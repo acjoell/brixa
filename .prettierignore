@@ -3,6 +3,9 @@ dist/
 node_modules/
 coverage/
 
+# Plantillas estáticas (no son código fuente de Foundry)
+src/templates/
+
 # Los archivos .md existentes tienen CRLF (pendiente de renormalización aprobada, D-028).
 # Se excluyen del check de Prettier hasta que se ejecute el commit de normalización.
 **/*.md

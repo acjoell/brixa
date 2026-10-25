@@ -6,6 +6,7 @@
  */
 import { runPrompts } from "./prompts/questions.js";
 import { validateOptionsWithDir, formatValidationError } from "./validation/options.js";
+import { generate, formatGenerateError, nextStepsMessage } from "./generator/generate.js";
 
 export async function main(): Promise<number> {
   const raw = await runPrompts();
@@ -24,11 +25,14 @@ export async function main(): Promise<number> {
   }
 
   const { modality, language, outputDir } = result.value;
-  // Resumen final con ruta absoluta resuelta.
-  console.log(`\nOpciones seleccionadas:`);
-  console.log(`  Modalidad : ${modality}`);
-  console.log(`  Lenguaje  : ${language}`);
-  console.log(`  Directorio: ${outputDir}`);
-  console.log("\n(Generación pendiente — T-006)");
+
+  const genResult = await generate({ modality, language, outputDir });
+
+  if (!genResult.ok) {
+    console.error(`Error: ${formatGenerateError(genResult.error)}`);
+    return 1;
+  }
+
+  console.log(nextStepsMessage(outputDir));
   return 0;
 }

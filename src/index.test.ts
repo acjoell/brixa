@@ -10,10 +10,18 @@ vi.mock("./validation/options.js", () => ({
   formatValidationError: vi.fn((e: { kind: string }) => `Error: ${e.kind}`),
 }));
 
+vi.mock("./generator/generate.js", () => ({
+  generate: vi.fn(),
+  formatGenerateError: vi.fn((e: { kind: string }) => `Error: ${e.kind}`),
+  nextStepsMessage: vi.fn(() => "\nProyecto creado.\n"),
+}));
+
 const { runPrompts } = await import("./prompts/questions.js");
 const { validateOptionsWithDir } = await import("./validation/options.js");
+const { generate } = await import("./generator/generate.js");
 const runPromptsMock = runPrompts as Mock;
 const validateMock = validateOptionsWithDir as Mock;
+const generateMock = generate as Mock;
 
 const { main } = await import("./index.js");
 
@@ -37,6 +45,7 @@ describe("main", () => {
       ok: true,
       value: { modality: "frontend", language: "ts", outputDir: "/abs/my-app" },
     });
+    generateMock.mockResolvedValue({ ok: true });
     await expect(main()).resolves.toBe(0);
   });
 
