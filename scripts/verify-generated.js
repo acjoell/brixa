@@ -15,7 +15,7 @@
  * No se ejecuta dentro de npm test porque es lento y usa red.
  * process.exit solo se llama aquí (fuera de src/).
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +32,68 @@ const root = path.resolve(here, "..");
 function run(cmd, args, cwd) {
   console.log(`\n$ ${cmd} ${args.join(" ")}  (cwd: ${cwd})`);
   execFileSync(cmd, args, { cwd, stdio: "inherit" });
+}
+
+/** Comprueba que el servidor backend arranca y responde 200 en /health antes de cerrarlo. */
+async function checkBackendServer(projectDir) {
+  console.log("\nIniciando servidor backend (dist/index.js)...");
+  const child = spawn("node", ["dist/index.js"], {
+    cwd: projectDir,
+    env: { ...process.env, PORT: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  try {
+    const port = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Timeout esperando a que el servidor backend arranque"));
+      }, 10000);
+
+      let stdout = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        const match = stdout.match(/http:\/\/localhost:(\d+)/);
+        if (match) {
+          clearTimeout(timeout);
+          resolve(Number(match[1]));
+        }
+      });
+
+      child.stderr.on("data", (chunk) => {
+        process.stderr.write(chunk);
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+
+      child.on("exit", (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`El servidor backend terminó prematuramente con código ${code}`));
+      });
+    });
+
+    console.log(`Servidor backend escuchando en puerto ${port}. Verificando GET /health...`);
+    const res = await fetch(`http://localhost:${port}/health`);
+    if (res.status !== 200) {
+      throw new Error(`Esperado status 200 en /health, recibido ${res.status}`);
+    }
+    const body = await res.json();
+    if (body.status !== "ok") {
+      throw new Error(
+        `Esperado body { status: "ok" } en /health, recibido ${JSON.stringify(body)}`,
+      );
+    }
+    console.log("✔ GET /health respondió 200 con status: ok");
+  } finally {
+    console.log("Cerrando servidor backend...");
+    await new Promise((resolve) => {
+      child.on("exit", () => resolve());
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 5000);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +147,12 @@ async function verifyVariant(modality, language, step, total) {
     run("npm", ["run", "build"], projectDir);
     run("npm", ["run", "lint"], projectDir);
 
+    if (modality === "backend") {
+      run("npm", ["run", "typecheck"], projectDir);
+      run("npm", ["run", "test"], projectDir);
+      await checkBackendServer(projectDir);
+    }
+
     console.log(`\n✔ ${label} verificado correctamente`);
   } finally {
     console.log(`\nLimpiando ${tmpBase} …`);
@@ -99,11 +167,12 @@ async function verifyVariant(modality, language, step, total) {
 const VARIANTS = [
   { modality: "frontend", language: "ts" },
   { modality: "frontend", language: "js" },
+  { modality: "backend", language: "ts" },
 ];
 
 async function main() {
   // 1. Build Foundry (una sola vez para todas las variantes)
-  console.log("=== 1/4  npm run build ===");
+  console.log("=== 1/5  npm run build ===");
   run("npm", ["run", "build"], root);
 
   // 2. Verificar cada variante soportada

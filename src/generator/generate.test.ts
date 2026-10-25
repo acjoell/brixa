@@ -95,11 +95,46 @@ describe("generate — frontend + js", () => {
   });
 });
 
+describe("generate — backend + ts", () => {
+  it("crea los archivos clave de la variante backend TS en el directorio de destino", async () => {
+    const dest = await mkTmp("my-backend-app");
+    const result = await generate({ modality: "backend", language: "ts", outputDir: dest });
+
+    expect(result.ok).toBe(true);
+
+    const backendKeyFiles = [
+      ".gitignore",
+      "package.json",
+      "tsconfig.json",
+      "eslint.config.js",
+      ".env.example",
+      "README.md",
+      "src/app.ts",
+      "src/index.ts",
+      "tests/health.test.ts",
+    ];
+    for (const rel of backendKeyFiles) {
+      const full = path.join(dest, rel);
+      await expect(fs.access(full), `falta: ${rel}`).resolves.toBeUndefined();
+    }
+  });
+
+  it("sustituye el nombre del proyecto en package.json", async () => {
+    const projectName = "backend-service";
+    const dest = await mkTmp(projectName);
+    await generate({ modality: "backend", language: "ts", outputDir: dest });
+
+    const pkg = await fs.readFile(path.join(dest, "package.json"), "utf-8");
+    expect(pkg).toContain(`"name": "${projectName}"`);
+    expect(pkg).not.toContain("foundry-tpl");
+  });
+});
+
 describe("generate — combinación no soportada", () => {
   it("el mensaje de error lista las combinaciones soportadas actuales", async () => {
     const result = await generate({
       modality: "backend",
-      language: "ts",
+      language: "js",
       outputDir: "/tmp/irrelevant",
     });
 
@@ -110,13 +145,14 @@ describe("generate — combinación no soportada", () => {
       expect(msg).toContain("no está soportada todavía");
       expect(msg).toContain("frontend + ts");
       expect(msg).toContain("frontend + js");
+      expect(msg).toContain("backend + ts");
     }
   });
 
-  it("devuelve error unsupported_combination para backend + ts", async () => {
+  it("devuelve error unsupported_combination para backend + js", async () => {
     const result = await generate({
       modality: "backend",
-      language: "ts",
+      language: "js",
       outputDir: "/tmp/irrelevant",
     });
 

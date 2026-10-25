@@ -42,6 +42,7 @@ function templatesDir(): string {
 const SUPPORTED_TEMPLATES: Record<string, string> = {
   "frontend+ts": "frontend-react-ts",
   "frontend+js": "frontend-react-js",
+  "backend+ts": "backend-express-ts",
 };
 
 // ---------------------------------------------------------------------------
