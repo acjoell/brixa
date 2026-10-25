@@ -35,9 +35,9 @@ function run(cmd, args, cwd) {
 }
 
 /** Comprueba que el servidor backend arranca y responde 200 en /health antes de cerrarlo. */
-async function checkBackendServer(projectDir) {
-  console.log("\nIniciando servidor backend (dist/index.js)...");
-  const child = spawn("node", ["dist/index.js"], {
+async function checkBackendServer(projectDir, entryPoint = "dist/index.js") {
+  console.log(`\nIniciando servidor backend (${entryPoint})...`);
+  const child = spawn("node", [entryPoint], {
     cwd: projectDir,
     env: { ...process.env, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -144,13 +144,18 @@ async function verifyVariant(modality, language, step, total) {
     console.log(`Proyecto generado en: ${projectDir}`);
 
     run("npm", ["install"], projectDir);
-    run("npm", ["run", "build"], projectDir);
+    if (modality === "frontend" || language === "ts") {
+      run("npm", ["run", "build"], projectDir);
+    }
     run("npm", ["run", "lint"], projectDir);
 
     if (modality === "backend") {
-      run("npm", ["run", "typecheck"], projectDir);
+      if (language === "ts") {
+        run("npm", ["run", "typecheck"], projectDir);
+      }
       run("npm", ["run", "test"], projectDir);
-      await checkBackendServer(projectDir);
+      const entryPoint = language === "ts" ? "dist/index.js" : "src/index.js";
+      await checkBackendServer(projectDir, entryPoint);
     }
 
     console.log(`\n✔ ${label} verificado correctamente`);
@@ -168,15 +173,16 @@ const VARIANTS = [
   { modality: "frontend", language: "ts" },
   { modality: "frontend", language: "js" },
   { modality: "backend", language: "ts" },
+  { modality: "backend", language: "js" },
 ];
 
 async function main() {
   // 1. Build Foundry (una sola vez para todas las variantes)
-  console.log("=== 1/5  npm run build ===");
+  const total = VARIANTS.length + 2; // 1 build + N variantes + 1 resumen
+  console.log(`=== 1/${total}  npm run build ===`);
   run("npm", ["run", "build"], root);
 
   // 2. Verificar cada variante soportada
-  const total = VARIANTS.length + 2; // 1 build + N variantes + 1 resumen
   for (let i = 0; i < VARIANTS.length; i++) {
     const { modality, language } = VARIANTS[i];
     await verifyVariant(modality, language, i + 2, total);

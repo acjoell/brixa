@@ -38,4 +38,9 @@ describe("GET /health", () => {
     const body = (await res.json()) as { status: string };
     expect(body).toEqual({ status: "ok" });
   });
+
+  it("no incluye la cabecera x-powered-by", async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.headers.get("x-powered-by")).toBeNull();
+  });
 });

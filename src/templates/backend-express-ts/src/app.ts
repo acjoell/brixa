@@ -2,6 +2,8 @@ import express, { type Request, type Response, type NextFunction } from "express
 
 export const app = express();
 
+app.disable("x-powered-by");
+
 app.use(express.json());
 
 app.get("/health", (_req: Request, res: Response) => {
