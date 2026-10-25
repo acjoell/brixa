@@ -5,7 +5,7 @@
  * para que los tests puedan comprobar el resultado sin efectos secundarios.
  */
 import { runPrompts } from "./prompts/questions.js";
-import { validateOptions, formatValidationError } from "./validation/options.js";
+import { validateOptionsWithDir, formatValidationError } from "./validation/options.js";
 
 export async function main(): Promise<number> {
   const raw = await runPrompts();
@@ -16,16 +16,19 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  const result = validateOptions(raw);
+  const result = await validateOptionsWithDir(raw);
 
   if (!result.ok) {
     console.error(`Error: ${formatValidationError(result.error)}`);
     return 1;
   }
 
-  const { modality, language } = result.value;
-  // Confirmación temporal hasta que T-005 implemente la generación real.
-  console.log(`\nOpciones seleccionadas: modalidad=${modality}, lenguaje=${language}`);
-  console.log("(Generación pendiente — T-005)");
+  const { modality, language, outputDir } = result.value;
+  // Resumen final con ruta absoluta resuelta.
+  console.log(`\nOpciones seleccionadas:`);
+  console.log(`  Modalidad : ${modality}`);
+  console.log(`  Lenguaje  : ${language}`);
+  console.log(`  Directorio: ${outputDir}`);
+  console.log("\n(Generación pendiente — T-006)");
   return 0;
 }

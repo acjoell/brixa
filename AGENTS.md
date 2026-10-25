@@ -250,3 +250,8 @@ No ocultar incertidumbres, fallos ni limitaciones.
 Foundry debe evolucionar mediante incrementos pequeños, funcionales y verificables.
 
 Comprender antes de modificar. Resolver el problema real. Evitar complejidad innecesaria. Preservar el trabajo existente. Verificar antes de afirmar que algo funciona.
+
+## Lazy Senior (resumen de AI_RULES §3)
+- Cambio mínimo que cumpla el criterio. Sin capas, utilidades ni dependencias sin necesidad concreta.
+- Tests solo para los casos del criterio de aceptación; sin tests redundantes.
+- Sin refactors ni reorganizaciones no pedidas. Informe de máximo 15 líneas.

@@ -1,5 +1,8 @@
-import { select } from "@inquirer/prompts";
+import { select, input } from "@inquirer/prompts";
 import type { RawOptions } from "../types.js";
+
+/** Directorio de destino por defecto si el usuario no introduce ninguno. */
+const DEFAULT_OUTPUT_DIR = "./my-project";
 
 /**
  * Ejecuta el flujo de prompts interactivo.
@@ -26,7 +29,12 @@ export async function runPrompts(): Promise<RawOptions | null> {
       ],
     });
 
-    return { modality, language };
+    const outputDir = await input({
+      message: "¿En qué directorio quieres generar el proyecto?",
+      default: DEFAULT_OUTPUT_DIR,
+    });
+
+    return { modality, language, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

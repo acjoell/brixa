@@ -13,12 +13,16 @@ export type Language = "js" | "ts";
 export interface RawOptions {
   modality: Modality;
   language: Language;
+  /** Ruta tal como la escribe el usuario (puede ser relativa o con `..`). */
+  outputDir: string;
 }
 
 /** Opciones validadas y normalizadas listas para la generación. */
 export interface UserOptions {
   modality: Modality;
   language: Language;
+  /** Ruta absoluta resuelta y validada del directorio de destino. */
+  outputDir: string;
 }
 
 /** Resultado discriminado. Evita excepciones en la lógica de dominio. */
