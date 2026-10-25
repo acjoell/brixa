@@ -506,6 +506,11 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 - Modo de producción unificado sin resolver (fuera del alcance del MVP).
 - Aviso cosmético de esbuild al ejecutar pruebas o compilación.
 
+**Hallazgos verificados por el responsable:**
+- (a) Drizzle 0.45.4 con PostgreSQL 17 pasa en TypeScript y en JavaScript (3 tests cada uno) ejecutando los archivos por separado, y con SQLite pasa (6 tests).
+- (b) Los archivos de test que comparten una misma base de datos PostgreSQL y se ejecutan en paralelo chocan al crear el esquema "drizzle" (carrera de CREATE SCHEMA); el informe original (24/24) no era reproducible con el comando del README por esto y por la falta de prisma generate --schema por motor.
+- (c) Riesgo para T-012: los tests de un proyecto generado contra una misma base de datos deben ejecutarse en serie o usar una base de datos por archivo.
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados.

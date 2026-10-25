@@ -341,7 +341,7 @@ Actividades:
 
 ### T-011 — Evaluar el ORM y la persistencia
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P1  
 **Fase:** 3
 
