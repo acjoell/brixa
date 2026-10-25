@@ -1,0 +1,3 @@
+# Normalizar saltos de línea a LF en todos los archivos de texto.
+# Git convierte CRLF → LF al hacer commit y mantiene LF en el working tree.
+* text=auto eol=lf

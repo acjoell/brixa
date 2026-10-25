@@ -1,0 +1,8 @@
+# Archivos generados
+dist/
+node_modules/
+coverage/
+
+# Los archivos .md existentes tienen CRLF (pendiente de renormalización aprobada, D-028).
+# Se excluyen del check de Prettier hasta que se ejecute el commit de normalización.
+**/*.md
