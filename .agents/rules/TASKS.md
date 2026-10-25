@@ -175,7 +175,7 @@ Esta separación permite probar `validation/` y `generator/` sin terminal ni sis
 
 ### T-004 — Implementar el flujo interactivo mínimo
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P0  
 **Fase:** 1  
 **Dependencia:** T-003
@@ -193,6 +193,25 @@ Actividades:
 - El flujo puede completarse desde la terminal.
 - Las opciones inválidas no provocan una generación inconsistente.
 - La cancelación se gestiona de manera clara.
+
+**Verificación (2026-10-24):**
+
+Archivos creados siguiendo la estructura de T-003:
+- `src/types.ts`: tipos compartidos (`Modality`, `Language`, `RawOptions`, `UserOptions`, `Result<T,E>`).
+- `src/prompts/questions.ts`: flujo de prompts con `@inquirer/prompts`. Cancelación gestionada mediante detección de `ExitPromptError` sin importar la clase concreta.
+- `src/validation/options.ts`: validación pura (sin I/O). Tipos de error discriminados y formatter de mensajes.
+- `src/index.ts`: orquestación del flujo; sale con código 1 en error de validación; generación diferida a T-005.
+- `src/prompts/questions.test.ts`: 4 tests (happy path ×2, cancelación, error inesperado).
+- `src/validation/options.test.ts`: 7 tests (combinaciones válidas, modalidad inválida, lenguaje inválido, formatters).
+- `src/index.test.ts`: smoke test actualizado para `main` async (2 tests).
+- `tsconfig.json`: añadido `"types": ["node"]` para disponibilizar `console` y `process` en el código del CLI.
+
+Verificaciones ejecutadas:
+- `npm run typecheck`: 0 errores.
+- `npm run lint`: 0 errores.
+- `npm run format:check`: todos los archivos pasan.
+- `npm test`: 13/13 tests pasan en 3 ficheros.
+- `npm run build`: `dist/` generado sin errores.
 
 ### T-005 — Implementar la selección del destino y la protección de archivos
 
