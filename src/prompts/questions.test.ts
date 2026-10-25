@@ -21,13 +21,19 @@ describe("runPrompts", () => {
     inputMock.mockReset();
   });
 
-  it("devuelve las opciones cuando el usuario completa los prompts", async () => {
+  it("devuelve las opciones cuando el usuario completa los prompts en frontend sin preguntar BD", async () => {
     selectMock.mockResolvedValueOnce("frontend").mockResolvedValueOnce("ts");
     inputMock.mockResolvedValueOnce("./my-app");
 
     const result = await runPrompts();
 
-    expect(result).toEqual({ modality: "frontend", language: "ts", outputDir: "./my-app" });
+    expect(selectMock).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      modality: "frontend",
+      language: "ts",
+      database: "none",
+      outputDir: "./my-app",
+    });
   });
 
   it("devuelve null cuando el usuario cancela con Ctrl+C (ExitPromptError)", async () => {
@@ -46,15 +52,20 @@ describe("runPrompts", () => {
     await expect(runPrompts()).rejects.toThrow("fallo inesperado");
   });
 
-  it("devuelve la combinación backend+js con ruta absoluta", async () => {
-    selectMock.mockResolvedValueOnce("backend").mockResolvedValueOnce("js");
+  it("solicita base de datos en backend y fullstack, devolviendo la opción seleccionada", async () => {
+    selectMock
+      .mockResolvedValueOnce("backend")
+      .mockResolvedValueOnce("js")
+      .mockResolvedValueOnce("postgres");
     inputMock.mockResolvedValueOnce("/home/user/projects/api");
 
     const result = await runPrompts();
 
+    expect(selectMock).toHaveBeenCalledTimes(3);
     expect(result).toEqual({
       modality: "backend",
       language: "js",
+      database: "postgres",
       outputDir: "/home/user/projects/api",
     });
   });

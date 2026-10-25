@@ -361,23 +361,25 @@ Actividades:
 
 ### T-012 — Implementar y verificar la persistencia seleccionada
 
-**Estado:** PENDIENTE  
+**Estado:** EN PROGRESO (T-012a completada; T-012b SQLite sin iniciar)
 **Prioridad:** P1  
 **Fase:** 3  
 **Dependencia:** T-011
 
-Actividades:
+**T-012a — PostgreSQL opcional con Drizzle ORM (COMPLETADA, verificada el 2026-10-25):**
 
-- Incorporar la solución elegida.
-- Configurar las variables necesarias.
-- Implementar los mecanismos de esquema y migraciones que correspondan.
-- Crear pruebas de integración.
-- Verificar las bases de datos realmente soportadas.
+- Backend y aplicación completa ofrecen "Ninguna" (por defecto) o PostgreSQL. Esquema vacío con comentarios guía; migraciones explícitas (`db:generate` y `db:migrate`); `DATABASE_URL` validada al importar el cliente; test de conexión que se omite sin `DATABASE_URL`; `fileParallelism: false`.
+- Corregidos: el cliente con Proxy bloqueaba el pool; las instrucciones del CLI recomendaban `db:migrate` con esquema vacío; vulnerabilidades moderadas de `esbuild` antiguo (traído por `drizzle-kit`), resueltas con un override.
+- Verificación: `npm run verify:generated` 11/11. Variantes con PostgreSQL verificadas: backend+ts, backend+js y fullstack+ts (instalación sin vulnerabilidades, `npm audit` en 0, migración aplicada, tabla creada y tests).
+- NO verificadas directamente: fullstack+js+postgres (comparte backend y frontend ya verificados, pero no está en `verify:generated`; no declararla soportada hasta incluirla), y que los errores de `db:migrate` no revelen la URL de conexión (comprobar con un valor reconocible).
+- Pendientes anotados: el aviso de deprecación de `@esbuild-kit` no se puede evitar con `drizzle-kit` 0.31; `npm audit` en `verify:generated` puede fallar en el futuro por avisos nuevos, sin que cambie el código; `drizzle-kit` 1.0.0-rc.5 ya no depende de `@esbuild-kit` (reevaluar cuando 1.0 sea latest).
+
+**T-012b — SQLite (PENDIENTE):** driver propuesto `better-sqlite3` 13.0.3 con su script de instalación denegado (funciona en Linux x64; plataformas no verificadas). Alternativa: `@libsql/client`.
 
 **Criterios de aceptación:**
 
-- La persistencia funciona en las combinaciones declaradas como compatibles.
-- Las pruebas pueden reproducirse.
+- La persistencia funciona en las combinaciones declaradas como compatibles. Cumplido para PostgreSQL en backend+ts, backend+js y fullstack+ts; pendiente para SQLite y fullstack+js.
+- Las pruebas pueden reproducirse (`npm run verify:generated`, con Docker o `VERIFY_DATABASE_URL`).
 - La documentación refleja el comportamiento real.
 
 ### T-013 — Incorporar capacidades opcionales de desarrollo

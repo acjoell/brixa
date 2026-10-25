@@ -15,10 +15,12 @@ import {
 export type ValidationError =
   | { kind: "invalid_modality"; received: unknown }
   | { kind: "invalid_language"; received: unknown }
+  | { kind: "invalid_database"; received: unknown }
   | { kind: "invalid_target_dir"; inner: TargetDirError };
 
 const VALID_MODALITIES = new Set(["frontend", "backend", "fullstack"]);
 const VALID_LANGUAGES = new Set(["js", "ts"]);
+const VALID_DATABASES = new Set(["none", "postgres"]);
 
 // ---------------------------------------------------------------------------
 // Validación pura de modalidad y lenguaje
@@ -27,7 +29,7 @@ const VALID_LANGUAGES = new Set(["js", "ts"]);
 /**
  * Valida y normaliza las opciones crudas del usuario.
  *
- * Valida modalidad y lenguaje de forma síncrona.
+ * Valida modalidad, lenguaje y base de datos de forma síncrona.
  * La resolución del directorio requiere I/O; usa `validateOptionsWithDir`.
  *
  * No interactúa con el terminal ni el sistema de archivos.
@@ -35,7 +37,7 @@ const VALID_LANGUAGES = new Set(["js", "ts"]);
  */
 export function validateOptions(
   raw: RawOptions,
-): Result<Pick<UserOptions, "modality" | "language">, ValidationError> {
+): Result<Pick<UserOptions, "modality" | "language" | "database">, ValidationError> {
   if (!VALID_MODALITIES.has(raw.modality)) {
     return { ok: false, error: { kind: "invalid_modality", received: raw.modality } };
   }
@@ -44,7 +46,12 @@ export function validateOptions(
     return { ok: false, error: { kind: "invalid_language", received: raw.language } };
   }
 
-  return { ok: true, value: { modality: raw.modality, language: raw.language } };
+  const database = raw.database ?? "none";
+  if (!VALID_DATABASES.has(database)) {
+    return { ok: false, error: { kind: "invalid_database", received: raw.database } };
+  }
+
+  return { ok: true, value: { modality: raw.modality, language: raw.language, database } };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +96,7 @@ export async function validateOptionsWithDir(
     value: {
       modality: baseResult.value.modality,
       language: baseResult.value.language,
+      database: baseResult.value.database,
       outputDir: dirResult.value.resolved,
     },
   };
@@ -105,6 +113,8 @@ export function formatValidationError(error: ValidationError): string {
       return `Modalidad no válida: "${String(error.received)}". Las opciones son: frontend, backend, fullstack.`;
     case "invalid_language":
       return `Lenguaje no válido: "${String(error.received)}". Las opciones son: js, ts.`;
+    case "invalid_database":
+      return `Base de datos no válida: "${String(error.received)}". Las opciones son: none, postgres.`;
     case "invalid_target_dir":
       return formatTargetDirError(error.inner);
   }

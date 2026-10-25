@@ -9,10 +9,14 @@ export type Modality = "frontend" | "backend" | "fullstack";
 /** Lenguaje seleccionado por el usuario. */
 export type Language = "js" | "ts";
 
+/** Base de datos seleccionada por el usuario. */
+export type Database = "none" | "postgres";
+
 /** Opciones crudas devueltas por el flujo de prompts. */
 export interface RawOptions {
   modality: Modality;
   language: Language;
+  database?: Database | undefined;
   /** Ruta tal como la escribe el usuario (puede ser relativa o con `..`). */
   outputDir: string;
 }
@@ -21,6 +25,7 @@ export interface RawOptions {
 export interface UserOptions {
   modality: Modality;
   language: Language;
+  database?: Database | undefined;
   /** Ruta absoluta resuelta y validada del directorio de destino. */
   outputDir: string;
 }

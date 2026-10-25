@@ -2,23 +2,46 @@
  * Foundry — orquestación de la generación de proyectos.
  *
  * Copia la plantilla al directorio de destino, renombra _gitignore a .gitignore
- * e interpolate el nombre del proyecto en package.json e index.html.
+ * e interpola el nombre del proyecto en package.json e index.html.
+ * Aplica overlays opcionales (proxy fullstack, persistencia con PostgreSQL y Drizzle ORM).
  * Sin dependencias externas ni motor de plantillas.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type UserOptions, type Modality } from "../types.js";
+import { type UserOptions, type Modality, type Database, type Language } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
 // ---------------------------------------------------------------------------
 
 export type GenerateError =
-  | { kind: "unsupported_combination"; modality: string; language: string }
+  | { kind: "unsupported_combination"; modality: string; language: string; database?: string }
   | { kind: "copy_error"; message: string };
 
 export type GenerateResult = { ok: true } | { ok: false; error: GenerateError };
+
+export interface PackageJson {
+  name?: string;
+  version?: string;
+  private?: boolean;
+  type?: string;
+  engines?: Record<string, string>;
+  allowScripts?: Record<string, boolean>;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  overrides?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface PackageJsonOverlay {
+  allowScripts?: Record<string, boolean>;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  overrides?: Record<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Ruta base de plantillas (resuelta con import.meta.url para funcionar en dist/)
@@ -38,10 +61,14 @@ function templatesDir(): string {
 export const SUPPORTED_COMBINATIONS = [
   "frontend+ts",
   "frontend+js",
-  "backend+ts",
-  "backend+js",
-  "fullstack+ts",
-  "fullstack+js",
+  "backend+ts+none",
+  "backend+ts+postgres",
+  "backend+js+none",
+  "backend+js+postgres",
+  "fullstack+ts+none",
+  "fullstack+ts+postgres",
+  "fullstack+js+none",
+  "fullstack+js+postgres",
 ] as const;
 
 /**
@@ -63,6 +90,168 @@ function interpolate(content: string, projectName: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fusión determinista de package.json sin sobrescribir claves existentes
+// ---------------------------------------------------------------------------
+
+export function mergeSection<T>(
+  base?: Record<string, T>,
+  overlay?: Record<string, T>,
+): Record<string, T> | undefined {
+  if (!base && !overlay) return undefined;
+  const merged: Record<string, T> = { ...(base ?? {}) };
+  if (overlay) {
+    for (const [key, value] of Object.entries(overlay)) {
+      if (!(key in merged)) {
+        merged[key] = value;
+      }
+    }
+  }
+  return merged;
+}
+
+export function mergePackageJson(base: PackageJson, overlay: PackageJsonOverlay): PackageJson {
+  const result: PackageJson = { ...base };
+
+  const mergedAllowScripts = mergeSection(base.allowScripts, overlay.allowScripts);
+  if (mergedAllowScripts) {
+    result.allowScripts = mergedAllowScripts;
+  }
+
+  const mergedScripts = mergeSection(base.scripts, overlay.scripts);
+  if (mergedScripts) {
+    result.scripts = mergedScripts;
+  }
+
+  const mergedDependencies = mergeSection(base.dependencies, overlay.dependencies);
+  if (mergedDependencies) {
+    result.dependencies = mergedDependencies;
+  }
+
+  const mergedDevDependencies = mergeSection(base.devDependencies, overlay.devDependencies);
+  if (mergedDevDependencies) {
+    result.devDependencies = mergedDevDependencies;
+  }
+
+  const mergedOverrides = mergeSection(base.overrides, overlay.overrides);
+  if (mergedOverrides) {
+    result.overrides = mergedOverrides;
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Modificadores de archivos para persistencia PostgreSQL
+// ---------------------------------------------------------------------------
+
+async function appendEnvExample(envPath: string): Promise<void> {
+  const line = "DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD\n";
+  try {
+    const existing = await fs.readFile(envPath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
+  } catch {
+    await fs.writeFile(envPath, line, "utf-8");
+  }
+}
+
+async function appendBackendReadmeDatabase(readmePath: string): Promise<void> {
+  const content = `
+## Base de datos
+
+Este backend incluye integración con PostgreSQL mediante Drizzle ORM.
+
+### Configuración y flujo de trabajo
+
+1. Configura la variable de entorno \`DATABASE_URL\` en tu archivo \`.env\`:
+
+\`\`\`bash
+DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD
+\`\`\`
+
+Por seguridad, nunca confirmes credenciales reales al control de versiones.
+
+2. Define tus tablas en \`src/db/schema\`.
+
+3. Genera las migraciones SQL:
+\`\`\`bash
+npm run db:generate
+\`\`\`
+
+4. Aplica las migraciones en la base de datos:
+\`\`\`bash
+npm run db:migrate
+\`\`\`
+
+> **Nota:** Drizzle 1.0 se encuentra en fase RC (Release Candidate) y cambiará el formato de las migraciones en futuras versiones.
+> Este proyecto deniega por defecto el script de instalación de \`esbuild\` requerido internamente por \`drizzle-kit\`, garantizando la seguridad en la instalación sin afectar al generador de migraciones.
+> Los avisos de obsolescencia (\`npm warn deprecated\`) de \`@esbuild-kit\` durante \`npm install\` provienen internamente de las dependencias de \`drizzle-kit\` y no afectan al funcionamiento del proyecto.
+`;
+  const existing = await fs.readFile(readmePath, "utf-8");
+  const separator = existing.endsWith("\n") ? "" : "\n";
+  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
+}
+
+async function appendRootReadmeDatabase(readmePath: string): Promise<void> {
+  const content = `
+### Base de datos (PostgreSQL)
+El backend incluye persistencia con PostgreSQL y Drizzle ORM. Define tablas en \`backend/src/db/schema\`, genera migraciones con \`npm run db:generate\` y aplícalas con \`npm run db:migrate\`.
+`;
+  const existing = await fs.readFile(readmePath, "utf-8");
+  const separator = existing.endsWith("\n") ? "" : "\n";
+  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
+}
+
+async function applyPostgresOverlay(targetBackendDir: string, language: Language): Promise<void> {
+  const overlayDir = path.join(templatesDir(), "database-postgres", language);
+  await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
+
+  // Fusionar package.json deterministamente sin sobrescribir lo existente
+  const pkgPath = path.join(targetBackendDir, "package.json");
+  const pkgRaw = await fs.readFile(pkgPath, "utf-8");
+  const pkgJson = JSON.parse(pkgRaw) as PackageJson;
+
+  const overlayPkgPath = path.join(overlayDir, "package.json");
+  let overlayDeps: PackageJsonOverlay;
+  try {
+    const overlayRaw = await fs.readFile(overlayPkgPath, "utf-8");
+    overlayDeps = JSON.parse(overlayRaw) as PackageJsonOverlay;
+  } catch {
+    overlayDeps = {
+      allowScripts: {
+        esbuild: false,
+      },
+      overrides: {
+        "@esbuild-kit/core-utils": {
+          esbuild: "^0.25.0",
+        },
+      },
+      scripts: {
+        "db:generate": "drizzle-kit generate",
+        "db:migrate": language === "ts" ? "tsx src/db/migrate.ts" : "node src/db/migrate.js",
+      },
+      dependencies: {
+        "drizzle-orm": "0.45.4",
+        pg: "8.23.1",
+      },
+      devDependencies: {
+        "drizzle-kit": "0.31.11",
+        ...(language === "ts" ? { "@types/pg": "8.23.1" } : {}),
+      },
+    };
+  }
+
+  const merged = mergePackageJson(pkgJson, overlayDeps);
+  await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+
+  // Añadir DATABASE_URL a .env.example
+  await appendEnvExample(path.join(targetBackendDir, ".env.example"));
+
+  // Añadir sección de base de datos a README.md
+  await appendBackendReadmeDatabase(path.join(targetBackendDir, "README.md"));
+}
+
+// ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
 
@@ -70,16 +259,24 @@ function interpolate(content: string, projectName: string): string {
  * Genera el proyecto copiando la plantilla o plantillas correspondientes a `outputDir`.
  * Para fullstack, copia frontend y backend a subcarpetas hermanas, aplica el overlay
  * de Vite para el proxy a la API y genera el README raíz.
+ * Si se solicita base de datos PostgreSQL, aplica el overlay sobre el backend resultante.
  * Para cualquier otra combinación devuelve error `unsupported_combination`.
  */
 export async function generate(options: UserOptions): Promise<GenerateResult> {
   const { modality, language, outputDir } = options;
-  const combinationKey = `${modality}+${language}`;
+  const database = options.database ?? "none";
+
+  const combinationKey =
+    modality === "frontend"
+      ? database === "none"
+        ? `${modality}+${language}`
+        : `${modality}+${language}+${database}`
+      : `${modality}+${language}+${database}`;
 
   if (!(SUPPORTED_COMBINATIONS as readonly string[]).includes(combinationKey)) {
     return {
       ok: false,
-      error: { kind: "unsupported_combination", modality, language },
+      error: { kind: "unsupported_combination", modality, language, database },
     };
   }
 
@@ -112,6 +309,11 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       const readmeContent = generateFullstackReadme(projectName, language);
       await fs.writeFile(path.join(outputDir, "README.md"), readmeContent, "utf-8");
 
+      if (database === "postgres") {
+        await applyPostgresOverlay(backendDest, language);
+        await appendRootReadmeDatabase(path.join(outputDir, "README.md"));
+      }
+
       return { ok: true };
     } catch (err) {
       return {
@@ -124,11 +326,12 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
     }
   }
 
-  const templateName = SINGLE_TEMPLATES[combinationKey];
+  const baseKey = `${modality}+${language}`;
+  const templateName = SINGLE_TEMPLATES[baseKey];
   if (templateName === undefined) {
     return {
       ok: false,
-      error: { kind: "unsupported_combination", modality, language },
+      error: { kind: "unsupported_combination", modality, language, database },
     };
   }
 
@@ -136,6 +339,11 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
 
   try {
     await copyTemplate(templateSrc, outputDir);
+
+    if (modality === "backend" && database === "postgres") {
+      await applyPostgresOverlay(outputDir, language);
+    }
+
     return { ok: true };
   } catch (err) {
     return {
@@ -173,6 +381,16 @@ async function copyDir(src: string, dest: string, projectName: string): Promise<
     // _gitignore → .gitignore
     const destName = entry.name === "_gitignore" ? ".gitignore" : entry.name;
     const destPath = path.join(dest, destName);
+
+    if (entry.name === "package.json") {
+      const alreadyExists = await fs
+        .stat(destPath)
+        .then(() => true)
+        .catch(() => false);
+      if (alreadyExists) {
+        continue;
+      }
+    }
 
     if (entry.isDirectory()) {
       await fs.mkdir(destPath, { recursive: true });
@@ -289,9 +507,13 @@ El proxy de Vite es exclusivo para desarrollo local. El despliegue en producció
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
     case "unsupported_combination": {
-      const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace("+", " + ")).join(", ");
+      const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace(/\+/g, " + ")).join(", ");
+      const combo =
+        error.database && error.database !== "none"
+          ? `${error.modality} + ${error.language} + ${error.database}`
+          : `${error.modality} + ${error.language}`;
       return (
-        `La combinación "${error.modality} + ${error.language}" no está soportada todavía.\n` +
+        `La combinación "${combo}" no está soportada todavía.\n` +
         `Combinaciones soportadas: ${supported}.`
       );
     }
@@ -303,11 +525,16 @@ export function formatGenerateError(error: GenerateError): string {
 /**
  * Devuelve los pasos a seguir tras la generación exitosa.
  */
-export function nextStepsMessage(outputDir: string, modality?: Modality): string {
+export function nextStepsMessage(
+  outputDir: string,
+  modality?: Modality,
+  database?: Database,
+): string {
   const name = path.basename(outputDir);
+  const hasDb = database === "postgres";
 
   if (modality === "fullstack") {
-    return [
+    const lines = [
       "",
       `✔ Proyecto creado en: ${outputDir}`,
       "",
@@ -323,11 +550,23 @@ export function nextStepsMessage(outputDir: string, modality?: Modality): string
       "  cd frontend",
       "  npm install",
       "  npm run dev",
-      "",
-    ].join("\n");
+    ];
+
+    if (hasDb) {
+      lines.push(
+        "",
+        "  # Base de datos (PostgreSQL):",
+        "  # 1. Configura DATABASE_URL en backend/.env",
+        "  # 2. Define tus tablas en backend/src/db/schema",
+        "  # 3. Genera y aplica migraciones: cd backend && npm run db:generate && npm run db:migrate",
+      );
+    }
+
+    lines.push("");
+    return lines.join("\n");
   }
 
-  return [
+  const lines = [
     "",
     `✔ Proyecto creado en: ${outputDir}`,
     "",
@@ -335,6 +574,18 @@ export function nextStepsMessage(outputDir: string, modality?: Modality): string
     `  cd ${name}`,
     "  npm install",
     "  npm run dev",
-    "",
-  ].join("\n");
+  ];
+
+  if (hasDb) {
+    lines.push(
+      "",
+      "  # Base de datos (PostgreSQL):",
+      "  # 1. Configura DATABASE_URL en .env",
+      "  # 2. Define tus tablas en src/db/schema",
+      "  # 3. Genera y aplica migraciones: npm run db:generate && npm run db:migrate",
+    );
+  }
+
+  lines.push("");
+  return lines.join("\n");
 }

@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { generate, formatGenerateError } from "./generate.js";
+import { generate, formatGenerateError, mergePackageJson } from "./generate.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -297,5 +297,90 @@ describe("generate — combinación no soportada", () => {
     const msg = formatGenerateError({ kind: "copy_error", message: "ENOSPC: disco lleno" });
     expect(msg.toLowerCase()).toContain("plantilla");
     expect(msg).toContain("ENOSPC: disco lleno");
+  });
+});
+
+describe("generate — persistencia PostgreSQL (T-012)", () => {
+  it("fusión de package.json sin pisar nada", () => {
+    const base = {
+      name: "app",
+      scripts: { test: "vitest run" },
+      dependencies: { express: "5.3.0" },
+      allowScripts: { esbuild: false },
+    };
+
+    const overlay = {
+      scripts: { test: "should-not-overwrite", "db:generate": "drizzle-kit generate" },
+      dependencies: { express: "99.0.0", "drizzle-orm": "0.45.4" },
+      devDependencies: { "drizzle-kit": "0.31.11" },
+      allowScripts: { esbuild: true, other: false },
+    };
+
+    const result = mergePackageJson(base, overlay);
+
+    expect(result.scripts?.test).toBe("vitest run");
+    expect(result.scripts?.["db:generate"]).toBe("drizzle-kit generate");
+    expect(result.dependencies?.express).toBe("5.3.0");
+    expect(result.dependencies?.["drizzle-orm"]).toBe("0.45.4");
+    expect(result.devDependencies?.["drizzle-kit"]).toBe("0.31.11");
+    expect(result.allowScripts?.esbuild).toBe(false);
+    expect(result.allowScripts?.other).toBe(false);
+  });
+
+  it("'Ninguna' no altera el resultado y genera el backend sin persistencia", async () => {
+    const dest = await mkTmp("backend-none");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "none",
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "drizzle.config.ts"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "src", "db"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "tests", "db.test.ts"))).rejects.toThrow();
+
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.["drizzle-orm"]).toBeUndefined();
+    expect(pkg.scripts?.["db:generate"]).toBeUndefined();
+  });
+
+  it(".env.example en postgres contiene marcadores no sensibles sin credenciales reales", async () => {
+    const dest = await mkTmp("backend-postgres-env");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "postgres",
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(true);
+
+    const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
+    expect(envContent).toContain("DATABASE_URL=");
+    expect(envContent).toContain("postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD");
+    expect(envContent).not.toMatch(/postgres:\/\/.*:.*@.*:.*\/.+/);
+  });
+
+  it("combinación inválida rechazada (frontend con postgres)", async () => {
+    const dest = await mkTmp("frontend-postgres-invalid");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      database: "postgres",
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("unsupported_combination");
+      const msg = formatGenerateError(result.error);
+      expect(msg).toContain("no está soportada todavía");
+      expect(msg).toContain("frontend + ts + postgres");
+    }
   });
 });

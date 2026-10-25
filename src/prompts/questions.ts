@@ -1,5 +1,5 @@
 import { select, input } from "@inquirer/prompts";
-import type { RawOptions } from "../types.js";
+import type { RawOptions, Database } from "../types.js";
 
 /** Directorio de destino por defecto si el usuario no introduce ninguno. */
 const DEFAULT_OUTPUT_DIR = "./my-project";
@@ -29,12 +29,24 @@ export async function runPrompts(): Promise<RawOptions | null> {
       ],
     });
 
+    let database: Database = "none";
+    if (modality === "backend" || modality === "fullstack") {
+      database = await select({
+        message: "¿Base de datos?",
+        choices: [
+          { name: "Ninguna", value: "none" as const },
+          { name: "PostgreSQL", value: "postgres" as const },
+        ],
+        default: "none",
+      });
+    }
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, outputDir };
+    return { modality, language, database, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {
