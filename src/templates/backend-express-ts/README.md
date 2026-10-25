@@ -13,6 +13,10 @@ Plantilla backend minimalista construida con Node.js, Express y TypeScript.
 npm install
 ```
 
+## Nota sobre scripts de instalación
+
+Este proyecto deniega por defecto el script de instalación de `esbuild` (lo trae `tsx`), por seguridad de la cadena de suministro. `tsx` funciona sin él. Si algún entorno lo necesitara, se puede aprobar con `npm install-scripts approve esbuild`.
+
 ## Variables de entorno
 
 Copia `.env.example` a `.env` para personalizar la configuración local:
