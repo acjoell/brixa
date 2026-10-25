@@ -2,14 +2,15 @@
 /**
  * Foundry — verify:generated
  *
- * Verifica de forma reproducible que el proyecto generado se instala,
- * compila y pasa el lint correctamente.
+ * Verifica de forma reproducible que los proyectos generados se instalan,
+ * compilan y pasan el lint correctamente.
  *
  * Pasos:
  *   1. npm run build (Foundry CLI)
- *   2. Genera un proyecto frontend+ts en un directorio temporal
- *   3. En el proyecto generado: npm install, npm run build, npm run lint
- *   4. Limpia el directorio temporal siempre (incluso si hay error)
+ *   2. Para cada variante soportada (frontend+ts, frontend+js):
+ *      a. Genera el proyecto en un directorio temporal
+ *      b. npm install, npm run build, npm run lint
+ *      c. Limpia el directorio temporal (incluso si hay error)
  *
  * No se ejecuta dentro de npm test porque es lento y usa red.
  * process.exit solo se llama aquí (fuera de src/).
@@ -38,21 +39,19 @@ function run(cmd, args, cwd) {
 // ---------------------------------------------------------------------------
 
 /**
- * Genera un proyecto frontend+ts en `outputDir` usando el CLI compilado.
+ * Genera un proyecto en `outputDir` usando el CLI compilado.
  * Requiere que `dist/` ya exista (ejecutar npm run build antes).
  *
+ * @param {string} modality - Modalidad del proyecto.
+ * @param {string} language - Lenguaje del proyecto ("ts" | "js").
  * @param {string} outputDir - Ruta absoluta del directorio de destino.
  */
-export async function generateProject(outputDir) {
+export async function generateProject(modality, language, outputDir) {
   // Importamos generate() del CLI compilado para no depender del proceso de prompts.
   const distGenerate = path.join(root, "dist", "generator", "generate.js");
   const { generate } = await import(distGenerate);
 
-  const result = await generate({
-    modality: "frontend",
-    language: "ts",
-    outputDir,
-  });
+  const result = await generate({ modality, language, outputDir });
 
   if (!result.ok) {
     throw new Error(`generate() falló: ${JSON.stringify(result.error)}`);
@@ -60,39 +59,61 @@ export async function generateProject(outputDir) {
 }
 
 // ---------------------------------------------------------------------------
-// Script principal
+// Verificación de una variante
 // ---------------------------------------------------------------------------
 
-async function main() {
-  // 1. Build Foundry
-  console.log("=== 1/4  npm run build ===");
-  run("npm", ["run", "build"], root);
+/**
+ * Genera y verifica una variante concreta en un directorio temporal aislado.
+ *
+ * @param {string} modality
+ * @param {string} language
+ * @param {number} step - Número de paso para mostrar en los logs.
+ * @param {number} total - Total de variantes.
+ */
+async function verifyVariant(modality, language, step, total) {
+  const label = `${modality}+${language}`;
+  console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
-  // 2. Crear directorio temporal y generar proyecto
-  console.log("\n=== 2/4  Generando proyecto frontend+ts ===");
-  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "foundry-verify-"));
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), `foundry-verify-${label}-`));
   const projectDir = path.join(tmpBase, "test-project");
 
   try {
-    await generateProject(projectDir);
+    await generateProject(modality, language, projectDir);
     console.log(`Proyecto generado en: ${projectDir}`);
 
-    // 3. Verificar el proyecto generado
-    console.log("\n=== 3/4  npm install ===");
     run("npm", ["install"], projectDir);
-
-    console.log("\n=== 3/4  npm run build ===");
     run("npm", ["run", "build"], projectDir);
-
-    console.log("\n=== 3/4  npm run lint ===");
     run("npm", ["run", "lint"], projectDir);
 
-    console.log("\n=== 4/4  ✔ verify:generated completado con éxito ===");
+    console.log(`\n✔ ${label} verificado correctamente`);
   } finally {
-    // 4. Limpiar siempre, incluso si hay error
     console.log(`\nLimpiando ${tmpBase} …`);
     fs.rmSync(tmpBase, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Script principal
+// ---------------------------------------------------------------------------
+
+const VARIANTS = [
+  { modality: "frontend", language: "ts" },
+  { modality: "frontend", language: "js" },
+];
+
+async function main() {
+  // 1. Build Foundry (una sola vez para todas las variantes)
+  console.log("=== 1/4  npm run build ===");
+  run("npm", ["run", "build"], root);
+
+  // 2. Verificar cada variante soportada
+  const total = VARIANTS.length + 2; // 1 build + N variantes + 1 resumen
+  for (let i = 0; i < VARIANTS.length; i++) {
+    const { modality, language } = VARIANTS[i];
+    await verifyVariant(modality, language, i + 2, total);
+  }
+
+  console.log(`\n=== ${total}/${total}  ✔ verify:generated completado con éxito ===`);
 }
 
 main().catch((err) => {

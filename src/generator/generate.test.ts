@@ -74,21 +74,42 @@ describe("generate — frontend + ts", () => {
   });
 });
 
+describe("generate — frontend + js", () => {
+  it("crea los archivos clave de la variante JS en el directorio de destino", async () => {
+    const dest = await mkTmp("my-js-app");
+    const result = await generate({ modality: "frontend", language: "js", outputDir: dest });
+
+    expect(result.ok).toBe(true);
+
+    const jsKeyFiles = [
+      ".gitignore",
+      "package.json",
+      "index.html",
+      "vite.config.js",
+      "src/main.jsx",
+    ];
+    for (const rel of jsKeyFiles) {
+      const full = path.join(dest, rel);
+      await expect(fs.access(full), `falta: ${rel}`).resolves.toBeUndefined();
+    }
+  });
+});
+
 describe("generate — combinación no soportada", () => {
-  it("devuelve error unsupported_combination para frontend + js", async () => {
-    // No necesita directorio real; falla antes del I/O.
+  it("el mensaje de error lista las combinaciones soportadas actuales", async () => {
     const result = await generate({
-      modality: "frontend",
-      language: "js",
+      modality: "backend",
+      language: "ts",
       outputDir: "/tmp/irrelevant",
     });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.kind).toBe("unsupported_combination");
-      // El mensaje indica explícitamente que no está soportada todavía.
       const msg = formatGenerateError(result.error);
-      expect(msg.toLowerCase()).toContain("no está soportada todavía");
+      expect(msg).toContain("no está soportada todavía");
+      expect(msg).toContain("frontend + ts");
+      expect(msg).toContain("frontend + js");
     }
   });
 

@@ -32,6 +32,19 @@ function templatesDir(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Tabla de combinaciones soportadas
+// ---------------------------------------------------------------------------
+
+/**
+ * Clave: `"${modality}+${language}"`.
+ * Valor: nombre de la carpeta de plantilla dentro de `src/templates/`.
+ */
+const SUPPORTED_TEMPLATES: Record<string, string> = {
+  "frontend+ts": "frontend-react-ts",
+  "frontend+js": "frontend-react-js",
+};
+
+// ---------------------------------------------------------------------------
 // Interpolación simple
 // ---------------------------------------------------------------------------
 
@@ -45,20 +58,22 @@ function interpolate(content: string, projectName: string): string {
 
 /**
  * Genera el proyecto copiando la plantilla correspondiente a `outputDir`.
- * Solo soporta modalidad `frontend` con lenguaje `ts`.
+ * Soporta modalidad `frontend` con lenguajes `ts` y `js`.
  * Para cualquier otra combinación devuelve error `unsupported_combination`.
  */
 export async function generate(options: UserOptions): Promise<GenerateResult> {
   const { modality, language, outputDir } = options;
 
-  if (modality !== "frontend" || language !== "ts") {
+  const templateName = SUPPORTED_TEMPLATES[`${modality}+${language}`];
+
+  if (templateName === undefined) {
     return {
       ok: false,
       error: { kind: "unsupported_combination", modality, language },
     };
   }
 
-  const templateSrc = path.join(templatesDir(), "frontend-react-ts");
+  const templateSrc = path.join(templatesDir(), templateName);
 
   try {
     await copyTemplate(templateSrc, outputDir);
@@ -129,11 +144,15 @@ async function copyFile(src: string, dest: string, projectName: string): Promise
  */
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
-    case "unsupported_combination":
+    case "unsupported_combination": {
+      const supported = Object.keys(SUPPORTED_TEMPLATES)
+        .map((k) => k.replace("+", " + "))
+        .join(", ");
       return (
         `La combinación "${error.modality} + ${error.language}" no está soportada todavía.\n` +
-        `Actualmente Foundry solo genera proyectos frontend con TypeScript.`
+        `Combinaciones soportadas: ${supported}.`
       );
+    }
     case "copy_error":
       return `Error al copiar la plantilla: ${error.message}`;
   }
