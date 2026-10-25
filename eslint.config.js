@@ -21,10 +21,16 @@ export default tseslint.config(
   {
     // Disable type-checked rules for files not covered by tsconfig
     // (root config files matched by allowDefaultProject, and test files).
-    files: ["*.config.js", "*.config.ts", "**/*.test.ts"],
+    files: ["*.config.js", "*.config.ts", "scripts/**/*.js", "**/*.test.ts"],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
     ignores: ["dist/", "node_modules/", "coverage/", "src/templates/"],
+  },
+  {
+    files: ["scripts/**/*.js"],
+    languageOptions: {
+      globals: { process: "readonly", console: "readonly" },
+    },
   },
 );

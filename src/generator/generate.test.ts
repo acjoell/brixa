@@ -91,4 +91,23 @@ describe("generate — combinación no soportada", () => {
       expect(msg.toLowerCase()).toContain("no está soportada todavía");
     }
   });
+
+  it("devuelve error unsupported_combination para backend + ts", async () => {
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      outputDir: "/tmp/irrelevant",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("unsupported_combination");
+    }
+  });
+
+  it("formatGenerateError incluye el mensaje original en copy_error", () => {
+    const msg = formatGenerateError({ kind: "copy_error", message: "ENOSPC: disco lleno" });
+    expect(msg.toLowerCase()).toContain("plantilla");
+    expect(msg).toContain("ENOSPC: disco lleno");
+  });
 });
