@@ -235,17 +235,9 @@ La solución debe ser sencilla de mantener y permitir incorporar nuevas plantill
 
 ### P-004 — Estructura de las aplicaciones completas
 
-**Estado:** Pendiente de definición.
+**Estado:** Resuelta (D-034).
 
-Se debe decidir cómo organizar el frontend y el backend cuando se generen juntos, incluyendo:
-
-- Estructura de directorios.
-- Gestión de dependencias y scripts.
-- Configuración de variables de entorno.
-- Ejecución y desarrollo local.
-- Integración entre frontend y backend.
-
-La estructura debe ser coherente, fácil de entender y no introducir complejidad innecesaria en proyectos que solo generen frontend o backend.
+Resuelta mediante estructura de carpetas hermanas (`frontend/` y `backend/`), dependencias independientes, proxy de desarrollo en Vite con `BACKEND_URL` (por defecto `http://localhost:3000`), rewrite `/^\/api(?=\/|$)/`, overlay de `vite.config` en `src/templates/fullstack/`, `README.md` raíz y sin `.gitignore` raíz. Matriz de seis combinaciones verificada. P-002 sigue pendiente para confirmación de versiones de dependencias de proyectos generados. Deuda técnica declarada: dos terminales para desarrollar, producción sin resolver y aviso de esbuild.
 
 ### P-005 — Criterios de aceptación del MVP
 
@@ -458,17 +450,69 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Alternativas consideradas:** `tsup` (eleva el piso de Node a `^22.18.0 || ^24.11.0 || >=26.0.0`, añade dependencia, descartado por el responsable del proyecto).
 
+---
+
+### D-031 — Protección de destino: fallo temprano si el directorio no está vacío
+
+**Estado:** Confirmada.
+
+**Contexto:** Evitar sobrescritura accidental en carpetas existentes con archivos (T-005).
+
+**Decisión:** Validar el directorio antes de escribir. Si existe y contiene archivos, abortar con error tipado (`not_empty`). Si no existe, crearlo de forma recursiva.
+
+**Motivo:** Garantizar seguridad de datos sin prompts destructivos ni sobreescrituras silenciosas.
+
+---
+
+### D-032 — Interpolación mínima de plantillas con token fijo
+
+**Estado:** Confirmada.
+
+**Contexto:** Personalizar el nombre del proyecto en `package.json` y archivos clave sin dependencias complejas (T-006).
+
+**Decisión:** Uso de `replaceAll("foundry-tpl", projectName)` y renombrado de `_gitignore` a `.gitignore` durante la copia recursiva con `fs.cp`.
+
+**Motivo:** Evita incluir motores de plantillas pesados (e.g. Handlebars, EJS), manteniendo la filosofía de cero dependencias innecesarias en el generador.
+
+---
+
+### D-033 — Soporte de 4 plantillas independientes para frontend y backend (JS y TS)
+
+**Estado:** Confirmada.
+
+**Contexto:** Implementación de plantillas base para Frontend (React + Vite) y Backend (Express) en JS y TS (T-008, T-009).
+
+**Decisión:** Cuatro carpetas de plantillas completas y verificadas: `frontend-react-ts`, `frontend-react-js`, `backend-express-ts` y `backend-express-js`. Cada una incluye scripts (`dev`, `build`, `test`, `lint`), configuración de ESLint flat y tests unitarios.
+
+**Motivo:** Proporciona proyectos listos para usar y aislados, cumpliendo los criterios de aceptación de T-008 y T-009.
+
+---
+
+### D-034 — Estructura y composición de aplicaciones completas (Fullstack)
+
+**Estado:** Confirmada.
+
+**Contexto:** Resolución de P-004 para la generación de proyectos completos (T-010).
+
+**Decisión:** 
+- Estructura de carpetas hermanas (`frontend/` y `backend/`) con dependencias y `package.json` independientes.
+- Proxy de desarrollo en Vite usando `BACKEND_URL` (por defecto `http://localhost:3000`) con rewrite `/^\/api(?=\/|$)/`.
+- Overlay de configuración de Vite en `src/templates/fullstack/` aplicado sobre la plantilla frontend.
+- `README.md` raíz explicativo sin `.gitignore` raíz (cada subproyecto mantiene su propio `.gitignore`).
+- Matriz de seis combinaciones verificada (frontend ts/js, backend ts/js, fullstack ts/js). P-002 sigue pendiente para la confirmación de versiones de proyectos generados.
+
+**Deuda técnica declarada:**
+- Requiere dos terminales para desarrollar (uno para frontend y otro para backend).
+- Modo de producción unificado sin resolver (fuera del alcance del MVP).
+- Aviso cosmético de esbuild al ejecutar pruebas o compilación.
+
 ## 5. Cuestiones pendientes
 
+- P-002: confirmación definitiva de versiones de dependencias de proyectos generados.
 - Selección definitiva del ORM mediante una prueba técnica.
-- Versiones estables y compatibles de las tecnologías iniciales.
-- Matriz exacta de combinaciones soportadas por el MVP.
 - Confirmación de la licencia AGPL-3.0 y sus implicaciones legales.
 - Política para contribuciones de terceros y posibles licencias comerciales alternativas.
 - Disponibilidad definitiva del nombre Foundry.
-- Definición de los comandos, preguntas y mensajes de la CLI.
-- Estructura concreta de plantillas y composición de módulos.
-- Criterios automatizados para aceptar una combinación como soportada.
 
 
 ## 6. Registro de nuevas decisiones

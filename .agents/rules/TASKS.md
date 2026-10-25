@@ -111,7 +111,7 @@ Actividades:
 
 ### T-003 — Definir la estructura inicial del CLI
 
-**Estado:** EN PROGRESO (estructura definida; implementación pendiente en T-004 y siguientes)
+**Estado:** COMPLETADA
 **Prioridad:** P0
 **Fase:** 0
 **Dependencia:** T-002
@@ -215,7 +215,7 @@ Verificaciones ejecutadas:
 
 ### T-005 — Implementar la selección del destino y la protección de archivos
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P0  
 **Fase:** 1  
 **Dependencia:** T-004
@@ -237,7 +237,7 @@ Actividades:
 
 ### T-006 — Crear la primera plantilla funcional
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P0  
 **Fase:** 1  
 **Dependencia:** T-005
@@ -258,7 +258,7 @@ Actividades:
 
 ### T-007 — Incorporar pruebas automatizadas del flujo de generación
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P0  
 **Fase:** 1  
 **Dependencia:** T-006
@@ -280,7 +280,7 @@ Actividades:
 
 ### T-008 — Implementar y verificar las plantillas frontend
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P1  
 **Fase:** 2  
 **Dependencias:** T-007 y las decisiones tecnológicas correspondientes
@@ -299,7 +299,7 @@ Actividades:
 
 ### T-009 — Implementar y verificar las plantillas backend
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P1  
 **Fase:** 2  
 **Dependencias:** T-007 y las decisiones tecnológicas correspondientes
@@ -319,7 +319,7 @@ Actividades:
 
 ### T-010 — Implementar la generación de aplicaciones completas
 
-**Estado:** PENDIENTE  
+**Estado:** COMPLETADA  
 **Prioridad:** P1  
 **Fase:** 2  
 **Dependencias:** T-008 y T-009
@@ -336,6 +336,8 @@ Actividades:
 - Ambos componentes pueden instalarse y ejecutarse.
 - La estructura no duplica innecesariamente la configuración.
 - La aplicación completa tiene instrucciones reproducibles.
+
+**Cierre de Fase 2:** Con T-010 completada, la Fase 2 queda cerrada y los seis criterios de salida de la matriz de combinaciones (frontend ts/js, backend ts/js, fullstack ts/js) quedan superados.
 
 ### T-011 — Evaluar el ORM y la persistencia
 

@@ -86,9 +86,9 @@ describe("validateOptions", () => {
   });
 
   it("rechaza lenguaje inválido", () => {
-    // @ts-expect-error — prueba deliberada con valor inválido.
     const result = validateOptions({
       modality: "frontend",
+      // @ts-expect-error — prueba deliberada con valor inválido.
       language: "python",
       outputDir: "./app",
     });

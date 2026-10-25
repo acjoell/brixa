@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { generate, formatGenerateError } from "./generate.js";
+import type { Modality } from "../types.js";
 
 const KEY_FILES = [
   ".gitignore",
@@ -164,10 +165,103 @@ describe("generate — backend + js", () => {
   });
 });
 
+describe("generate — interpolación de nombre en las cuatro variantes base", () => {
+  it("sustituye el nombre del proyecto en package.json e index.html en las cuatro variantes", async () => {
+    const variants = [
+      { modality: "frontend" as const, language: "ts" as const },
+      { modality: "frontend" as const, language: "js" as const },
+      { modality: "backend" as const, language: "ts" as const },
+      { modality: "backend" as const, language: "js" as const },
+    ];
+
+    for (const { modality, language } of variants) {
+      const projectName = `custom-${modality}-${language}`;
+      const dest = await mkTmp(projectName);
+      const result = await generate({ modality, language, outputDir: dest });
+      expect(result.ok).toBe(true);
+
+      const pkgContent = await fs.readFile(path.join(dest, "package.json"), "utf-8");
+      const pkg = JSON.parse(pkgContent) as { name: string };
+      expect(pkg.name).toBe(projectName);
+      expect(pkgContent).not.toContain("foundry-tpl");
+
+      if (modality === "frontend") {
+        const html = await fs.readFile(path.join(dest, "index.html"), "utf-8");
+        expect(html).toContain(`<title>${projectName}</title>`);
+        expect(html).not.toContain("foundry-tpl");
+      }
+    }
+  });
+});
+
+describe("generate — fullstack", () => {
+  it("crea la estructura con subcarpetas frontend y backend y solo README.md en raíz", async () => {
+    const dest = await mkTmp("fullstack-structure-test");
+    const result = await generate({ modality: "fullstack", language: "ts", outputDir: dest });
+    expect(result.ok).toBe(true);
+
+    const rootEntries = await fs.readdir(dest);
+    expect(rootEntries.sort()).toEqual(["README.md", "backend", "frontend"]);
+
+    await expect(fs.access(path.join(dest, "frontend", ".gitignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "frontend", "package.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "backend", ".gitignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "backend", "package.json"))).resolves.toBeUndefined();
+  });
+
+  it("aplica el overlay de proxy en vite.config del frontend", async () => {
+    for (const language of ["ts", "js"] as const) {
+      const dest = await mkTmp(`fullstack-proxy-${language}`);
+      const result = await generate({ modality: "fullstack", language, outputDir: dest });
+      expect(result.ok).toBe(true);
+
+      const viteFile = language === "ts" ? "vite.config.ts" : "vite.config.js";
+      const viteContent = await fs.readFile(path.join(dest, "frontend", viteFile), "utf-8");
+
+      expect(viteContent).toContain("proxy");
+      expect(viteContent).toContain("BACKEND_URL");
+      expect(viteContent).toContain("http://localhost:3000");
+      expect(viteContent).toContain("/^\\/api(?=\\/|$)/");
+    }
+  });
+
+  it("genera el README raíz con la información requerida", async () => {
+    const dest = await mkTmp("fullstack-readme-test");
+    const result = await generate({ modality: "fullstack", language: "ts", outputDir: dest });
+    expect(result.ok).toBe(true);
+
+    const readme = await fs.readFile(path.join(dest, "README.md"), "utf-8");
+    expect(readme).toContain("Estructura");
+    expect(readme).toContain("Requisitos");
+    expect(readme).toContain("Instalación");
+    expect(readme).toContain("Terminal 1");
+    expect(readme).toContain("Terminal 2");
+    expect(readme).toContain("BACKEND_URL");
+    expect(readme).toContain("Despliegue en producción");
+  });
+
+  it("asigna los nombres de paquete <nombre>-frontend y <nombre>-backend", async () => {
+    const projectName = "portal-app";
+    const dest = await mkTmp(projectName);
+    const result = await generate({ modality: "fullstack", language: "ts", outputDir: dest });
+    expect(result.ok).toBe(true);
+
+    const frontPkg = JSON.parse(
+      await fs.readFile(path.join(dest, "frontend", "package.json"), "utf-8"),
+    ) as { name: string };
+    const backPkg = JSON.parse(
+      await fs.readFile(path.join(dest, "backend", "package.json"), "utf-8"),
+    ) as { name: string };
+
+    expect(frontPkg.name).toBe(`${projectName}-frontend`);
+    expect(backPkg.name).toBe(`${projectName}-backend`);
+  });
+});
+
 describe("generate — combinación no soportada", () => {
   it("el mensaje de error lista las combinaciones soportadas actuales", async () => {
     const result = await generate({
-      modality: "fullstack",
+      modality: "desktop" as unknown as Modality,
       language: "ts",
       outputDir: "/tmp/irrelevant",
     });
@@ -181,12 +275,14 @@ describe("generate — combinación no soportada", () => {
       expect(msg).toContain("frontend + js");
       expect(msg).toContain("backend + ts");
       expect(msg).toContain("backend + js");
+      expect(msg).toContain("fullstack + ts");
+      expect(msg).toContain("fullstack + js");
     }
   });
 
-  it("devuelve error unsupported_combination para fullstack + ts", async () => {
+  it("devuelve error unsupported_combination para combinación desconocida", async () => {
     const result = await generate({
-      modality: "fullstack",
+      modality: "desktop" as unknown as Modality,
       language: "ts",
       outputDir: "/tmp/irrelevant",
     });

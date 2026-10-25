@@ -33,6 +33,6 @@ export async function main(): Promise<number> {
     return 1;
   }
 
-  console.log(nextStepsMessage(outputDir));
+  console.log(nextStepsMessage(outputDir, modality));
   return 0;
 }

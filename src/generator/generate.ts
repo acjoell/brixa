@@ -8,7 +8,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type UserOptions } from "../types.js";
+import { type UserOptions, type Modality } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -35,11 +35,19 @@ function templatesDir(): string {
 // Tabla de combinaciones soportadas
 // ---------------------------------------------------------------------------
 
+export const SUPPORTED_COMBINATIONS = [
+  "frontend+ts",
+  "frontend+js",
+  "backend+ts",
+  "backend+js",
+  "fullstack+ts",
+  "fullstack+js",
+] as const;
+
 /**
- * Clave: `"${modality}+${language}"`.
- * Valor: nombre de la carpeta de plantilla dentro de `src/templates/`.
+ * Plantillas individuales para frontend y backend.
  */
-const SUPPORTED_TEMPLATES: Record<string, string> = {
+const SINGLE_TEMPLATES: Record<string, string> = {
   "frontend+ts": "frontend-react-ts",
   "frontend+js": "frontend-react-js",
   "backend+ts": "backend-express-ts",
@@ -59,15 +67,64 @@ function interpolate(content: string, projectName: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Genera el proyecto copiando la plantilla correspondiente a `outputDir`.
- * Soporta modalidad `frontend` con lenguajes `ts` y `js`.
+ * Genera el proyecto copiando la plantilla o plantillas correspondientes a `outputDir`.
+ * Para fullstack, copia frontend y backend a subcarpetas hermanas, aplica el overlay
+ * de Vite para el proxy a la API y genera el README raíz.
  * Para cualquier otra combinación devuelve error `unsupported_combination`.
  */
 export async function generate(options: UserOptions): Promise<GenerateResult> {
   const { modality, language, outputDir } = options;
+  const combinationKey = `${modality}+${language}`;
 
-  const templateName = SUPPORTED_TEMPLATES[`${modality}+${language}`];
+  if (!(SUPPORTED_COMBINATIONS as readonly string[]).includes(combinationKey)) {
+    return {
+      ok: false,
+      error: { kind: "unsupported_combination", modality, language },
+    };
+  }
 
+  if (modality === "fullstack") {
+    try {
+      const projectName = path.basename(outputDir);
+      const frontendTpl = language === "ts" ? "frontend-react-ts" : "frontend-react-js";
+      const backendTpl = language === "ts" ? "backend-express-ts" : "backend-express-js";
+      const overlayFile = language === "ts" ? "vite.config.ts" : "vite.config.js";
+
+      await fs.mkdir(outputDir, { recursive: true });
+
+      const frontendDest = path.join(outputDir, "frontend");
+      const backendDest = path.join(outputDir, "backend");
+
+      await copyTemplate(
+        path.join(templatesDir(), frontendTpl),
+        frontendDest,
+        `${projectName}-frontend`,
+      );
+      await copyTemplate(
+        path.join(templatesDir(), backendTpl),
+        backendDest,
+        `${projectName}-backend`,
+      );
+
+      const overlaySrc = path.join(templatesDir(), "fullstack", overlayFile);
+      await fs.copyFile(overlaySrc, path.join(frontendDest, overlayFile));
+
+      const readmeContent = generateFullstackReadme(projectName, language);
+      await fs.writeFile(path.join(outputDir, "README.md"), readmeContent, "utf-8");
+
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          kind: "copy_error",
+          message: err instanceof Error ? err.message : String(err),
+        },
+      };
+    }
+  }
+
+  const templateName = SINGLE_TEMPLATES[combinationKey];
   if (templateName === undefined) {
     return {
       ok: false,
@@ -97,10 +154,13 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
 
 /**
  * Copia recursivamente `src` en `dest`, aplicando renombrado e interpolación.
- * El nombre del proyecto se extrae del basename de `dest`.
+ * Por defecto el nombre del proyecto se extrae del basename de `dest`.
  */
-async function copyTemplate(src: string, dest: string): Promise<void> {
-  const projectName = path.basename(dest);
+async function copyTemplate(
+  src: string,
+  dest: string,
+  projectName: string = path.basename(dest),
+): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   await copyDir(src, dest, projectName);
 }
@@ -138,6 +198,88 @@ async function copyFile(src: string, dest: string, projectName: string): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Generación del README raíz para proyectos fullstack
+// ---------------------------------------------------------------------------
+
+function generateFullstackReadme(projectName: string, language: string): string {
+  const langLabel = language === "ts" ? "TypeScript" : "JavaScript";
+  return `# ${projectName}
+
+Aplicación fullstack generada con Foundry.
+
+## Estructura
+
+\`\`\`
+${projectName}/
+├── frontend/   # Aplicación cliente React + Vite (${langLabel})
+├── backend/    # API REST Express (${langLabel})
+└── README.md   # Documentación general del proyecto
+\`\`\`
+
+## Requisitos
+
+- Node.js ^24.0.0 o >=26.0.0
+- npm
+
+## Instalación
+
+Instala las dependencias en cada carpeta por separado:
+
+\`\`\`bash
+# Frontend
+cd frontend
+npm install
+cd ..
+
+# Backend
+cd backend
+npm install
+cd ..
+\`\`\`
+
+## Ejecución en desarrollo
+
+La aplicación requiere ejecutar ambos servicios en dos terminales independientes:
+
+### 1. Backend (Terminal 1)
+
+\`\`\`bash
+cd backend
+npm run dev
+\`\`\`
+
+El servidor backend iniciará en \`http://localhost:3000\`.
+
+### 2. Frontend (Terminal 2)
+
+\`\`\`bash
+cd frontend
+npm run dev
+\`\`\`
+
+El servidor de desarrollo de Vite iniciará habitualmente en \`http://localhost:5173\`.
+
+## Comunicación entre servicios y BACKEND_URL
+
+En desarrollo, Vite reenvía las peticiones dirigidas a \`/api/*\` hacia el backend descartando el prefijo \`/api\` (por ejemplo, una llamada a \`/api/health\` llegará al backend como \`/health\`).
+
+El destino del proxy se configura mediante la variable de entorno \`BACKEND_URL\`, con valor por defecto \`http://localhost:3000\`. Si ejecutas el backend en otro puerto o dirección:
+
+\`\`\`bash
+cd frontend
+BACKEND_URL=http://localhost:4000 npm run dev
+\`\`\`
+
+## Despliegue en producción
+
+El proxy de Vite es exclusivo para desarrollo local. El despliegue en producción no está resuelto por Foundry. Para producción es necesario:
+
+1. Compilar el frontend (\`npm run build\` dentro de \`frontend/\`).
+2. Servir los archivos estáticos resultantes (\`dist/\`) y enrutar las peticiones \`/api/*\` al backend mediante un proxy inverso (como Nginx, Caddy o un API gateway) o servir el frontend compilado desde el propio servidor backend.
+`;
+}
+
+// ---------------------------------------------------------------------------
 // Mensajes de usuario
 // ---------------------------------------------------------------------------
 
@@ -147,9 +289,7 @@ async function copyFile(src: string, dest: string, projectName: string): Promise
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
     case "unsupported_combination": {
-      const supported = Object.keys(SUPPORTED_TEMPLATES)
-        .map((k) => k.replace("+", " + "))
-        .join(", ");
+      const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace("+", " + ")).join(", ");
       return (
         `La combinación "${error.modality} + ${error.language}" no está soportada todavía.\n` +
         `Combinaciones soportadas: ${supported}.`
@@ -163,8 +303,30 @@ export function formatGenerateError(error: GenerateError): string {
 /**
  * Devuelve los pasos a seguir tras la generación exitosa.
  */
-export function nextStepsMessage(outputDir: string): string {
+export function nextStepsMessage(outputDir: string, modality?: Modality): string {
   const name = path.basename(outputDir);
+
+  if (modality === "fullstack") {
+    return [
+      "",
+      `✔ Proyecto creado en: ${outputDir}`,
+      "",
+      "Pasos para continuar:",
+      `  cd ${name}`,
+      "",
+      "  # Terminal 1 — Backend:",
+      "  cd backend",
+      "  npm install",
+      "  npm run dev",
+      "",
+      "  # Terminal 2 — Frontend:",
+      "  cd frontend",
+      "  npm install",
+      "  npm run dev",
+      "",
+    ].join("\n");
+  }
+
   return [
     "",
     `✔ Proyecto creado en: ${outputDir}`,
