@@ -571,6 +571,23 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Decisión:** Los proyectos generados ejecutan los archivos de test en serie (`fileParallelism: false`, ver hallazgo (c) de D-034) y el test de conexión se omite si falta `DATABASE_URL` (Docker es opcional). `verify:generated` usa `VERIFY_DATABASE_URL` o un contenedor desechable, con una base de datos aislada por variante; si no hay Docker, informa "NO VERIFICADO: PostgreSQL". Con T-012a verifica 12 variantes, incluidas backend y fullstack en ts y js con PostgreSQL.
 
+---
+
+### D-041 — Driver de SQLite: @libsql/client
+
+**Estado:** Confirmada.
+
+**Contexto:** T-012b requería elegir el driver de SQLite para Drizzle. Las pruebas se realizaron con caché de npm limpia en Linux x64 con Node 24.
+
+**Decisión:** Se utiliza `@libsql/client` con `drizzle-orm/libsql` y `DATABASE_URL=file:./data/app.db`. La plantilla crea la carpeta de la base de datos si no existe y excluye `data/` mediante el `.gitignore` generado.
+
+**Motivo:** La instalación no requiere scripts de compilación ni toolchain nativa y la integración supera las pruebas de consultas reales, generación de migraciones y ejecución del migrador. `better-sqlite3` sin su script de instalación no dispone del binario necesario; al permitir el script, requiere compilación en el entorno probado.
+
+**Consecuencias:** Verificado en Linux x64 con Node 24; otras plataformas no probadas. La ruta `file:` es relativa al directorio de ejecución. Los avisos de deprecación de `@esbuild-kit` y el override de D-039 siguen aplicando.
+
+**Alternativas consideradas:** `better-sqlite3` con script de instalación denegado (no funciona en el entorno probado) y con script permitido (requiere compilación).
+
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados.

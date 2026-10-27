@@ -36,6 +36,7 @@ export async function runPrompts(): Promise<RawOptions | null> {
         choices: [
           { name: "Ninguna", value: "none" as const },
           { name: "PostgreSQL", value: "postgres" as const },
+          { name: "SQLite", value: "sqlite" as const },
         ],
         default: "none",
       });

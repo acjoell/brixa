@@ -387,7 +387,7 @@ function verifyNoDatabaseArtifacts(dir) {
   if (fs.existsSync(pkgFile)) {
     const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf-8"));
     const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
-    const forbiddenPkgs = ["drizzle-orm", "drizzle-kit", "pg", "@types/pg"];
+    const forbiddenPkgs = ["drizzle-orm", "drizzle-kit", "pg", "@types/pg", "@libsql/client"];
     for (const p of forbiddenPkgs) {
       if (p in allDeps) {
         throw new Error(
@@ -442,7 +442,9 @@ async function verifyVariant(variant, step, total, pgContext) {
     await generateProject(modality, language, projectDir, database);
     console.log(`Proyecto generado en: ${projectDir}`);
 
-    const hasDb = database === "postgres";
+    const hasPostgres = database === "postgres";
+    const hasSqlite = database === "sqlite";
+    const hasDb = hasPostgres || hasSqlite;
 
     if (modality === "fullstack") {
       const frontendDir = path.join(projectDir, "frontend");
@@ -465,8 +467,10 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
       run("npm", ["run", "lint"], backendDir);
 
-      if (hasDb) {
+      if (hasPostgres) {
         await verifyDatabaseIntegration(backendDir, language, pgContext, label);
+      } else if (hasSqlite) {
+        await verifySqliteIntegration(backendDir, language);
       } else {
         run("npm", ["run", "test"], backendDir);
       }
@@ -517,8 +521,10 @@ async function verifyVariant(variant, step, total, pgContext) {
           run("npm", ["run", "typecheck"], projectDir);
         }
 
-        if (hasDb) {
+        if (hasPostgres) {
           await verifyDatabaseIntegration(projectDir, language, pgContext, label);
+        } else if (hasSqlite) {
+          await verifySqliteIntegration(projectDir, language);
         } else {
           run("npm", ["run", "test"], projectDir);
         }
@@ -528,7 +534,7 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
     }
 
-    if (hasDb && !pgContext.available) {
+    if (hasPostgres && !pgContext.available) {
       console.log(`\n⚠ ${label}: NO VERIFICADO: PostgreSQL (código y build verificados sin BD)`);
     } else {
       console.log(`\n✔ ${label} verificado correctamente`);
@@ -614,6 +620,69 @@ await client.end();
   run("npm", ["run", "test"], backendDir, { DATABASE_URL: databaseUrl });
 }
 
+/** Verifica integración con SQLite: schema, db:generate, db:migrate (incluso con data/ borrada), existencia de tabla y tests. */
+async function verifySqliteIntegration(backendDir, language) {
+  // 0. Comprobar auditoría de seguridad de dependencias (falla si hay avisos >= moderate)
+  run("npm", ["audit", "--audit-level=moderate"], backendDir);
+
+  const databaseUrl = "file:./data/app.db";
+
+  // 1. Añadir tabla mínima en el schema dentro del directorio temporal (nunca en la plantilla)
+  const schemaFile = path.join(
+    backendDir,
+    "src",
+    "db",
+    language === "ts" ? "schema.ts" : "schema.js",
+  );
+  const schemaSnippet = `
+import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+
+export const testItems = sqliteTable("test_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+});
+`;
+  fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
+
+  // 2. Generar migraciones
+  run("npm", ["run", "db:generate"], backendDir);
+
+  // 3. Comprobar que db:migrate funciona con data/ borrada
+  const dataDir = path.join(backendDir, "data");
+  if (fs.existsSync(dataDir)) {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+
+  // 4. Aplicar migraciones con DATABASE_URL
+  run("npm", ["run", "db:migrate"], backendDir, { DATABASE_URL: databaseUrl });
+
+  if (!fs.existsSync(dataDir)) {
+    throw new Error("El directorio 'data/' no fue creado automáticamente por db:migrate.");
+  }
+
+  // 5. Comprobar que la tabla existe en la base de datos SQLite
+  const checkScript = `
+import { createClient } from "@libsql/client";
+const client = createClient({ url: process.env.DATABASE_URL });
+const res = await client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test_items'");
+if (res.rows.length === 0) {
+  throw new Error("La tabla 'test_items' no existe en la base de datos tras ejecutar migraciones.");
+}
+console.log("✔ Tabla 'test_items' encontrada en SQLite.");
+client.close();
+`;
+  const checkPath = path.join(backendDir, "verify-table.mjs");
+  fs.writeFileSync(checkPath, checkScript, "utf-8");
+  try {
+    run("node", ["verify-table.mjs"], backendDir, { DATABASE_URL: databaseUrl });
+  } finally {
+    fs.rmSync(checkPath, { force: true });
+  }
+
+  // 6. Ejecutar tests con DATABASE_URL definida
+  run("npm", ["run", "test"], backendDir, { DATABASE_URL: databaseUrl });
+}
+
 // ---------------------------------------------------------------------------
 // Script principal
 // ---------------------------------------------------------------------------
@@ -629,6 +698,10 @@ const VARIANTS = [
   { modality: "backend", language: "js", database: "postgres" },
   { modality: "fullstack", language: "ts", database: "postgres" },
   { modality: "fullstack", language: "js", database: "postgres" },
+  { modality: "backend", language: "ts", database: "sqlite" },
+  { modality: "backend", language: "js", database: "sqlite" },
+  { modality: "fullstack", language: "ts", database: "sqlite" },
+  { modality: "fullstack", language: "js", database: "sqlite" },
 ];
 
 async function main() {

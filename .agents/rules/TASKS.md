@@ -361,27 +361,40 @@ Actividades:
 
 ### T-012 — Implementar y verificar la persistencia seleccionada
 
-**Estado:** EN PROGRESO (T-012a completada; T-012b SQLite sin iniciar)
+**Estado:** COMPLETADA (T-012a y T-012b completadas y verificadas el 2026-10-27)  
 **Prioridad:** P1  
 **Fase:** 3  
 **Dependencia:** T-011
 
-**T-012a — PostgreSQL opcional con Drizzle ORM (COMPLETADA, verificada el 2026-10-27):**
+**T-012a — PostgreSQL opcional con Drizzle ORM (COMPLETADA):**
 
-- Backend y aplicación completa ofrecen "Ninguna" (por defecto) o PostgreSQL. Esquema vacío con comentarios guía; migraciones explícitas (`db:generate` y `db:migrate`); `DATABASE_URL` validada al importar el cliente; test de conexión que se omite sin `DATABASE_URL`; `fileParallelism: false`.
-- Corregidos: el cliente con Proxy bloqueaba el pool; las instrucciones del CLI recomendaban `db:migrate` con esquema vacío; vulnerabilidades moderadas de `esbuild` antiguo (traído por `drizzle-kit`), resueltas con un override.
-- Verificación: `npm run verify:generated` 12/12. Variantes con PostgreSQL verificadas: backend+ts, backend+js, fullstack+ts y fullstack+js (instalación sin vulnerabilidades, `npm audit` en 0, migración aplicada, tabla creada, tests y proxy `/api/health` en fullstack).
-- Enmascarado de credenciales verificado con `postgresql://u:SECR@ETO@127.0.0.1:1/d`: ni `db:migrate` ni el test de conexión emiten `SECR` ni `ETO` (stdout y stderr).
-- Pendiente: comprobar que el test del CLI sobre `redact` ejecuta la función real de la plantilla y no una copia; si es una copia, extraer `redact` a un archivo sin dependencias.
-- Pendientes anotados: el aviso de deprecación de `@esbuild-kit` no se puede evitar con `drizzle-kit` 0.31; `npm audit` en `verify:generated` puede fallar en el futuro por avisos nuevos, sin que cambie el código; `drizzle-kit` 1.0.0-rc.5 ya no depende de `@esbuild-kit` (reevaluar cuando 1.0 sea latest).
+- Backend y aplicación completa ofrecen «Ninguna» (por defecto) o PostgreSQL. Esquema vacío con comentarios guía; migraciones explícitas (`db:generate` y `db:migrate`); `DATABASE_URL` validada al importar el cliente; test de conexión que se omite sin `DATABASE_URL`; `fileParallelism: false`.
+- Corregido el cliente con Proxy que bloqueaba el pool. Ajustadas las instrucciones del CLI para no recomendar `db:migrate` con un esquema vacío.
+- Las vulnerabilidades moderadas de `esbuild` introducidas por `drizzle-kit` se resolvieron mediante un override.
+- Verificación: `npm run verify:generated`, con PostgreSQL en backend y fullstack, JavaScript y TypeScript. Migraciones, creación de tablas, tests y proxy `/api/health` verificados.
+- Enmascarado de credenciales comprobado para `db:migrate` y el test de conexión.
+- Pendiente técnico no bloqueante: comprobar que el test del CLI sobre `redact` ejecuta la función real de la plantilla y no una copia; si utiliza una copia, valorar extraer `redact` a un archivo sin dependencias.
+- Los avisos de deprecación de `@esbuild-kit` siguen presentes en las instalaciones que utilizan `drizzle-kit`. Reevaluar cuando Drizzle Kit 1.0 estable esté disponible.
 
-**T-012b — SQLite (PENDIENTE):** driver propuesto `better-sqlite3` 13.0.3 con su script de instalación denegado (funciona en Linux x64; plataformas no verificadas). Alternativa: `@libsql/client`.
+**T-012b — SQLite opcional con Drizzle ORM (COMPLETADA):**
+
+- Backend y aplicación completa ofrecen SQLite en JavaScript y TypeScript mediante `@libsql/client` y `drizzle-orm/libsql`.
+- Configuración inicial: `DATABASE_URL=file:./data/app.db`. La plantilla crea recursivamente la carpeta contenedora cuando corresponde; `data/` se excluye mediante el `.gitignore` generado.
+- Incluye esquema vacío con comentarios guía, cliente con validación de `DATABASE_URL`, generación y ejecución explícita de migraciones, y test de conexión que se omite cuando no hay `DATABASE_URL`.
+- `db:migrate` falla si no existe `drizzle/` y no informa de éxito cuando el directorio existe pero no contiene migraciones.
+- Dependencias fijadas en versiones exactas: `@libsql/client` 0.18.0, `drizzle-orm` 0.45.4 y `drizzle-kit` en la versión estable fijada por la plantilla. Se aplica el override de `esbuild` de D-039.
+- Verificación: `npm run verify:generated` completado correctamente, 16/16 variantes. Las cuatro variantes SQLite (backend y fullstack, JavaScript y TypeScript) pasaron instalación, lint, comprobaciones de tipos cuando correspondía, auditoría, generación y ejecución de migraciones, comprobación de tablas y tests. Las variantes fullstack también verificaron `GET /api/health` mediante el proxy de Vite.
+- La creación de la carpeta `data/` se comprobó después de eliminarla antes de ejecutar la migración.
+- `npm audit --audit-level=moderate` informó cero vulnerabilidades en las variantes generadas.
+- Compatibilidad verificada únicamente en Linux x64 con Node 24. Las demás plataformas no se han probado. La ruta `file:./data/app.db` es relativa al directorio de ejecución.
+- Decisión del driver registrada en D-041. `better-sqlite3` queda descartado para esta implementación por los problemas de instalación y compilación observados en las pruebas.
 
 **Criterios de aceptación:**
 
-- La persistencia funciona en las combinaciones declaradas como compatibles. Cumplido para PostgreSQL en backend y fullstack, ts y js; pendiente para SQLite.
-- Las pruebas pueden reproducirse (`npm run verify:generated`, con Docker o `VERIFY_DATABASE_URL`).
-- La documentación refleja el comportamiento real.
+- La persistencia funciona en las combinaciones declaradas como compatibles: PostgreSQL y SQLite, backend y fullstack, JavaScript y TypeScript. **Cumplido; 16/16 variantes verificadas.**
+- Las pruebas son reproducibles mediante `npm run verify:generated`, utilizando el entorno PostgreSQL configurado por el script.
+- Las migraciones, las consultas reales y las comprobaciones de conexión funcionan en las variantes verificadas.
+- La documentación refleja el comportamiento real y las limitaciones de compatibilidad conocidas.
 
 ### T-013 — Incorporar capacidades opcionales de desarrollo
 

@@ -63,12 +63,16 @@ export const SUPPORTED_COMBINATIONS = [
   "frontend+js",
   "backend+ts+none",
   "backend+ts+postgres",
+  "backend+ts+sqlite",
   "backend+js+none",
   "backend+js+postgres",
+  "backend+js+sqlite",
   "fullstack+ts+none",
   "fullstack+ts+postgres",
+  "fullstack+ts+sqlite",
   "fullstack+js+none",
   "fullstack+js+postgres",
+  "fullstack+js+sqlite",
 ] as const;
 
 /**
@@ -251,6 +255,127 @@ async function applyPostgresOverlay(targetBackendDir: string, language: Language
   await appendBackendReadmeDatabase(path.join(targetBackendDir, "README.md"));
 }
 
+async function appendEnvExampleSqlite(envPath: string): Promise<void> {
+  const line = "DATABASE_URL=file:./data/app.db\n";
+  try {
+    const existing = await fs.readFile(envPath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
+  } catch {
+    await fs.writeFile(envPath, line, "utf-8");
+  }
+}
+
+async function appendGitignoreSqlite(gitignorePath: string): Promise<void> {
+  const line = "data/\n";
+  try {
+    const existing = await fs.readFile(gitignorePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(gitignorePath, `${existing}${separator}${line}`, "utf-8");
+  } catch {
+    await fs.writeFile(gitignorePath, line, "utf-8");
+  }
+}
+
+async function appendBackendReadmeDatabaseSqlite(readmePath: string): Promise<void> {
+  const content = `
+## Base de datos
+
+Este backend incluye integración con SQLite mediante Drizzle ORM y @libsql/client.
+
+### Configuración y flujo de trabajo
+
+1. Configura la variable de entorno \`DATABASE_URL\` en tu archivo \`.env\`:
+
+\`\`\`bash
+DATABASE_URL=file:./data/app.db
+\`\`\`
+
+La ruta con prefijo \`file:\` es relativa al directorio de ejecución del proyecto.
+Esta integración está verificada oficialmente en entornos Linux x64.
+
+2. Define tus tablas en \`src/db/schema\`.
+
+3. Genera las migraciones SQL:
+\`\`\`bash
+npm run db:generate
+\`\`\`
+
+4. Aplica las migraciones en la base de datos:
+\`\`\`bash
+npm run db:migrate
+\`\`\`
+
+> **Nota:** Drizzle 1.0 se encuentra en fase RC (Release Candidate) y cambiará el formato de las migraciones en futuras versiones.
+> Este proyecto deniega por defecto el script de instalación de \`esbuild\` requerido internamente por \`drizzle-kit\`, garantizando la seguridad en la instalación sin afectar al generador de migraciones.
+> Los avisos de obsolescencia (\`npm warn deprecated\`) de \`@esbuild-kit\` durante \`npm install\` provienen internamente de las dependencias de \`drizzle-kit\` y no afectan al funcionamiento del proyecto.
+`;
+  const existing = await fs.readFile(readmePath, "utf-8");
+  const separator = existing.endsWith("\n") ? "" : "\n";
+  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
+}
+
+async function appendRootReadmeDatabaseSqlite(readmePath: string): Promise<void> {
+  const content = `
+### Base de datos (SQLite)
+El backend incluye persistencia con SQLite (vía @libsql/client) y Drizzle ORM. Define tablas en \`backend/src/db/schema\`, genera migraciones con \`npm run db:generate\` y aplícalas con \`npm run db:migrate\`. La ruta del archivo SQLite es relativa al directorio de ejecución y está verificada en Linux x64.
+`;
+  const existing = await fs.readFile(readmePath, "utf-8");
+  const separator = existing.endsWith("\n") ? "" : "\n";
+  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
+}
+
+async function applySqliteOverlay(targetBackendDir: string, language: Language): Promise<void> {
+  const overlayDir = path.join(templatesDir(), "database-sqlite", language);
+  await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
+
+  // Fusionar package.json deterministamente sin sobrescribir lo existente
+  const pkgPath = path.join(targetBackendDir, "package.json");
+  const pkgRaw = await fs.readFile(pkgPath, "utf-8");
+  const pkgJson = JSON.parse(pkgRaw) as PackageJson;
+
+  const overlayPkgPath = path.join(overlayDir, "package.json");
+  let overlayDeps: PackageJsonOverlay;
+  try {
+    const overlayRaw = await fs.readFile(overlayPkgPath, "utf-8");
+    overlayDeps = JSON.parse(overlayRaw) as PackageJsonOverlay;
+  } catch {
+    overlayDeps = {
+      allowScripts: {
+        esbuild: false,
+      },
+      overrides: {
+        "@esbuild-kit/core-utils": {
+          esbuild: "^0.25.0",
+        },
+      },
+      scripts: {
+        "db:generate": "drizzle-kit generate",
+        "db:migrate": language === "ts" ? "tsx src/db/migrate.ts" : "node src/db/migrate.js",
+      },
+      dependencies: {
+        "@libsql/client": "0.18.0",
+        "drizzle-orm": "0.45.4",
+      },
+      devDependencies: {
+        "drizzle-kit": "0.31.11",
+      },
+    };
+  }
+
+  const merged = mergePackageJson(pkgJson, overlayDeps);
+  await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+
+  // Añadir DATABASE_URL a .env.example
+  await appendEnvExampleSqlite(path.join(targetBackendDir, ".env.example"));
+
+  // Añadir data/ a .gitignore
+  await appendGitignoreSqlite(path.join(targetBackendDir, ".gitignore"));
+
+  // Añadir sección de base de datos a README.md
+  await appendBackendReadmeDatabaseSqlite(path.join(targetBackendDir, "README.md"));
+}
+
 // ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
@@ -312,6 +437,9 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       if (database === "postgres") {
         await applyPostgresOverlay(backendDest, language);
         await appendRootReadmeDatabase(path.join(outputDir, "README.md"));
+      } else if (database === "sqlite") {
+        await applySqliteOverlay(backendDest, language);
+        await appendRootReadmeDatabaseSqlite(path.join(outputDir, "README.md"));
       }
 
       return { ok: true };
@@ -340,8 +468,12 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
   try {
     await copyTemplate(templateSrc, outputDir);
 
-    if (modality === "backend" && database === "postgres") {
-      await applyPostgresOverlay(outputDir, language);
+    if (modality === "backend") {
+      if (database === "postgres") {
+        await applyPostgresOverlay(outputDir, language);
+      } else if (database === "sqlite") {
+        await applySqliteOverlay(outputDir, language);
+      }
     }
 
     return { ok: true };
@@ -531,7 +663,6 @@ export function nextStepsMessage(
   database?: Database,
 ): string {
   const name = path.basename(outputDir);
-  const hasDb = database === "postgres";
 
   if (modality === "fullstack") {
     const lines = [
@@ -552,11 +683,19 @@ export function nextStepsMessage(
       "  npm run dev",
     ];
 
-    if (hasDb) {
+    if (database === "postgres") {
       lines.push(
         "",
         "  # Base de datos (PostgreSQL):",
         "  # 1. Configura DATABASE_URL en backend/.env",
+        "  # 2. Define tus tablas en backend/src/db/schema",
+        "  # 3. Genera y aplica migraciones: cd backend && npm run db:generate && npm run db:migrate",
+      );
+    } else if (database === "sqlite") {
+      lines.push(
+        "",
+        "  # Base de datos (SQLite):",
+        "  # 1. Configura DATABASE_URL en backend/.env (por defecto: file:./data/app.db)",
         "  # 2. Define tus tablas en backend/src/db/schema",
         "  # 3. Genera y aplica migraciones: cd backend && npm run db:generate && npm run db:migrate",
       );
@@ -576,11 +715,19 @@ export function nextStepsMessage(
     "  npm run dev",
   ];
 
-  if (hasDb) {
+  if (database === "postgres") {
     lines.push(
       "",
       "  # Base de datos (PostgreSQL):",
       "  # 1. Configura DATABASE_URL en .env",
+      "  # 2. Define tus tablas en src/db/schema",
+      "  # 3. Genera y aplica migraciones: npm run db:generate && npm run db:migrate",
+    );
+  } else if (database === "sqlite") {
+    lines.push(
+      "",
+      "  # Base de datos (SQLite):",
+      "  # 1. Configura DATABASE_URL en .env (por defecto: file:./data/app.db)",
       "  # 2. Define tus tablas en src/db/schema",
       "  # 3. Genera y aplica migraciones: npm run db:generate && npm run db:migrate",
     );

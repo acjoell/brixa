@@ -417,3 +417,75 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
     }
   });
 });
+
+describe("generate — persistencia SQLite (T-012b)", () => {
+  it("genera los archivos clave para la variante SQLite y configura data/ en .gitignore", async () => {
+    const dest = await mkTmp("backend-sqlite");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "sqlite",
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "drizzle.config.ts"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "db", "client.ts"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "db", "schema.ts"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "db", "migrate.ts"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "tests", "db.test.ts"))).resolves.toBeUndefined();
+
+    const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
+    expect(envContent).toContain("DATABASE_URL=file:./data/app.db");
+
+    const gitignoreContent = await fs.readFile(path.join(dest, ".gitignore"), "utf-8");
+    expect(gitignoreContent).toContain("data/");
+
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.["@libsql/client"]).toBe("0.18.0");
+    expect(pkg.dependencies?.["drizzle-orm"]).toBe("0.45.4");
+    expect(pkg.scripts?.["db:generate"]).toBe("drizzle-kit generate");
+    expect(pkg.scripts?.["db:migrate"]).toBe("tsx src/db/migrate.ts");
+  });
+
+  it("acepta combinaciones válidas de SQLite para backend y fullstack", async () => {
+    const backendDest = await mkTmp("backend-js-sqlite");
+    const backendRes = await generate({
+      modality: "backend",
+      language: "js",
+      database: "sqlite",
+      outputDir: backendDest,
+    });
+    expect(backendRes.ok).toBe(true);
+
+    const fullstackDest = await mkTmp("fullstack-ts-sqlite");
+    const fullstackRes = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "sqlite",
+      outputDir: fullstackDest,
+    });
+    expect(fullstackRes.ok).toBe(true);
+  });
+
+  it("rechaza combinación inválida con SQLite (frontend con sqlite)", async () => {
+    const dest = await mkTmp("frontend-sqlite-invalid");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      database: "sqlite",
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("unsupported_combination");
+      const msg = formatGenerateError(result.error);
+      expect(msg).toContain("no está soportada todavía");
+      expect(msg).toContain("frontend + ts + sqlite");
+    }
+  });
+});

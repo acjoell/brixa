@@ -20,7 +20,7 @@ export type ValidationError =
 
 const VALID_MODALITIES = new Set(["frontend", "backend", "fullstack"]);
 const VALID_LANGUAGES = new Set(["js", "ts"]);
-const VALID_DATABASES = new Set(["none", "postgres"]);
+const VALID_DATABASES = new Set(["none", "postgres", "sqlite"]);
 
 // ---------------------------------------------------------------------------
 // Validación pura de modalidad y lenguaje
@@ -114,7 +114,7 @@ export function formatValidationError(error: ValidationError): string {
     case "invalid_language":
       return `Lenguaje no válido: "${String(error.received)}". Las opciones son: js, ts.`;
     case "invalid_database":
-      return `Base de datos no válida: "${String(error.received)}". Las opciones son: none, postgres.`;
+      return `Base de datos no válida: "${String(error.received)}". Las opciones son: none, postgres, sqlite.`;
     case "invalid_target_dir":
       return formatTargetDirError(error.inner);
   }

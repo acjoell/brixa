@@ -10,7 +10,7 @@ export type Modality = "frontend" | "backend" | "fullstack";
 export type Language = "js" | "ts";
 
 /** Base de datos seleccionada por el usuario. */
-export type Database = "none" | "postgres";
+export type Database = "none" | "postgres" | "sqlite";
 
 /** Opciones crudas devueltas por el flujo de prompts. */
 export interface RawOptions {
