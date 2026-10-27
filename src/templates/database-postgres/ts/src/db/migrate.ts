@@ -67,8 +67,8 @@ async function runMigrations(): Promise<void> {
 }
 
 /** Elimina credenciales de una cadena para que no aparezcan en logs. */
-function redact(text: string): string {
-  return text.replace(/postgresql?:\/\/[^@]+@/gi, "postgresql://***:***@");
+export function redact(text: string): string {
+  return text.replace(/postgres(?:ql)?:\/\/[^/\s]*@/gi, "postgresql://***:***@");
 }
 
 runMigrations().catch((err: unknown) => {

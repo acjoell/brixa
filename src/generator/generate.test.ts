@@ -11,6 +11,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { generate, formatGenerateError, mergePackageJson } from "./generate.js";
 import type { Modality } from "../types.js";
 
@@ -381,6 +382,38 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
       const msg = formatGenerateError(result.error);
       expect(msg).toContain("no está soportada todavía");
       expect(msg).toContain("frontend + ts + postgres");
+    }
+  });
+
+  it("enmascara credenciales en src/db/migrate (ts y js) con contraseña normal, con '@' y con ':'", async () => {
+    const templatesRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "templates",
+      "database-postgres",
+    );
+
+    for (const lang of ["ts", "js"] as const) {
+      const filePath = path.join(templatesRoot, lang, "src", "db", `migrate.${lang}`);
+      const content = await fs.readFile(filePath, "utf-8");
+
+      const fnMatch = content.match(/function redact\([^)]*\)(?::\s*\w+)?\s*\{([\s\S]*?)\}/);
+      expect(fnMatch).not.toBeNull();
+      const fnBody = fnMatch?.[1] ?? "";
+      const redact = new Function("text", fnBody) as (text: string) => string;
+
+      const normal = "postgresql://u:password123@127.0.0.1:5432/db";
+      const withAt = "postgresql://u:SECR@ETO@127.0.0.1:5432/db";
+      const withColon = "postgresql://u:SEC:RET:O@127.0.0.1:5432/db";
+
+      expect(redact(normal)).toBe("postgresql://***:***@127.0.0.1:5432/db");
+      expect(redact(withAt)).toBe("postgresql://***:***@127.0.0.1:5432/db");
+      expect(redact(withColon)).toBe("postgresql://***:***@127.0.0.1:5432/db");
+
+      expect(redact(withAt)).not.toContain("SECR");
+      expect(redact(withAt)).not.toContain("ETO");
+      expect(redact(withColon)).not.toContain("SEC");
+      expect(redact(withColon)).not.toContain("RET");
     }
   });
 });

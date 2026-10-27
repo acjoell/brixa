@@ -628,6 +628,7 @@ const VARIANTS = [
   { modality: "backend", language: "ts", database: "postgres" },
   { modality: "backend", language: "js", database: "postgres" },
   { modality: "fullstack", language: "ts", database: "postgres" },
+  { modality: "fullstack", language: "js", database: "postgres" },
 ];
 
 async function main() {
@@ -654,7 +655,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("\n✖ verify:generated falló:", err.message ?? err);
-  process.exit(1);
-});
+const isDirectRun =
+  process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error("\n✖ verify:generated falló:", err.message ?? err);
+    process.exit(1);
+  });
+}
