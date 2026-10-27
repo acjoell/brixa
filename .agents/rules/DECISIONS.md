@@ -135,7 +135,7 @@ La arquitectura podrá facilitar su incorporación futura, pero no debe introduc
 
 ### D-016 — Estrategia de ORM
 
-**Estado:** Pendiente de prueba técnica.
+**Estado:** Confirmada. Cerrada por D-035.
 
 No se seleccionará definitivamente un ORM hasta comparar una implementación pequeña con las bases de datos previstas y comprobar migraciones, consultas, transacciones, compatibilidad con JavaScript y TypeScript, y estabilidad de las versiones disponibles.
 
@@ -189,7 +189,7 @@ Las decisiones ya adoptadas se registran en la sección correspondiente de este 
 
 ### P-001 — Selección del ORM y mecanismo de persistencia
 
-**Estado:** Pendiente de prueba de concepto.
+**Estado:** Resuelta. Cerrada por D-035 (prueba de concepto de T-011).
 
 Se busca soportar PostgreSQL y SQLite en los proyectos que incluyan persistencia.
 
@@ -511,10 +511,70 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 - (b) Los archivos de test que comparten una misma base de datos PostgreSQL y se ejecutan en paralelo chocan al crear el esquema "drizzle" (carrera de CREATE SCHEMA); el informe original (24/24) no era reproducible con el comando del README por esto y por la falta de prisma generate --schema por motor.
 - (c) Riesgo para T-012: los tests de un proyecto generado contra una misma base de datos deben ejecutarse en serie o usar una base de datos por archivo.
 
+### D-035 — Drizzle ORM como capa de acceso a datos
+
+**Estado:** Confirmada. Cierra D-016 y P-001.
+
+**Contexto:** T-011 evaluó el mecanismo de persistencia mediante una prueba de concepto con PostgreSQL y SQLite en JavaScript y TypeScript.
+
+**Decisión:** Drizzle ORM es la única capa de acceso a datos de los proyectos generados con base de datos. Migraciones con `drizzle-kit` (solo desarrollo) y el migrador de `drizzle-orm`. La prueba de concepto se ejecutó con Drizzle 0.45.4: PostgreSQL 17 pasa en TypeScript y JavaScript, y SQLite pasa (ver hallazgos de D-034).
+
+**Consecuencias:** Una base de datos solo se declara soportada cuando su integración está implementada y verificada en `verify:generated` (D-021). PostgreSQL cumple esto desde T-012a; SQLite queda para T-012b. El driver de SQLite no está decidido (ver T-012b).
+
+---
+
+### D-036 — Base de datos opcional en backend y aplicación completa
+
+**Estado:** Confirmada.
+
+**Decisión:** El CLI pregunta "¿Base de datos?" solo para backend y aplicación completa: "Ninguna" (por defecto) o PostgreSQL. SQLite no se ofrece hasta T-012b. "Ninguna" genera lo mismo que antes.
+
+**Motivo:** No imponer persistencia a quien no la necesita y no multiplicar combinaciones sin verificar (D-021).
+
+---
+
+### D-037 — Esquema vacío y migraciones explícitas
+
+**Estado:** Confirmada.
+
+**Decisión:** El esquema se genera vacío, con comentarios guía; no hay tabla de ejemplo ni usuarios (la autenticación queda para T-014). Las migraciones se ejecutan con `npm run db:generate` (drizzle-kit, solo desarrollo) y `npm run db:migrate` (migrador de drizzle-orm); el servidor nunca migra al arrancar. `db:migrate` falla si no existe `drizzle/` y avisa claramente si existe pero no contiene migraciones.
+
+**Motivo:** Arrancar la aplicación no debe modificar la base de datos por sorpresa, y un despliegue no debe instalar `drizzle-kit`.
+
+---
+
+### D-038 — Cliente de base de datos sin Proxy y errores sin credenciales
+
+**Estado:** Confirmada.
+
+**Decisión:** `src/db/client` lee y valida `DATABASE_URL` al importarse y exporta `pool` y `db` directamente; el servidor no lo importa ni se conecta al arrancar. Los errores de `db:migrate` incluyen la causa real y enmascaran las credenciales de la URL (todo lo que hay entre `://` y el último `@` anterior a la primera `/`).
+
+**Motivo:** Un Proxy con instanciación perezosa ligaba el `this` de `pool.query()` y bloqueaba el pool (el test de conexión agotaba 5 s). Corregido y verificado.
+
+**Verificación:** con `DATABASE_URL=postgresql://u:SECR@ETO@127.0.0.1:1/d` (puerto cerrado), ni `db:migrate` ni el test de conexión emiten `SECR` ni `ETO` por stdout o stderr.
+
+---
+
+### D-039 — Cadena de suministro de las plantillas con base de datos
+
+**Estado:** Confirmada.
+
+**Decisión:** `overrides` de `@esbuild-kit/core-utils` a `esbuild ^0.25.0` para eliminar 4 vulnerabilidades moderadas (GHSA-67mh-4wv8-2f99, que afecta al servidor de desarrollo de esbuild, no usado por `drizzle-kit`); `allowScripts: { esbuild: false }`; `npm audit --audit-level=moderate` forma parte de `verify:generated`. Los avisos de deprecación de `@esbuild-kit` no se pueden evitar con `drizzle-kit` 0.31 y están explicados en el README del backend.
+
+**Consecuencias:** `npm audit` puede fallar en el futuro por avisos nuevos sin que cambie el código (no sería un bug de Foundry). `drizzle-kit` 1.0.0-rc.5 ya no depende de `@esbuild-kit`: reevaluar cuando 1.0 sea la versión estable (`latest`).
+
+---
+
+### D-040 — Pruebas con base de datos
+
+**Estado:** Confirmada.
+
+**Decisión:** Los proyectos generados ejecutan los archivos de test en serie (`fileParallelism: false`, ver hallazgo (c) de D-034) y el test de conexión se omite si falta `DATABASE_URL` (Docker es opcional). `verify:generated` usa `VERIFY_DATABASE_URL` o un contenedor desechable, con una base de datos aislada por variante; si no hay Docker, informa "NO VERIFICADO: PostgreSQL". Con T-012a verifica 12 variantes, incluidas backend y fullstack en ts y js con PostgreSQL.
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados.
-- Selección definitiva del ORM mediante una prueba técnica.
+- T-012b: driver y verificación de SQLite (better-sqlite3 con script denegado vs. `@libsql/client`).
 - Confirmación de la licencia AGPL-3.0 y sus implicaciones legales.
 - Política para contribuciones de terceros y posibles licencias comerciales alternativas.
 - Disponibilidad definitiva del nombre Foundry.
