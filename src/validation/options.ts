@@ -37,7 +37,7 @@ const VALID_DATABASES = new Set(["none", "postgres", "sqlite"]);
  */
 export function validateOptions(
   raw: RawOptions,
-): Result<Pick<UserOptions, "modality" | "language" | "database">, ValidationError> {
+): Result<Pick<UserOptions, "modality" | "language" | "database" | "docker">, ValidationError> {
   if (!VALID_MODALITIES.has(raw.modality)) {
     return { ok: false, error: { kind: "invalid_modality", received: raw.modality } };
   }
@@ -51,7 +51,9 @@ export function validateOptions(
     return { ok: false, error: { kind: "invalid_database", received: raw.database } };
   }
 
-  return { ok: true, value: { modality: raw.modality, language: raw.language, database } };
+  const docker = raw.modality === "backend" ? (raw.docker ?? false) : false;
+
+  return { ok: true, value: { modality: raw.modality, language: raw.language, database, docker } };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,7 @@ export async function validateOptionsWithDir(
       modality: baseResult.value.modality,
       language: baseResult.value.language,
       database: baseResult.value.database,
+      docker: baseResult.value.docker,
       outputDir: dirResult.value.resolved,
     },
   };

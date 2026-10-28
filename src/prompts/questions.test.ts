@@ -5,12 +5,14 @@ import type { Mock } from "vitest";
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
   input: vi.fn(),
+  confirm: vi.fn(),
 }));
 
 // Mock de ../types.js no necesario; importamos el módulo real.
-const { select, input } = await import("@inquirer/prompts");
+const { select, input, confirm } = await import("@inquirer/prompts");
 const selectMock = select as Mock;
 const inputMock = input as Mock;
+const confirmMock = confirm as Mock;
 
 // Importamos después del mock para que el módulo recoja el stub.
 const { runPrompts } = await import("./questions.js");
@@ -19,6 +21,7 @@ describe("runPrompts", () => {
   beforeEach(() => {
     selectMock.mockReset();
     inputMock.mockReset();
+    confirmMock.mockReset();
   });
 
   it("devuelve las opciones cuando el usuario completa los prompts en frontend sin preguntar BD", async () => {
@@ -28,10 +31,12 @@ describe("runPrompts", () => {
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(2);
+    expect(confirmMock).not.toHaveBeenCalled();
     expect(result).toEqual({
       modality: "frontend",
       language: "ts",
       database: "none",
+      docker: false,
       outputDir: "./my-app",
     });
   });
@@ -57,15 +62,18 @@ describe("runPrompts", () => {
       .mockResolvedValueOnce("backend")
       .mockResolvedValueOnce("js")
       .mockResolvedValueOnce("postgres");
+    confirmMock.mockResolvedValueOnce(false);
     inputMock.mockResolvedValueOnce("/home/user/projects/api");
 
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(3);
+    expect(confirmMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       modality: "backend",
       language: "js",
       database: "postgres",
+      docker: false,
       outputDir: "/home/user/projects/api",
     });
   });

@@ -17,6 +17,7 @@ export interface RawOptions {
   modality: Modality;
   language: Language;
   database?: Database | undefined;
+  docker?: boolean | undefined;
   /** Ruta tal como la escribe el usuario (puede ser relativa o con `..`). */
   outputDir: string;
 }
@@ -26,6 +27,7 @@ export interface UserOptions {
   modality: Modality;
   language: Language;
   database?: Database | undefined;
+  docker?: boolean | undefined;
   /** Ruta absoluta resuelta y validada del directorio de destino. */
   outputDir: string;
 }

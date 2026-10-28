@@ -489,3 +489,41 @@ describe("generate — persistencia SQLite (T-012b)", () => {
     }
   });
 });
+
+describe("generate — docker opcional en backend", () => {
+  it("(a) sin Docker no se generan Dockerfile, .dockerignore ni compose.yaml", async () => {
+    const dest = await mkTmp("backend-no-docker");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "postgres",
+      docker: false,
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "Dockerfile"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, ".dockerignore"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "compose.yaml"))).rejects.toThrow();
+  });
+
+  it("(b) con Docker se generan y no contienen valores de contraseña literales", async () => {
+    const dest = await mkTmp("backend-with-docker");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "postgres",
+      docker: true,
+      outputDir: dest,
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "Dockerfile"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, ".dockerignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "compose.yaml"))).resolves.toBeUndefined();
+
+    const composeContent = await fs.readFile(path.join(dest, "compose.yaml"), "utf-8");
+    expect(composeContent).toContain("${POSTGRES_PASSWORD:?");
+    expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
+  });
+});

@@ -8,6 +8,8 @@ El roadmap establece prioridades y dependencias. No implica que una funcionalida
 
 El estado real del proyecto debe verificarse en el repositorio y contrastarse con `TASKS.md`.
 
+Por decisión D-044, la Fase 6 (publicación) se ejecuta antes que la Fase 5 (seguridad y autorización), de modo que la versión `0.1.0` se publica sin autenticación, RBAC ni multitenancy.
+
 ## 2. Principios de planificación
 
 - Priorizar un MVP funcional antes de incorporar capacidades avanzadas.
@@ -110,12 +112,15 @@ No se debe seleccionar un ORM únicamente por popularidad ni declarar ambas base
 
 **Objetivo:** ofrecer opciones adicionales sin convertirlas en dependencias obligatorias.
 
-Posibles capacidades:
+Alcance de 0.1.0:
 
 - Docker y Docker Compose.
-- Configuración adicional de pruebas.
 - Documentación de API para los proyectos backend.
 - Internacionalización.
+
+Posteriores a 0.1.0:
+
+- Configuración adicional de pruebas.
 - Configuraciones adicionales de herramientas de desarrollo.
 
 Cada capacidad debe tener dependencias, criterios de compatibilidad y pruebas definidos antes de incorporarse.
@@ -153,6 +158,9 @@ Actividades:
 - Documentar instalación, uso, limitaciones y combinaciones soportadas.
 - Revisar la licencia antes de publicar.
 - Verificar que el paquete publicado funciona en un entorno limpio.
+- Configurar CI en Ubuntu, Windows y macOS antes de publicar (T-016).
+- Hacer público el repositorio antes de publicar en npm, tras revisar el historial y los documentos de licencia y contribución.
+- Verificar el tarball de `npm pack` en Windows antes de `npm publish`.
 
 **Criterio de salida:** una versión puede instalarse y utilizarse desde su distribución publicada siguiendo la documentación.
 
@@ -171,10 +179,13 @@ Todas las fases deben cumplir los siguientes principios:
 
 ## 5. Alcance fuera del MVP
 
+No forman parte de la versión 0.1.0, salvo que se apruebe expresamente:
+
+- Autenticación, RBAC y multitenancy (T-014, versión posterior).
+
 No forman parte del MVP inicial, salvo que se apruebe expresamente:
 
 - Un modo avanzado con gran cantidad de opciones.
-- Autenticación, RBAC y multitenancy.
 - Un catálogo extenso de módulos opcionales.
 - Soporte universal para cualquier combinación tecnológica.
 - Publicación automática de versiones.

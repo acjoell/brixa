@@ -1,4 +1,4 @@
-import { select, input } from "@inquirer/prompts";
+import { select, input, confirm } from "@inquirer/prompts";
 import type { RawOptions, Database } from "../types.js";
 
 /** Directorio de destino por defecto si el usuario no introduce ninguno. */
@@ -42,12 +42,20 @@ export async function runPrompts(): Promise<RawOptions | null> {
       });
     }
 
+    let docker = false;
+    if (modality === "backend") {
+      docker = await confirm({
+        message: "¿Docker?",
+        default: false,
+      });
+    }
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, database, outputDir };
+    return { modality, language, database, docker, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

@@ -175,6 +175,8 @@ La lista anterior no impide diseñar el generador para facilitar futuras ampliac
 
 La primera versión debe demostrar que el proceso de selección, composición, generación y ejecución funciona de principio a fin.
 
+La primera versión pública (`0.1.0`) incluye además Docker y Docker Compose, documentación de API e internacionalización, como capacidades opcionales (D-044). Autenticación, RBAC y multitenancy se publican en una versión posterior.
+
 
 ## 9. Criterios de éxito
 
@@ -195,8 +197,9 @@ El generador debería:
 - Seleccionar el ORM después de una prueba técnica.
 - Definir las versiones estables y combinaciones exactas de Node.js, React, Vite, Express y las herramientas asociadas.
 - Definir la matriz inicial de combinaciones soportadas.
-- Confirmar la licencia del proyecto después de evaluar AGPL-3.0 y las implicaciones para colaboradores y aplicaciones generadas.
-- Definir la política de contribuciones y gestión de derechos sobre el código aportado por terceros.
 - Determinar las herramientas y el proceso para verificar cada combinación generada.
+- Nombre definitivo (D-046; el paquete `foundry` ya existe en npm).
+- Licencia: AGPL-3.0 con concesión sobre el código generado (D-042, provisional). Revisión legal recomendada.
+- Contribuciones: DCO sin CLA (D-043, temporal).
 
 Las decisiones confirmadas y propuestas deben mantenerse registradas en `DECISIONS.md`.

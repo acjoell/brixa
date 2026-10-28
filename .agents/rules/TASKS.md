@@ -32,6 +32,7 @@ No marcar una tarea como completada basándose únicamente en que se hayan cread
 - Registrar las decisiones nuevas en `DECISIONS.md`.
 - Actualizar los estados y añadir tareas derivadas cuando sea necesario.
 - No marcar como soportada una combinación tecnológica que no se haya verificado.
+- Orden de ejecución vigente (D-044): T-013 → T-016 → T-015 → T-014. Los identificadores no se renumeran.
 
 ## 4. Inventario inicial del repositorio
 
@@ -396,18 +397,41 @@ Actividades:
 - Las migraciones, las consultas reales y las comprobaciones de conexión funcionan en las variantes verificadas.
 - La documentación refleja el comportamiento real y las limitaciones de compatibilidad conocidas.
 
-### T-013 — Incorporar capacidades opcionales de desarrollo
+### T-013 — Incorporar capacidades opcionales de desarrollo (incluidas en 0.1.0)
 
-**Estado:** PENDIENTE  
-**Prioridad:** P2  
+**Estado:** PENDIENTE
+**Prioridad:** P1
 **Fase:** 4
+**Dependencia:** T-012
 
-Posibles actividades, que deben evaluarse individualmente:
+Alcance de 0.1.0 (D-044): Docker y Docker Compose, documentación de API e internacionalización. «Configuración adicional de pruebas» queda fuera de 0.1.0.
 
-- Docker y Docker Compose.
-- Configuración adicional de pruebas.
-- Documentación de API.
-- Internacionalización.
+Regla común: cada subtarea requiere antes un diseño breve y una decisión registrada en `DECISIONS.md` (alcance, herramienta elegida, compatibilidad, qué genera cada modalidad). Cada capacidad es opcional, no añade dependencias ni archivos a los proyectos que no la seleccionan, y solo se declara soportada tras verificarse en `verify:generated`.
+
+**T-013a — Docker y Docker Compose opcionales**
+
+**Estado de T-013a:** EN PROGRESO. Fase 1 (Docker en backend, ts y js, sin base de datos, PostgreSQL y SQLite) completada y verificada (22/22 variantes). Fase 2 (aplicación completa) pendiente. Frontend solo queda fuera (D-048). Compatibilidad verificada solo en Linux x64 con Node 24.
+
+- Definir qué genera cada modalidad (frontend, backend, aplicación completa) y su integración con PostgreSQL y SQLite.
+- Sin secretos en los archivos generados; variables de entorno documentadas.
+- Criterios: sin Docker seleccionado, la generación no cambia; con Docker, el proyecto arranca con `docker compose up` según las instrucciones generadas; verificación en `verify:generated` (si no hay Docker, informa «NO VERIFICADO»).
+
+**T-013b — Documentación de API (backend)**
+
+- Evaluar herramientas (por ejemplo OpenAPI con una interfaz de consulta) y registrar la elección.
+- Definir su comportamiento por defecto en producción (no exponer información de la API sin una decisión explícita).
+- Criterios: opcional, solo backend y aplicación completa, JavaScript y TypeScript, documentación coherente con las rutas reales.
+
+**T-013c — Internacionalización (frontend)**
+
+- Evaluar la librería, el formato de mensajes y los idiomas iniciales, y registrar la elección.
+- Criterios: opcional, solo frontend y aplicación completa, JavaScript y TypeScript, sin cambiar la generación de quien no la selecciona.
+
+**Criterios de aceptación globales:**
+
+- Cada capacidad tiene alcance y dependencias documentados.
+- Se activa sin incorporar dependencias innecesarias a otros proyectos.
+- Las combinaciones afectadas se verifican y la matriz de combinaciones se actualiza.
 
 **Criterios de aceptación:**
 
@@ -420,6 +444,7 @@ Posibles actividades, que deben evaluarse individualmente:
 **Estado:** PENDIENTE  
 **Prioridad:** P2  
 **Fase:** 5
+**Dependencia:** T-015 (versión 0.1.0 publicada). Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas.
 
 Actividades:
 
@@ -438,9 +463,10 @@ Actividades:
 
 ### T-015 — Preparar la distribución mediante npm y GitHub
 
-**Estado:** PENDIENTE  
-**Prioridad:** P1  
+**Estado:** PENDIENTE
+**Prioridad:** P1
 **Fase:** 6
+**Dependencias:** T-013 y T-016
 
 Actividades:
 
@@ -450,6 +476,9 @@ Actividades:
 - Preparar el procedimiento de publicación manual.
 - Verificar el paquete en un entorno limpio.
 - Confirmar la licencia antes de publicar.
+- Publicar la versión `0.1.0` (SemVer) con el nombre definitivo (D-046). Si es un paquete con scope, publicarlo con acceso público.
+- Publicar manualmente con 2FA activada en npm y GitHub.
+- Confirmar que la licencia y la concesión sobre código generado (D-042) figuran en el paquete.
 
 **Criterios de aceptación:**
 
@@ -457,6 +486,35 @@ Actividades:
 - Las instrucciones de instalación están actualizadas.
 - El proceso de publicación es reproducible.
 - No se publican secretos ni archivos innecesarios.
+
+### T-016 — CI multiplataforma y preparación del repositorio público
+
+**Estado:** PENDIENTE
+**Prioridad:** P1
+**Fase:** 6
+**Dependencia:** T-013
+**Bloquea:** T-015
+
+Actividades:
+
+- Preparar el repositorio para hacerlo público: revisar el historial de git en busca de secretos y archivos `.env`; añadir `LICENSE` (AGPL-3.0), `GENERATED_CODE_LICENSE.md`, un README público (instalación, uso, combinaciones soportadas, limitaciones, aviso de que 0.1.0 no incluye autenticación ni RBAC ni multitenancy) y `CONTRIBUTING.md` con DCO.
+- Resolver el conflicto de nombre de `SECURITY.md`: el actual es una guía interna de seguridad y GitHub usa ese nombre para la política de reporte de vulnerabilidades. Mover la guía interna (por ejemplo a `docs/`) o añadir al inicio una sección de reporte privado. Activar el reporte privado de vulnerabilidades de GitHub.
+- Decidir el nombre definitivo (D-046) antes de crear el repositorio público.
+- Crear el repositorio y subir el código.
+- Crear `.github/workflows/ci.yml`: matriz `ubuntu-latest`, `windows-latest` y `macos-latest`, con Node 24 y Node 26. Pasos: instalar con `npm ci`, `typecheck`, `lint`, `format:check`, `test`, `build`, `npm pack` y comprobación de su contenido, y `verify:generated` para las variantes que no requieren Docker (frontend, backend sin base de datos y backend/fullstack con SQLite).
+- Job aparte en Linux con PostgreSQL y las variantes que dependen de Docker.
+- Permisos mínimos del workflow (`contents: read`) y acciones fijadas a una versión concreta.
+- Si `verify:generated` no permite seleccionar variantes ni ejecutarse sin Docker, añadir el filtro mínimo necesario (tarea derivada, justificada).
+- Prueba manual: instalar el tarball de `npm pack` en Windows, en un entorno limpio, y generar proyectos.
+- Registrar los fallos de compatibilidad encontrados (rutas, renombrado de `_gitignore` de D-032, rutas `file:` de SQLite, scripts de `package.json`, finales de línea) y corregirlos o documentarlos como limitaciones.
+
+**Criterios de aceptación:**
+
+- La CI pasa en Ubuntu, Windows y macOS para las variantes sin Docker, y en Linux para PostgreSQL y Docker.
+- Se verifica Node 26 o se declara explícitamente que no está soportado.
+- Un tercero ha instalado y usado el tarball en Windows, con el resultado registrado.
+- El repositorio no contiene secretos y los documentos de licencia y contribución están presentes.
+- La compatibilidad declarada en el README coincide con lo verificado.
 
 ## 5. Regla de actualización
 

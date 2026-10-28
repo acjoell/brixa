@@ -408,18 +408,180 @@ function verifyNoDatabaseArtifacts(dir) {
 // Función pública de generación
 // ---------------------------------------------------------------------------
 
+function isDockerComposeV2Available() {
+  try {
+    const out = execFileSync("docker", ["compose", "version"], { stdio: "pipe" }).toString();
+    return out.includes("Docker Compose");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Genera un proyecto en `outputDir` usando el CLI compilado.
  * Requiere que `dist/` ya exista (ejecutar npm run build antes).
  */
-export async function generateProject(modality, language, outputDir, database = "none") {
+export async function generateProject(
+  modality,
+  language,
+  outputDir,
+  database = "none",
+  docker = false,
+) {
   const distGenerate = path.join(root, "dist", "generator", "generate.js");
   const { generate } = await import(distGenerate);
 
-  const result = await generate({ modality, language, database, outputDir });
+  const result = await generate({ modality, language, database, docker, outputDir });
 
   if (!result.ok) {
     throw new Error(`generate() falló: ${JSON.stringify(result.error)}`);
+  }
+}
+
+/** Verifica variantes con Docker usando docker compose */
+async function verifyDockerVariant(projectDir, language, database, variantLabel) {
+  console.log(`\nIniciando verificación Docker para ${variantLabel}...`);
+  if (database === "postgres") {
+    const envFile = path.join(projectDir, ".env");
+    const envContent =
+      [
+        "POSTGRES_USER=foundry_test",
+        "POSTGRES_PASSWORD=foundry_pass_123",
+        "POSTGRES_DB=foundry_db",
+      ].join("\n") + "\n";
+    fs.writeFileSync(envFile, envContent, "utf-8");
+  }
+
+  if (database === "postgres") {
+    run("npm", ["install"], projectDir);
+    const schemaFile = path.join(
+      projectDir,
+      "src",
+      "db",
+      language === "ts" ? "schema.ts" : "schema.js",
+    );
+    const schemaSnippet = `
+import { pgTable, serial, text } from "drizzle-orm/pg-core";
+
+export const testItems = pgTable("test_items", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+});
+`;
+    fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
+    run("npm", ["run", "db:generate"], projectDir);
+  } else if (database === "sqlite") {
+    run("npm", ["install"], projectDir);
+    const schemaFile = path.join(
+      projectDir,
+      "src",
+      "db",
+      language === "ts" ? "schema.ts" : "schema.js",
+    );
+    const schemaSnippet = `
+import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+
+export const testItems = sqliteTable("test_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+});
+`;
+    fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
+    run("npm", ["run", "db:generate"], projectDir);
+  }
+
+  try {
+    run("docker", ["compose", "build"], projectDir);
+    run("docker", ["compose", "up", "-d"], projectDir);
+
+    console.log("Esperando a que el backend esté healthy en Docker...");
+    const startTime = Date.now();
+    let healthy = false;
+    while (Date.now() - startTime < 60000) {
+      try {
+        const out = execFileSync("docker", ["compose", "ps", "backend", "--format", "json"], {
+          cwd: projectDir,
+          stdio: "pipe",
+        }).toString();
+        if (out.includes('"healthy"')) {
+          healthy = true;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (!healthy) {
+      throw new Error("Timeout esperando a que el servicio backend esté healthy en Docker");
+    }
+    console.log("✔ Backend healthy en Docker");
+
+    console.log("Verificando GET http://localhost:3000/health...");
+    const res = await fetch("http://localhost:3000/health");
+    if (res.status !== 200) {
+      throw new Error(`Esperado status 200 en /health, recibido ${res.status}`);
+    }
+    const body = await res.json();
+    if (body.status !== "ok") {
+      throw new Error(`Esperado status: ok en /health, recibido ${JSON.stringify(body)}`);
+    }
+    console.log("✔ GET /health respondió 200 con status: ok");
+
+    if (database === "postgres") {
+      const migrateArgs =
+        language === "ts"
+          ? ["compose", "run", "--rm", "backend", "node", "dist/db/migrate.js"]
+          : ["compose", "run", "--rm", "backend", "npm", "run", "db:migrate"];
+      run("docker", migrateArgs, projectDir);
+
+      const checkSql =
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'test_items';";
+      const checkOut = execFileSync(
+        "docker",
+        [
+          "compose",
+          "exec",
+          "-T",
+          "postgres",
+          "psql",
+          "-U",
+          "foundry_test",
+          "-d",
+          "foundry_db",
+          "-tAc",
+          checkSql,
+        ],
+        { cwd: projectDir, stdio: "pipe" },
+      )
+        .toString()
+        .trim();
+      if (!checkOut.includes("test_items")) {
+        throw new Error("La tabla 'test_items' no existe en PostgreSQL tras migración vía Docker");
+      }
+      console.log("✔ Tabla 'test_items' confirmada en PostgreSQL vía Docker");
+    } else if (database === "sqlite") {
+      const migrateArgs =
+        language === "ts"
+          ? ["compose", "run", "--rm", "backend", "node", "dist/db/migrate.js"]
+          : ["compose", "run", "--rm", "backend", "npm", "run", "db:migrate"];
+      run("docker", migrateArgs, projectDir);
+
+      const checkScript =
+        "import { createClient } from '@libsql/client'; const client = createClient({ url: 'file:./data/app.db' }); const res = await client.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='test_items'\"); client.close(); if (res.rows.length === 0) process.exit(1);";
+      execFileSync("docker", ["compose", "run", "--rm", "backend", "node", "-e", checkScript], {
+        cwd: projectDir,
+        stdio: "pipe",
+      });
+      console.log("✔ Tabla 'test_items' confirmada en SQLite vía Docker");
+    }
+  } finally {
+    console.log("\nLimpiando recursos Docker (docker compose down -v)...");
+    try {
+      execFileSync("docker", ["compose", "down", "-v"], { cwd: projectDir, stdio: "inherit" });
+    } catch {
+      // Ignorar
+    }
   }
 }
 
@@ -428,9 +590,11 @@ export async function generateProject(modality, language, outputDir, database = 
 // ---------------------------------------------------------------------------
 
 async function verifyVariant(variant, step, total, pgContext) {
-  const { modality, language, database = "none" } = variant;
-  const label =
-    database !== "none" ? `${modality}+${language}+${database}` : `${modality}+${language}`;
+  const { modality, language, database = "none", docker = false } = variant;
+  const labelParts = [modality, language];
+  if (database !== "none") labelParts.push(database);
+  if (docker) labelParts.push("docker");
+  const label = labelParts.join("+");
   console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
   const tmpBase = fs.mkdtempSync(
@@ -439,8 +603,20 @@ async function verifyVariant(variant, step, total, pgContext) {
   const projectDir = path.join(tmpBase, "test-project");
 
   try {
-    await generateProject(modality, language, projectDir, database);
+    await generateProject(modality, language, projectDir, database, docker);
     console.log(`Proyecto generado en: ${projectDir}`);
+
+    if (docker) {
+      if (!isDockerComposeV2Available()) {
+        console.log("\n========================================================");
+        console.log("NO VERIFICADO: Docker Compose v2");
+        console.log("========================================================");
+        return;
+      }
+      await verifyDockerVariant(projectDir, language, database, label);
+      console.log(`\n✔ ${label} verificado correctamente`);
+      return;
+    }
 
     const hasPostgres = database === "postgres";
     const hasSqlite = database === "sqlite";
@@ -702,6 +878,12 @@ const VARIANTS = [
   { modality: "backend", language: "js", database: "sqlite" },
   { modality: "fullstack", language: "ts", database: "sqlite" },
   { modality: "fullstack", language: "js", database: "sqlite" },
+  { modality: "backend", language: "ts", database: "none", docker: true },
+  { modality: "backend", language: "js", database: "none", docker: true },
+  { modality: "backend", language: "ts", database: "postgres", docker: true },
+  { modality: "backend", language: "js", database: "postgres", docker: true },
+  { modality: "backend", language: "ts", database: "sqlite", docker: true },
+  { modality: "backend", language: "js", database: "sqlite", docker: true },
 ];
 
 async function main() {

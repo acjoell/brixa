@@ -149,7 +149,7 @@ Las publicaciones serán manuales al principio. Se utilizará versionado semánt
 
 ### D-018 — Licencia AGPL-3.0
 
-**Estado:** Propuesta pendiente de revisión.
+**Estado:** Reemplazada por D-042.
 
 Se evaluará AGPL-3.0 como licencia para el proyecto.
 
@@ -239,17 +239,22 @@ La solución debe ser sencilla de mantener y permitir incorporar nuevas plantill
 
 Resuelta mediante estructura de carpetas hermanas (`frontend/` y `backend/`), dependencias independientes, proxy de desarrollo en Vite con `BACKEND_URL` (por defecto `http://localhost:3000`), rewrite `/^\/api(?=\/|$)/`, overlay de `vite.config` en `src/templates/fullstack/`, `README.md` raíz y sin `.gitignore` raíz. Matriz de seis combinaciones verificada. P-002 sigue pendiente para confirmación de versiones de dependencias de proyectos generados. Deuda técnica declarada: dos terminales para desarrollar, producción sin resolver y aviso de esbuild.
 
-### P-005 — Criterios de aceptación del MVP
+### P-005 — Criterios de aceptación de 0.1.0
 
-**Estado:** Pendiente de definición.
+**Estado:** Resuelta. Aprobada por el responsable el 2026-10-28.
 
-Se deben establecer criterios verificables para considerar funcional cada combinación soportada.
+La versión `0.1.0` se considera lista cuando se cumple todo lo siguiente:
 
-Como mínimo, las pruebas deben comprobar la generación de archivos, la instalación de dependencias, la ejecución de herramientas de calidad, el inicio de la aplicación y las pruebas automatizadas que correspondan.
-
+- Todas las variantes de la matriz (frontend, backend y fullstack; ts y js; sin base de datos, PostgreSQL y SQLite; con y sin las capacidades de T-013) se generan, se instalan, pasan lint, tipos, tests y `npm audit --audit-level=moderate`, y arrancan.
+- La CI es verde en Ubuntu, Windows y macOS para las variantes sin Docker, y en Linux para PostgreSQL y Docker.
+- Node 26 está verificado o se declara no soportado.
+- El tarball de `npm pack` se instala y funciona en un entorno limpio, incluido Windows.
+- El README público incluye combinaciones soportadas, limitaciones y el aviso de que no incluye autenticación, RBAC ni multitenancy.
+- `LICENSE`, `GENERATED_CODE_LICENSE.md` y `CONTRIBUTING.md` están presentes y no hay secretos en el historial.
+- La deuda de `redact` está cerrada.
 ### P-006 — Evaluación definitiva de la licencia
 
-**Estado:** Pendiente de revisión.
+**Estado:** Resuelta de forma provisional por D-042 (revisable).
 
 AGPL-3.0 es la licencia candidata, pero su adopción definitiva requiere revisar sus implicaciones para el generador, las plantillas, las contribuciones externas y la distribución de los proyectos generados.
 
@@ -257,7 +262,7 @@ No debe considerarse definitiva hasta completar la evaluación correspondiente.
 
 ### P-007 — Confirmación del nombre del proyecto
 
-**Estado:** Pendiente de verificación.
+**Estado:** Pendiente. Comprobado el 2026-10-28: el paquete npm «foundry» ya existe; «create-foundry-app» está ocupado por otro producto (FoundryDB); «@acjoell/foundry» está libre y no se encontró el repositorio acjoell/foundry en GitHub. Ver D-046.
 
 Foundry es el nombre provisional del proyecto.
 
@@ -587,14 +592,113 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Alternativas consideradas:** `better-sqlite3` con script de instalación denegado (no funciona en el entorno probado) y con script permitido (requiere compilación).
 
+---
+
+### D-042 — Licencia AGPL-3.0 y concesión sobre el código generado
+
+**Estado:** Confirmada (provisional, revisable). Reemplaza a D-018 y resuelve P-006 de forma provisional.
+
+**Contexto:** D-018 dejaba AGPL-3.0 como propuesta. El responsable quiere una herramienta abierta y comunitaria, sin restringir las aplicaciones creadas con ella.
+
+**Decisión:** El CLI y las plantillas se distribuyen bajo AGPL-3.0. El código generado por Foundry puede usarse, modificarse, distribuirse y licenciarse libremente, incluso con fines comerciales y bajo la licencia que elija quien lo genera. La concesión se documenta en el README público y en `GENERATED_CODE_LICENSE.md`, junto al `LICENSE`.
+
+**Motivo:** Las plantillas forman parte del CLI y se copian a los proyectos de los usuarios. Sin una concesión expresa, esa copia podría interpretarse como material AGPL.
+
+**Consecuencias:**
+- La concesión solo cubre código del que el responsable sea titular. Las contribuciones de terceros a las plantillas deben aceptar la concesión (ver D-043 y CONTRIBUTING.md).
+- Sin CLA no podrá relicenciarse el código aportado por terceros sin su consentimiento.
+- Algunas empresas prohíben instalar herramientas AGPL. Puede frenar la adopción corporativa.
+- Se recomienda una revisión legal del texto de la concesión antes de endurecer la política de licencias. No bloquea `0.1.0`.
+
+**Alternativas consideradas:** MIT o Apache-2.0 (más permisivas, sin protección frente a versiones modificadas cerradas); licencia dual con licencia comercial (descartada por ahora para no complicar el proyecto).
+
+---
+
+### D-043 — Contribuciones con DCO, sin CLA
+
+**Estado:** Confirmada (temporal, revisable).
+
+**Decisión:** Se aceptan issues y pull requests. Cada commit lleva `Signed-off-by` (Developer Certificate of Origin, `git commit -s`). No hay CLA ni licencia comercial alternativa. El mantenedor decide qué se incorpora. Al contribuir, la persona acepta que su aportación se distribuye bajo AGPL-3.0 y con la concesión sobre código generado de D-042.
+
+**Consecuencias:** Mínima burocracia. No se puede ofrecer licencia comercial del código ajeno sin pedir permiso. Si esa opción se quiere abrir en el futuro habrá que introducir un CLA.
+
+---
+
+### D-044 — Alcance de 0.1.0 y orden de entrega
+
+**Estado:** Confirmada.
+
+**Decisión:** La primera versión pública es `0.1.0` y contiene el MVP técnico (T-001 a T-012) más T-013 (Docker y Docker Compose, documentación de API e i18n), T-016 (CI multiplataforma) y T-015 (publicación). Orden: T-013 → T-016 → T-015 → T-014. Autenticación, RBAC y multitenancy (T-014) se publican en una versión posterior.
+
+**Motivo:** Mostrar una versión útil, documentada y verificada cuanto antes, sin esperar a la parte de seguridad. El README debe indicar explícitamente que `0.1.0` no incluye autenticación, RBAC ni multitenancy.
+
+**Consecuencias:** D-015 sigue vigente: esas capacidades quedan fuera del MVP técnico y de `0.1.0`. `ROADMAP.md` ejecuta la Fase 6 antes que la Fase 5. «Configuración adicional de pruebas» (antes en T-013) no forma parte de `0.1.0`.
+
+---
+
+### D-045 — Publicación gradual: repositorio, CI y npm
+
+**Estado:** Confirmada.
+
+**Decisión:** El repositorio se hace público en GitHub antes de publicar en npm. Antes de `npm publish` se comprueba el CLI en Ubuntu, Windows y macOS mediante GitHub Actions (T-016) y mediante una instalación manual en Windows a partir del tarball de `npm pack`. Las variantes con PostgreSQL o Docker solo se verifican en Linux.
+
+**Consecuencias:** Los fallos de compatibilidad que aparezcan se corrigen o se documentan como limitaciones antes de publicar. Hasta entonces, la compatibilidad declarada sigue siendo Linux x64 con Node 24.
+
+---
+
+### D-046 — Nombre del proyecto
+
+**Estado:** Propuesta (pendiente de aprobación).
+
+**Contexto:** Comprobado por el responsable el 2026-10-28: `foundry` ya existe en npm; `create-foundry-app` pertenece a FoundryDB; `@acjoell/foundry` está libre; no se encontró `acjoell/foundry` en GitHub. «Foundry» también es el nombre de otros productos conocidos (confusión en buscadores y marca).
+
+**Decisión pendiente:** elegir un nombre definitivo. Hasta que se apruebe, no se renombra nada (`package.json`, `bin`, token `foundry-tpl` de D-032, documentación, repositorio).
+
+**Criterios:** que `@acjoell/<nombre>` esté libre (el scope evita colisiones de paquete), que el nombre de comando no choque con herramientas existentes, que no haya un producto conocido con el mismo nombre y que el repositorio `acjoell/<nombre>` esté libre.
+
+**Candidatos (sin verificar):** Fragua, Moldkit, Forjakit, Smeltkit, Castwork, Crisol. Lista y script de comprobación en la sección 6.
+
+**Consecuencias:** Renombrar es más barato antes de publicar. Afecta a metadatos del paquete, comando, token de plantillas, documentación y nombre del repositorio.
+
+---
+
+### D-047 — Docker y Docker Compose opcionales en backend (T-013a, fase 1)
+
+**Estado:** Confirmada.
+
+**Decisión:** El CLI pregunta «¿Docker?» (por defecto No) solo para backend. Con Docker genera `Dockerfile` multi-etapa (`node:24.22.1-slim`, usuario no root, solo dependencias de producción), `.dockerignore` y `compose.yaml` (servicio `backend`, más `postgres:17` o un volumen para `data/` en SQLite). Sin Docker, la generación no cambia. Frontend y fullstack quedan para la fase 2.
+
+**Migraciones:** explícitas, como en D-037. En JavaScript: `docker compose run --rm backend npm run db:migrate`. En TypeScript: `docker compose run --rm backend node dist/db/migrate.js` (ejecuta el JS compilado; `tsx` es una devDependency y no existe en la imagen de producción). `db:generate` se ejecuta en el host antes de construir la imagen para que `drizzle/` exista en ella.
+
+**Secretos:** `compose.yaml` no contiene valores de contraseña; `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica.
+
+**Requisitos:** Docker Compose v2 (`docker compose`). Sin una versión mínima verificada.
+
+**Alternativas consideradas:** etapa o servicio de migración aparte (más complejidad); `tsx` en dependencias de producción (contradice D-037); fallback `node ... || tsx ...` (comportamiento implícito).
+
+**Consecuencias:** `verify:generated` verifica las 6 variantes de backend con Docker; sin Docker informa «NO VERIFICADO». Los comandos de migración difieren entre ts y js y están documentados en el README del backend.
+
+---
+
+### D-048 — Docker solo en backend y aplicación completa
+
+**Estado:** Confirmada (revisable).
+
+**Decisión:** Docker y Docker Compose se ofrecen únicamente en backend y aplicación completa. La modalidad «solo frontend» no ofrece Docker.
+
+**Motivo:** Un frontend estático suele desplegarse en hosting estático o CDN; un contenedor solo para él añade complejidad sin valor claro. En la aplicación completa, Docker permite levantar todos los servicios con un comando.
+
+**Consecuencias:** T-013a fase 2 cubre solo fullstack. Se reevaluará si aparece una necesidad concreta.
+
+---
 
 ## 5. Cuestiones pendientes
 
-- P-002: confirmación definitiva de versiones de dependencias de proyectos generados.
-- T-012b: driver y verificación de SQLite (better-sqlite3 con script denegado vs. `@libsql/client`).
-- Confirmación de la licencia AGPL-3.0 y sus implicaciones legales.
-- Política para contribuciones de terceros y posibles licencias comerciales alternativas.
-- Disponibilidad definitiva del nombre Foundry.
+- P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).
+- P-007 / D-046: nombre definitivo.
+- Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
+- Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia.
+- Reevaluar Drizzle Kit 1.0 estable por los avisos de `@esbuild-kit` (D-039).
 
 
 ## 6. Registro de nuevas decisiones

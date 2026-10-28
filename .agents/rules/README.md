@@ -37,7 +37,11 @@ Las decisiones marcadas como pendientes no deben tratarse como requisitos confir
 - Docker opcional.
 - Autenticación, RBAC y multitenancy previstos para etapas posteriores.
 - Código fuente en GitHub y distribución mediante npm.
-- Licencia AGPL-3.0 bajo evaluación, todavía no confirmada.
+- Código fuente en GitHub (público antes de publicar en npm) y distribución mediante npm.
+- Licencia AGPL-3.0 para el CLI y las plantillas; el código generado puede usarse y licenciarse libremente, incluso comercialmente (D-042).
+- Contribuciones con DCO, sin CLA (D-043).
+- Versión 0.1.0: MVP técnico + Docker, documentación de API e i18n; autenticación, RBAC y multitenancy después (D-044).
+- Nombre: Foundry es provisional y el paquete `foundry` ya existe en npm (D-046).
 
 Consulta `DECISIONS.md` para conocer el estado y la justificación de cada decisión.
 
@@ -50,7 +54,3 @@ Consulta `DECISIONS.md` para conocer el estado y la justificación de cada decis
 - Inspeccionar el código existente antes de modificarlo.
 - Verificar los cambios con pruebas y herramientas disponibles.
 - Comunicar las limitaciones y los aspectos que no se hayan verificado.
-
-## Documentos adicionales
-
-`ROADMAP.md`, `TASKS.md` y `AGENTS.md` ya forman parte de la documentación del proyecto.

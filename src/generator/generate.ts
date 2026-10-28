@@ -377,6 +377,115 @@ async function applySqliteOverlay(targetBackendDir: string, language: Language):
 }
 
 // ---------------------------------------------------------------------------
+// Modificadores de archivos para overlay Docker
+// ---------------------------------------------------------------------------
+
+async function appendEnvExampleDockerPostgres(envPath: string): Promise<void> {
+  const content = `
+# Configuración para Docker Compose
+# POSTGRES_PASSWORD es obligatoria para docker compose y debe ser alfanumérica.
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=ejemplo123
+POSTGRES_DB=app
+`;
+  try {
+    const existing = await fs.readFile(envPath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(envPath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(envPath, content.trimStart(), "utf-8");
+  }
+}
+
+async function appendBackendReadmeDocker(
+  readmePath: string,
+  language: Language,
+  database: Database,
+): Promise<void> {
+  const isTs = language === "ts";
+  const hasDb = database === "postgres" || database === "sqlite";
+
+  let dbSection = "";
+  if (hasDb) {
+    const migrateCmd = isTs
+      ? "docker compose run --rm backend node dist/db/migrate.js"
+      : "docker compose run --rm backend npm run db:migrate";
+
+    dbSection = `
+### Migraciones de base de datos
+
+> **Importante:** \`npm run db:generate\` debe ejecutarse en el host ANTES de construir la imagen, porque el directorio \`drizzle/\` debe existir en ella.
+
+Aplica las migraciones en la base de datos dentro del contenedor:
+
+\`\`\`bash
+${migrateCmd}
+\`\`\`
+`;
+  }
+
+  const content = `
+## Docker
+
+### Requisitos
+
+- Docker con Docker Compose v2 (\`docker compose\`).
+
+### Arranque
+
+1. Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo \`.env\` (en PostgreSQL, \`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
+2. Construye e inicia los servicios:
+
+\`\`\`bash
+docker compose up -d
+\`\`\`
+
+El backend estará disponible en \`http://localhost:3000\` y expondrá su ruta de salud en \`http://localhost:3000/health\`.
+${dbSection}
+### Limitaciones
+
+- Diseñado para desarrollo y pruebas locales en contenedores.
+- Cualquier modificación en el código fuente requiere reconstruir la imagen (\`docker compose build\` o \`docker compose up --build\`).
+`;
+
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+async function applyDockerOverlay(
+  targetBackendDir: string,
+  language: Language,
+  database: Database,
+): Promise<void> {
+  const dockerTemplates = path.join(templatesDir(), "docker");
+
+  // 1. Dockerfile
+  const dockerfileSrc = path.join(dockerTemplates, language, "Dockerfile");
+  await fs.copyFile(dockerfileSrc, path.join(targetBackendDir, "Dockerfile"));
+
+  // 2. .dockerignore
+  const dockerignoreSrc = path.join(dockerTemplates, "_dockerignore");
+  await fs.copyFile(dockerignoreSrc, path.join(targetBackendDir, ".dockerignore"));
+
+  // 3. compose.yaml
+  const composeSrc = path.join(dockerTemplates, `compose.${database}.yaml`);
+  await fs.copyFile(composeSrc, path.join(targetBackendDir, "compose.yaml"));
+
+  // 4. Variables de compose en .env.example si usa postgres
+  if (database === "postgres") {
+    await appendEnvExampleDockerPostgres(path.join(targetBackendDir, ".env.example"));
+  }
+
+  // 5. Sección Docker en README.md
+  await appendBackendReadmeDocker(path.join(targetBackendDir, "README.md"), language, database);
+}
+
+// ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
 
@@ -474,6 +583,9 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       } else if (database === "sqlite") {
         await applySqliteOverlay(outputDir, language);
       }
+      if (options.docker) {
+        await applyDockerOverlay(outputDir, language, database);
+      }
     }
 
     return { ok: true };
@@ -510,8 +622,13 @@ async function copyDir(src: string, dest: string, projectName: string): Promise<
 
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
-    // _gitignore → .gitignore
-    const destName = entry.name === "_gitignore" ? ".gitignore" : entry.name;
+    // _gitignore → .gitignore, _dockerignore → .dockerignore
+    const destName =
+      entry.name === "_gitignore"
+        ? ".gitignore"
+        : entry.name === "_dockerignore"
+          ? ".dockerignore"
+          : entry.name;
     const destPath = path.join(dest, destName);
 
     if (entry.name === "package.json") {
@@ -661,6 +778,8 @@ export function nextStepsMessage(
   outputDir: string,
   modality?: Modality,
   database?: Database,
+  docker?: boolean,
+  language?: Language,
 ): string {
   const name = path.basename(outputDir);
 
@@ -715,6 +834,10 @@ export function nextStepsMessage(
     "  npm run dev",
   ];
 
+  if (docker) {
+    lines.push("", "  # O con Docker:", "  docker compose up -d");
+  }
+
   if (database === "postgres") {
     lines.push(
       "",
@@ -723,6 +846,13 @@ export function nextStepsMessage(
       "  # 2. Define tus tablas en src/db/schema",
       "  # 3. Genera y aplica migraciones: npm run db:generate && npm run db:migrate",
     );
+    if (docker) {
+      const migrateCmd =
+        language === "ts"
+          ? "docker compose run --rm backend node dist/db/migrate.js"
+          : "docker compose run --rm backend npm run db:migrate";
+      lines.push("  #    En Docker:", `  #    ${migrateCmd}`);
+    }
   } else if (database === "sqlite") {
     lines.push(
       "",
@@ -731,6 +861,13 @@ export function nextStepsMessage(
       "  # 2. Define tus tablas en src/db/schema",
       "  # 3. Genera y aplica migraciones: npm run db:generate && npm run db:migrate",
     );
+    if (docker) {
+      const migrateCmd =
+        language === "ts"
+          ? "docker compose run --rm backend node dist/db/migrate.js"
+          : "docker compose run --rm backend npm run db:migrate";
+      lines.push("  #    En Docker:", `  #    ${migrateCmd}`);
+    }
   }
 
   lines.push("");
