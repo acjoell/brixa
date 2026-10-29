@@ -43,7 +43,7 @@ export async function runPrompts(): Promise<RawOptions | null> {
     }
 
     let docker = false;
-    if (modality === "backend") {
+    if (modality === "backend" || modality === "fullstack") {
       docker = await confirm({
         message: "¿Docker?",
         default: false,

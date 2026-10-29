@@ -527,3 +527,74 @@ describe("generate — docker opcional en backend", () => {
     expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
   });
 });
+
+describe("generate — docker opcional en fullstack", () => {
+  it("(a) fullstack sin Docker no genera compose.yaml, Dockerfiles ni .gitignore raíz, y frontend solo no genera archivos Docker aunque se pida", async () => {
+    // 1. Fullstack sin Docker
+    const fullstackDest = await mkTmp("fullstack-no-docker");
+    const fullstackRes = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "postgres",
+      docker: false,
+      outputDir: fullstackDest,
+    });
+    expect(fullstackRes.ok).toBe(true);
+    await expect(fs.access(path.join(fullstackDest, "compose.yaml"))).rejects.toThrow();
+    await expect(fs.access(path.join(fullstackDest, ".gitignore"))).rejects.toThrow();
+    await expect(fs.access(path.join(fullstackDest, "frontend", "Dockerfile"))).rejects.toThrow();
+    await expect(fs.access(path.join(fullstackDest, "backend", "Dockerfile"))).rejects.toThrow();
+
+    // 2. Frontend solo con docker: true (debe ignorarse)
+    const frontendDest = await mkTmp("frontend-with-docker");
+    const frontendRes = await generate({
+      modality: "frontend",
+      language: "ts",
+      docker: true,
+      outputDir: frontendDest,
+    });
+    expect(frontendRes.ok).toBe(true);
+    await expect(fs.access(path.join(frontendDest, "Dockerfile"))).rejects.toThrow();
+    await expect(fs.access(path.join(frontendDest, ".dockerignore"))).rejects.toThrow();
+    await expect(fs.access(path.join(frontendDest, "compose.yaml"))).rejects.toThrow();
+  });
+
+  it("(b) fullstack con Docker genera los archivos, el .gitignore raíz contiene .env, y compose.yaml no contiene contraseñas literales", async () => {
+    // Comprobar que la plantilla del repositorio se llama _gitignore
+    const templateGitignorePath = path.resolve(
+      fileURLToPath(import.meta.url),
+      "../../templates/docker/fullstack/_gitignore",
+    );
+    await expect(fs.access(templateGitignorePath)).resolves.toBeUndefined();
+
+    const dest = await mkTmp("fullstack-with-docker");
+    const result = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "postgres",
+      docker: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    // Archivos generados
+    await expect(fs.access(path.join(dest, "compose.yaml"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, ".gitignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "_gitignore"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "frontend", "Dockerfile"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "frontend", "nginx.conf"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "frontend", ".dockerignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "backend", "Dockerfile"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "backend", ".dockerignore"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "backend", "compose.yaml"))).rejects.toThrow();
+
+    // .gitignore raíz contiene .env
+    const gitignoreContent = await fs.readFile(path.join(dest, ".gitignore"), "utf-8");
+    expect(gitignoreContent.trim()).toBe(".env");
+
+    // compose.yaml no contiene contraseñas literales
+    const composeContent = await fs.readFile(path.join(dest, "compose.yaml"), "utf-8");
+    expect(composeContent).toContain("${POSTGRES_PASSWORD:?");
+    expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
+  });
+});

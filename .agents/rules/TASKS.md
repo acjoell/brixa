@@ -410,7 +410,7 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 **T-013a — Docker y Docker Compose opcionales**
 
-**Estado de T-013a:** EN PROGRESO. Fase 1 (Docker en backend, ts y js, sin base de datos, PostgreSQL y SQLite) completada y verificada (22/22 variantes). Fase 2 (aplicación completa) pendiente. Frontend solo queda fuera (D-048). Compatibilidad verificada solo en Linux x64 con Node 24.
+**Estado de T-013a:** COMPLETADA. Docker y Docker Compose opcionales en backend y aplicación completa (ts y js; sin base de datos, PostgreSQL y SQLite), verificados en `verify:generated` (28/28 variantes). Frontend solo queda sin Docker (D-048). Compatibilidad verificada solo en Linux x64 con Node 24.
 
 - Definir qué genera cada modalidad (frontend, backend, aplicación completa) y su integración con PostgreSQL y SQLite.
 - Sin secretos en los archivos generados; variables de entorno documentadas.

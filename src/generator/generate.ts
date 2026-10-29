@@ -433,8 +433,9 @@ ${migrateCmd}
 
 ### Arranque
 
-1. Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo \`.env\` (en PostgreSQL, \`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
-2. Construye e inicia los servicios:
+1. Se recomienda ejecutar \`npm install\` antes de \`docker compose build\` para fijar el archivo de bloqueo (\`package-lock.json\`).
+2. Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo \`.env\` (en PostgreSQL, \`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
+3. Construye e inicia los servicios:
 
 \`\`\`bash
 docker compose up -d
@@ -446,6 +447,67 @@ ${dbSection}
 
 - Diseñado para desarrollo y pruebas locales en contenedores.
 - Cualquier modificación en el código fuente requiere reconstruir la imagen (\`docker compose build\` o \`docker compose up --build\`).
+`;
+
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+async function appendRootReadmeDockerFullstack(
+  readmePath: string,
+  language: Language,
+  database: Database,
+): Promise<void> {
+  const isTs = language === "ts";
+  const hasDb = database === "postgres" || database === "sqlite";
+
+  let dbSection = "";
+  if (hasDb) {
+    const migrateCmd = isTs
+      ? "docker compose run --rm backend node dist/db/migrate.js"
+      : "docker compose run --rm backend npm run db:migrate";
+
+    dbSection = `
+### Migraciones de base de datos
+
+> **Importante:** \`npm run db:generate\` debe ejecutarse dentro de \`backend/\` en el host ANTES de construir la imagen, porque el directorio \`drizzle/\` debe existir en ella.
+
+Aplica las migraciones en la base de datos desde la raíz del proyecto:
+
+\`\`\`bash
+${migrateCmd}
+\`\`\`
+`;
+  }
+
+  const content = `
+## Docker
+
+### Requisitos
+
+- Docker con Docker Compose v2 (\`docker compose\`).
+
+### Arranque
+
+1. Se recomienda ejecutar \`npm install\` en \`frontend/\` y \`backend/\` antes de \`docker compose build\` para fijar los archivos de bloqueo (\`package-lock.json\`).
+2. Si utilizas PostgreSQL, configura las variables de entorno requeridas en el archivo \`.env\` de la raíz (\`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
+3. Construye e inicia los servicios:
+
+\`\`\`bash
+docker compose up -d
+\`\`\`
+
+La aplicación web estará disponible en \`http://localhost:8080\` y la API responderá a través del proxy en \`http://localhost:8080/api/health\`.
+${dbSection}
+### Limitaciones
+
+- Diseñado para desarrollo y pruebas locales en contenedores.
+- Cualquier modificación en el código fuente requiere reconstruir las imágenes (\`docker compose build\` o \`docker compose up --build\`).
 `;
 
   try {
@@ -483,6 +545,56 @@ async function applyDockerOverlay(
 
   // 5. Sección Docker en README.md
   await appendBackendReadmeDocker(path.join(targetBackendDir, "README.md"), language, database);
+}
+
+async function applyFullstackDockerOverlay(
+  outputDir: string,
+  frontendDest: string,
+  backendDest: string,
+  language: Language,
+  database: Database,
+): Promise<void> {
+  const dockerTemplates = path.join(templatesDir(), "docker");
+  const fullstackTemplates = path.join(dockerTemplates, "fullstack");
+
+  // 1. Backend: Dockerfile y .dockerignore (sin compose.yaml)
+  const backendDockerfileSrc = path.join(dockerTemplates, language, "Dockerfile");
+  await fs.copyFile(backendDockerfileSrc, path.join(backendDest, "Dockerfile"));
+  const backendDockerignoreSrc = path.join(dockerTemplates, "_dockerignore");
+  await fs.copyFile(backendDockerignoreSrc, path.join(backendDest, ".dockerignore"));
+
+  // 2. Frontend: Dockerfile, nginx.conf y .dockerignore
+  const frontendTemplates = path.join(fullstackTemplates, "frontend");
+  await fs.copyFile(
+    path.join(frontendTemplates, "Dockerfile"),
+    path.join(frontendDest, "Dockerfile"),
+  );
+  await fs.copyFile(
+    path.join(frontendTemplates, "_dockerignore"),
+    path.join(frontendDest, ".dockerignore"),
+  );
+  await fs.copyFile(
+    path.join(frontendTemplates, "nginx.conf"),
+    path.join(frontendDest, "nginx.conf"),
+  );
+
+  // 3. Raíz: compose.yaml
+  const composeSrc = path.join(fullstackTemplates, `compose.${database}.yaml`);
+  await fs.copyFile(composeSrc, path.join(outputDir, "compose.yaml"));
+
+  // 4. Raíz: .gitignore (renombrado explícito de _gitignore)
+  await fs.copyFile(
+    path.join(fullstackTemplates, "_gitignore"),
+    path.join(outputDir, ".gitignore"),
+  );
+
+  // 5. Raíz: .env.example si usa postgres
+  if (database === "postgres") {
+    await appendEnvExampleDockerPostgres(path.join(outputDir, ".env.example"));
+  }
+
+  // 6. Raíz: README.md sección Docker
+  await appendRootReadmeDockerFullstack(path.join(outputDir, "README.md"), language, database);
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +661,10 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       } else if (database === "sqlite") {
         await applySqliteOverlay(backendDest, language);
         await appendRootReadmeDatabaseSqlite(path.join(outputDir, "README.md"));
+      }
+
+      if (options.docker) {
+        await applyFullstackDockerOverlay(outputDir, frontendDest, backendDest, language, database);
       }
 
       return { ok: true };
@@ -802,14 +918,32 @@ export function nextStepsMessage(
       "  npm run dev",
     ];
 
+    if (docker) {
+      lines.push(
+        "",
+        "  # O con Docker:",
+        "  # (Recomendado: ejecuta npm install en frontend/ y backend/ antes de construir para fijar el lockfile)",
+        "  docker compose up -d",
+        "  # Aplicación web disponible en: http://localhost:8080",
+        "  # Ruta de salud: http://localhost:8080/api/health",
+      );
+    }
+
     if (database === "postgres") {
       lines.push(
         "",
         "  # Base de datos (PostgreSQL):",
-        "  # 1. Configura DATABASE_URL en backend/.env",
+        "  # 1. Configura DATABASE_URL en backend/.env (o .env en la raíz para Docker)",
         "  # 2. Define tus tablas en backend/src/db/schema",
         "  # 3. Genera y aplica migraciones: cd backend && npm run db:generate && npm run db:migrate",
       );
+      if (docker) {
+        const migrateCmd =
+          language === "ts"
+            ? "docker compose run --rm backend node dist/db/migrate.js"
+            : "docker compose run --rm backend npm run db:migrate";
+        lines.push("  #    En Docker (desde la raíz):", `  #    ${migrateCmd}`);
+      }
     } else if (database === "sqlite") {
       lines.push(
         "",
@@ -818,6 +952,13 @@ export function nextStepsMessage(
         "  # 2. Define tus tablas en backend/src/db/schema",
         "  # 3. Genera y aplica migraciones: cd backend && npm run db:generate && npm run db:migrate",
       );
+      if (docker) {
+        const migrateCmd =
+          language === "ts"
+            ? "docker compose run --rm backend node dist/db/migrate.js"
+            : "docker compose run --rm backend npm run db:migrate";
+        lines.push("  #    En Docker (desde la raíz):", `  #    ${migrateCmd}`);
+      }
     }
 
     lines.push("");
@@ -835,7 +976,12 @@ export function nextStepsMessage(
   ];
 
   if (docker) {
-    lines.push("", "  # O con Docker:", "  docker compose up -d");
+    lines.push(
+      "",
+      "  # O con Docker:",
+      "  # (Recomendado: ejecuta npm install antes de docker compose build para fijar el lockfile)",
+      "  docker compose up -d",
+    );
   }
 
   if (database === "postgres") {

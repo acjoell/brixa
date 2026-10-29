@@ -51,7 +51,8 @@ export function validateOptions(
     return { ok: false, error: { kind: "invalid_database", received: raw.database } };
   }
 
-  const docker = raw.modality === "backend" ? (raw.docker ?? false) : false;
+  const docker =
+    raw.modality === "backend" || raw.modality === "fullstack" ? (raw.docker ?? false) : false;
 
   return { ok: true, value: { modality: raw.modality, language: raw.language, database, docker } };
 }

@@ -692,6 +692,22 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 ---
 
+### D-049 — Docker y Docker Compose en aplicación completa (T-013a, fase 2)
+
+**Estado:** Confirmada.
+
+**Decisión:** El CLI pregunta «¿Docker?» (por defecto No) también en aplicación completa. Con Docker genera `compose.yaml` en la raíz con los servicios `backend`, `frontend` y, según la base de datos, `postgres:17` o un volumen para `data/` en SQLite. El backend reutiliza su `Dockerfile` (D-047). El frontend se construye con `node:24.22.1-slim` y se sirve con `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, sin privilegios, con fallback SPA y proxy de `/api/` al backend quitando el prefijo (misma semántica que el rewrite de Vite de D-034). Solo el frontend publica puerto al host (8080); backend y PostgreSQL permanecen internos. Sin Docker, la generación no cambia.
+
+**Secretos y `.gitignore` raíz:** `POSTGRES_PASSWORD` es obligatoria, sin valor por defecto. Como Compose lee el `.env` de la raíz y los `.gitignore` de `frontend/` y `backend/` no lo cubren, con Docker se genera un `.gitignore` raíz que contiene solo `.env`. Esto matiza D-034 (fullstack sin `.gitignore` raíz): sigue sin existir cuando no se elige Docker. La plantilla se guarda como `_gitignore` y se copia con renombrado explícito, porque `copyDir()` (D-032) solo se aplica a las subcarpetas y npm descarta los `.gitignore` en los paquetes publicados.
+
+**Lockfile:** el CLI no genera `package-lock.json`. El `Dockerfile` mantiene el fallback a `npm install`; los README y las instrucciones finales indican ejecutar `npm install` antes de `docker compose build` para fijar versiones.
+
+**Migraciones:** explícitas, desde la raíz, con los comandos de D-047 (ts: `node dist/db/migrate.js`; js: `npm run db:migrate`).
+
+**Consecuencias:** `verify:generated` verifica 28 variantes, con las 6 de fullstack con Docker (incluidos `/`, `/api/health` por nginx y que el backend no es accesible desde el host). Se descarta Docker para frontend solo (D-048). Verificado solo en Linux x64 con Node 24 y Docker Compose v2. La etiqueta de nginx debe revisarse periódicamente por parches de seguridad.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).
