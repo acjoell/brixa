@@ -598,3 +598,57 @@ describe("generate — docker opcional en fullstack", () => {
     expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
   });
 });
+
+describe("generate — apiDocs opcional", () => {
+  it("(a) sin documentación no se generan la especificación, la dependencia ni cambios en .env.example", async () => {
+    const dest = await mkTmp("backend-no-docs");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      apiDocs: false,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    await expect(fs.access(path.join(dest, "src", "docs", "openapi.json"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "tests", "docs.test.ts"))).rejects.toThrow();
+
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      allowScripts?: Record<string, boolean>;
+    };
+    expect(pkg.dependencies?.["swagger-ui-express"]).toBeUndefined();
+    expect(pkg.allowScripts?.["@scarf/scarf"]).toBeUndefined();
+
+    const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
+    expect(envContent).not.toContain("ENABLE_API_DOCS");
+  });
+
+  it("(b) con documentación se generan la especificación, la dependencia swagger-ui-express con versión exacta, @scarf/scarf false en allowScripts y ENABLE_API_DOCS=false en .env.example", async () => {
+    const dest = await mkTmp("backend-with-docs");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      apiDocs: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    await expect(
+      fs.access(path.join(dest, "src", "docs", "openapi.json")),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "tests", "docs.test.ts"))).resolves.toBeUndefined();
+
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      allowScripts?: Record<string, boolean>;
+    };
+    expect(pkg.dependencies?.["swagger-ui-express"]).toBe("5.0.1");
+    expect(pkg.devDependencies?.["@types/swagger-ui-express"]).toBe("4.1.8");
+    expect(pkg.allowScripts?.["@scarf/scarf"]).toBe(false);
+
+    const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
+    expect(envContent).toContain("ENABLE_API_DOCS=false");
+  });
+});

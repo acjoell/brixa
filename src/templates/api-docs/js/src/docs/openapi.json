@@ -1,0 +1,35 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Backend API",
+    "version": "1.0.0",
+    "description": "Especificación OpenAPI para la API del backend."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Comprobación de salud",
+        "description": "Devuelve el estado de disponibilidad del backend.",
+        "responses": {
+          "200": {
+            "description": "Servidor funcionando correctamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    }
+                  },
+                  "required": ["status"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

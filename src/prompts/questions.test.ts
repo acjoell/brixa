@@ -37,6 +37,7 @@ describe("runPrompts", () => {
       language: "ts",
       database: "none",
       docker: false,
+      apiDocs: false,
       outputDir: "./my-app",
     });
   });
@@ -62,18 +63,19 @@ describe("runPrompts", () => {
       .mockResolvedValueOnce("backend")
       .mockResolvedValueOnce("js")
       .mockResolvedValueOnce("postgres");
-    confirmMock.mockResolvedValueOnce(false);
+    confirmMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     inputMock.mockResolvedValueOnce("/home/user/projects/api");
 
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(3);
-    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(confirmMock).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
       modality: "backend",
       language: "js",
       database: "postgres",
       docker: false,
+      apiDocs: true,
       outputDir: "/home/user/projects/api",
     });
   });

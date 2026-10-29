@@ -708,6 +708,20 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 ---
 
+### D-050 — Documentación de API opcional con OpenAPI y Swagger UI (T-013b)
+
+**Estado:** Confirmada.
+
+**Decisión:** El CLI pregunta «¿Documentación de API?» (por defecto No) en backend y aplicación completa. Con ella se genera una especificación OpenAPI 3 escrita a mano y se sirve con `swagger-ui-express` en `/docs` (en fullstack, `/api/docs/`). La ruta solo se monta si `ENABLE_API_DOCS=true`; por defecto está desactivada y devuelve 404. Un test compara las rutas registradas en Express con las documentadas y falla si hay alguna sin documentar. `/docs` redirige a la ruta relativa `docs/`, de modo que la redirección funciona tras el proxy de Vite y el de nginx sin configuración adicional.
+
+**Cadena de suministro:** `@scarf/scarf` (dependencia transitiva de `swagger-ui-dist`) declara un `postinstall` de telemetría; se deniega con `"@scarf/scarf": false` en `allowScripts`, igual que `esbuild` en D-039. Licencias: MIT y Apache-2.0.
+
+**Motivo:** Es la opción más pequeña, estable y auditable, funciona sin red externa y no obliga a las plantillas a usar una librería de esquemas. Se descartaron Scalar (versión 0.x, 10 dependencias directas, JS desde CDN por defecto y 1.941 archivos en producción) y JSDoc (27 dependencias transitivas y parseo en ejecución).
+
+**Consecuencias:** La especificación se mantiene a mano. El test reduce el riesgo de desincronización, pero depende de `app.router.stack`, estructura interna de Express que puede cambiar. Con la documentación activada se expone la estructura de la API: no habilitarla en producción sin una decisión explícita (su protección futura queda para T-014). Verificado en 4 variantes de `verify:generated` (32 en total) solo en Linux x64 con Node 24. En fullstack, la pasada automática no comprueba el 404 por defecto.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).

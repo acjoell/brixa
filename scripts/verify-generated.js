@@ -85,11 +85,11 @@ async function getFreePort() {
 }
 
 /** Arranca el servidor backend en puerto efímero (PORT=0) y devuelve el proceso y el puerto asignado. */
-async function startBackendServer(projectDir, entryPoint = "dist/index.js") {
+async function startBackendServer(projectDir, entryPoint = "dist/index.js", extraEnv = {}) {
   console.log(`\nIniciando servidor backend (${entryPoint})...`);
   const child = spawn("node", [entryPoint], {
     cwd: projectDir,
-    env: { ...process.env, PORT: "0" },
+    env: { ...process.env, PORT: "0", ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -229,6 +229,64 @@ async function checkBackendServer(projectDir, entryPoint = "dist/index.js") {
       console.log("Cerrando servidor backend...");
       await stopProcess(backend.child);
     }
+  }
+}
+
+/** Comprueba que la documentación de API responde 404 por defecto y 200/301 con ENABLE_API_DOCS=true. */
+async function checkBackendDocs(projectDir, entryPoint = "dist/index.js") {
+  let backendWithoutDocs;
+  try {
+    backendWithoutDocs = await startBackendServer(projectDir, entryPoint, {
+      ENABLE_API_DOCS: "false",
+    });
+    console.log(`Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin flag)...`);
+    const res = await fetch(`http://localhost:${backendWithoutDocs.port}/docs`, {
+      redirect: "manual",
+    });
+    if (res.status !== 404) {
+      throw new Error(
+        `Esperado status 404 en /docs con ENABLE_API_DOCS=false, recibido ${res.status}`,
+      );
+    }
+    console.log("✔ GET /docs respondió 404 cuando ENABLE_API_DOCS=false");
+  } finally {
+    if (backendWithoutDocs?.child) await stopProcess(backendWithoutDocs.child);
+  }
+
+  let backendWithDocs;
+  try {
+    backendWithDocs = await startBackendServer(projectDir, entryPoint, { ENABLE_API_DOCS: "true" });
+    console.log(`Verificando redirección GET http://localhost:${backendWithDocs.port}/docs...`);
+    const resRedirect = await fetch(`http://localhost:${backendWithDocs.port}/docs`, {
+      redirect: "manual",
+    });
+    if (resRedirect.status !== 301) {
+      throw new Error(`Esperado status 301 en /docs, recibido ${resRedirect.status}`);
+    }
+    const location = resRedirect.headers.get("location");
+    if (location !== "docs/") {
+      throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
+    }
+    console.log("✔ GET /docs respondió 301 con Location: docs/");
+
+    console.log(`Verificando GET http://localhost:${backendWithDocs.port}/docs/...`);
+    const resHtml = await fetch(`http://localhost:${backendWithDocs.port}/docs/`);
+    if (resHtml.status !== 200) {
+      throw new Error(`Esperado status 200 en /docs/, recibido ${resHtml.status}`);
+    }
+    const html = await resHtml.text();
+    if (!html.includes("swagger-ui")) {
+      throw new Error("HTML en /docs/ no contiene 'swagger-ui'");
+    }
+    console.log("✔ GET /docs/ respondió 200 con Swagger UI");
+
+    const resCss = await fetch(`http://localhost:${backendWithDocs.port}/docs/swagger-ui.css`);
+    if (resCss.status !== 200) {
+      throw new Error(`Esperado status 200 en /docs/swagger-ui.css, recibido ${resCss.status}`);
+    }
+    console.log("✔ GET /docs/swagger-ui.css respondió 200");
+  } finally {
+    if (backendWithDocs?.child) await stopProcess(backendWithDocs.child);
   }
 }
 
@@ -427,11 +485,12 @@ export async function generateProject(
   outputDir,
   database = "none",
   docker = false,
+  apiDocs = false,
 ) {
   const distGenerate = path.join(root, "dist", "generator", "generate.js");
   const { generate } = await import(distGenerate);
 
-  const result = await generate({ modality, language, database, docker, outputDir });
+  const result = await generate({ modality, language, database, docker, apiDocs, outputDir });
 
   if (!result.ok) {
     throw new Error(`generate() falló: ${JSON.stringify(result.error)}`);
@@ -439,22 +498,34 @@ export async function generateProject(
 }
 
 /** Verifica variantes con Docker usando docker compose */
-async function verifyDockerVariant(projectDir, modality, language, database, variantLabel) {
+async function verifyDockerVariant(
+  projectDir,
+  modality,
+  language,
+  database,
+  variantLabel,
+  apiDocs = false,
+) {
   console.log(`\nIniciando verificación Docker para ${variantLabel}...`);
 
   if (modality === "fullstack") {
     const backendDir = path.join(projectDir, "backend");
     const frontendDir = path.join(projectDir, "frontend");
 
+    const envLines = [];
     if (database === "postgres") {
+      envLines.push(
+        "POSTGRES_USER=foundry_test",
+        "POSTGRES_PASSWORD=foundry_pass_123",
+        "POSTGRES_DB=foundry_db",
+      );
+    }
+    if (apiDocs) {
+      envLines.push("ENABLE_API_DOCS=true");
+    }
+    if (envLines.length > 0) {
       const envFile = path.join(projectDir, ".env");
-      const envContent =
-        [
-          "POSTGRES_USER=foundry_test",
-          "POSTGRES_PASSWORD=foundry_pass_123",
-          "POSTGRES_DB=foundry_db",
-        ].join("\n") + "\n";
-      fs.writeFileSync(envFile, envContent, "utf-8");
+      fs.writeFileSync(envFile, envLines.join("\n") + "\n", "utf-8");
     }
 
     run("npm", ["install"], backendDir);
@@ -572,6 +643,46 @@ export const testItems = sqliteTable("test_items", {
           throw err;
         }
         console.log("✔ Confirmado: el puerto 3000 del backend no es accesible desde el host");
+      }
+
+      if (apiDocs) {
+        console.log("Verificando redirección GET http://localhost:8080/api/docs...");
+        const resDocsRedirect = await fetch("http://localhost:8080/api/docs", {
+          redirect: "manual",
+        });
+        if (resDocsRedirect.status !== 301) {
+          throw new Error(
+            `Esperado status 301 en /api/docs vía Docker, recibido ${resDocsRedirect.status}`,
+          );
+        }
+        const location = resDocsRedirect.headers.get("location");
+        if (location !== "docs/") {
+          throw new Error(
+            `Esperada cabecera Location: 'docs/' en /api/docs vía Docker, recibido '${location}'`,
+          );
+        }
+        console.log("✔ GET http://localhost:8080/api/docs respondió 301 con Location: docs/");
+
+        console.log("Verificando GET http://localhost:8080/api/docs/...");
+        const resDocs = await fetch("http://localhost:8080/api/docs/");
+        if (resDocs.status !== 200) {
+          throw new Error(
+            `Esperado status 200 en /api/docs/ vía Docker, recibido ${resDocs.status}`,
+          );
+        }
+        const docsHtml = await resDocs.text();
+        if (!docsHtml.includes("swagger-ui")) {
+          throw new Error("HTML en /api/docs/ vía Docker no contiene 'swagger-ui'");
+        }
+        console.log("✔ GET http://localhost:8080/api/docs/ respondió 200 con Swagger UI");
+
+        const resDocsCss = await fetch("http://localhost:8080/api/docs/swagger-ui.css");
+        if (resDocsCss.status !== 200) {
+          throw new Error(
+            `Esperado status 200 en /api/docs/swagger-ui.css vía Docker, recibido ${resDocsCss.status}`,
+          );
+        }
+        console.log("✔ GET http://localhost:8080/api/docs/swagger-ui.css respondió 200");
       }
 
       if (database === "postgres") {
@@ -784,10 +895,11 @@ export const testItems = sqliteTable("test_items", {
 // ---------------------------------------------------------------------------
 
 async function verifyVariant(variant, step, total, pgContext) {
-  const { modality, language, database = "none", docker = false } = variant;
+  const { modality, language, database = "none", docker = false, apiDocs = false } = variant;
   const labelParts = [modality, language];
   if (database !== "none") labelParts.push(database);
   if (docker) labelParts.push("docker");
+  if (apiDocs) labelParts.push("docs");
   const label = labelParts.join("+");
   console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
@@ -797,7 +909,7 @@ async function verifyVariant(variant, step, total, pgContext) {
   const projectDir = path.join(tmpBase, "test-project");
 
   try {
-    await generateProject(modality, language, projectDir, database, docker);
+    await generateProject(modality, language, projectDir, database, docker, apiDocs);
     console.log(`Proyecto generado en: ${projectDir}`);
 
     if (docker) {
@@ -807,7 +919,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         console.log("========================================================");
         return;
       }
-      await verifyDockerVariant(projectDir, modality, language, database, label);
+      await verifyDockerVariant(projectDir, modality, language, database, label, apiDocs);
       console.log(`\n✔ ${label} verificado correctamente`);
       return;
     }
@@ -831,6 +943,9 @@ async function verifyVariant(variant, step, total, pgContext) {
 
       // Backend: install, build (si TS), lint, typecheck (si TS), test
       run("npm", ["install"], backendDir);
+      if (apiDocs) {
+        run("npm", ["audit", "--audit-level=moderate"], backendDir);
+      }
       if (language === "ts") {
         run("npm", ["run", "build"], backendDir);
         run("npm", ["run", "typecheck"], backendDir);
@@ -850,7 +965,8 @@ async function verifyVariant(variant, step, total, pgContext) {
       let backendChild;
       let viteChild;
       try {
-        const backend = await startBackendServer(backendDir, entryPoint);
+        const backendEnv = apiDocs ? { ENABLE_API_DOCS: "true" } : {};
+        const backend = await startBackendServer(backendDir, entryPoint, backendEnv);
         backendChild = backend.child;
 
         const vite = await startViteServer(frontendDir, backend.port);
@@ -870,6 +986,36 @@ async function verifyVariant(variant, step, total, pgContext) {
           );
         }
         console.log("✔ GET /api/health vía Vite proxy respondió 200 con status: ok");
+
+        if (apiDocs) {
+          console.log(`Verificando redirección GET http://127.0.0.1:${vite.port}/api/docs...`);
+          const resDocsRedirect = await fetch(`http://127.0.0.1:${vite.port}/api/docs`, {
+            redirect: "manual",
+          });
+          if (resDocsRedirect.status !== 301) {
+            throw new Error(
+              `Esperado status 301 en /api/docs vía Vite, recibido ${resDocsRedirect.status}`,
+            );
+          }
+          const location = resDocsRedirect.headers.get("location");
+          if (location !== "docs/") {
+            throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
+          }
+          console.log("✔ GET /api/docs vía Vite respondió 301 con Location: docs/");
+
+          console.log(`Verificando GET http://127.0.0.1:${vite.port}/api/docs/...`);
+          const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`);
+          if (resDocs.status !== 200) {
+            throw new Error(
+              `Esperado status 200 en /api/docs/ vía Vite, recibido ${resDocs.status}`,
+            );
+          }
+          const docsHtml = await resDocs.text();
+          if (!docsHtml.includes("swagger-ui")) {
+            throw new Error("HTML en /api/docs/ vía Vite no contiene 'swagger-ui'");
+          }
+          console.log("✔ GET /api/docs/ vía Vite respondió 200 con Swagger UI");
+        }
       } finally {
         console.log("Cerrando servidores Vite y backend...");
         await stopProcess(viteChild);
@@ -881,6 +1027,9 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       run("npm", ["install"], projectDir);
+      if (apiDocs) {
+        run("npm", ["audit", "--audit-level=moderate"], projectDir);
+      }
       if (modality === "frontend" || language === "ts") {
         run("npm", ["run", "build"], projectDir);
       }
@@ -901,6 +1050,9 @@ async function verifyVariant(variant, step, total, pgContext) {
 
         const entryPoint = language === "ts" ? "dist/index.js" : "src/index.js";
         await checkBackendServer(projectDir, entryPoint);
+        if (apiDocs) {
+          await checkBackendDocs(projectDir, entryPoint);
+        }
       }
     }
 
@@ -1084,6 +1236,10 @@ const VARIANTS = [
   { modality: "fullstack", language: "js", database: "postgres", docker: true },
   { modality: "fullstack", language: "ts", database: "sqlite", docker: true },
   { modality: "fullstack", language: "js", database: "sqlite", docker: true },
+  { modality: "backend", language: "ts", database: "none", apiDocs: true },
+  { modality: "backend", language: "js", database: "none", apiDocs: true },
+  { modality: "fullstack", language: "ts", database: "postgres", docker: true, apiDocs: true },
+  { modality: "fullstack", language: "js", database: "sqlite", docker: false, apiDocs: true },
 ];
 
 async function main() {

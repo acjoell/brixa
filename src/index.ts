@@ -24,15 +24,15 @@ export async function main(): Promise<number> {
     return 1;
   }
 
-  const { modality, language, database, docker, outputDir } = result.value;
+  const { modality, language, database, docker, apiDocs, outputDir } = result.value;
 
-  const genResult = await generate({ modality, language, database, docker, outputDir });
+  const genResult = await generate({ modality, language, database, docker, apiDocs, outputDir });
 
   if (!genResult.ok) {
     console.error(`Error: ${formatGenerateError(genResult.error)}`);
     return 1;
   }
 
-  console.log(nextStepsMessage(outputDir, modality, database, docker, language));
+  console.log(nextStepsMessage(outputDir, modality, database, docker, language, apiDocs));
   return 0;
 }

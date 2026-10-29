@@ -1,0 +1,9 @@
+{
+  "allowScripts": {
+    "esbuild": false,
+    "@scarf/scarf": false
+  },
+  "dependencies": {
+    "swagger-ui-express": "5.0.1"
+  }
+}

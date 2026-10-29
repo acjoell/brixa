@@ -598,6 +598,133 @@ async function applyFullstackDockerOverlay(
 }
 
 // ---------------------------------------------------------------------------
+// Overlay opcional: Documentación de API (OpenAPI 3 + Swagger UI)
+// ---------------------------------------------------------------------------
+
+async function appendEnvExampleApiDocs(envPath: string): Promise<void> {
+  const line =
+    "# Documentación de API (OpenAPI/Swagger UI). No habilitar en producción sin una decisión explícita.\nENABLE_API_DOCS=false\n";
+  try {
+    const existing = await fs.readFile(envPath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
+  } catch {
+    await fs.writeFile(envPath, line, "utf-8");
+  }
+}
+
+async function appendBackendReadmeApiDocs(readmePath: string): Promise<void> {
+  const content = `
+## Documentación de API
+
+El backend incluye documentación OpenAPI interactiva servida con Swagger UI.
+
+### Activación y uso
+
+Por seguridad, la documentación está desactivada por defecto para no exponer la estructura de la API en producción sin una decisión explícita.
+
+Para activarla localmente:
+1. Configura \`ENABLE_API_DOCS=true\` en tu archivo \`.env\`.
+2. Accede en tu navegador a \`http://localhost:3000/docs\` (o \`http://localhost:3000/docs/\`).
+
+### Mantenimiento de la especificación
+
+La especificación OpenAPI reside en \`src/docs/openapi.json\` y se mantiene a mano. El backend incluye un test automatizado que compara las rutas registradas en Express con la especificación para detectar desincronizaciones.
+`;
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+async function appendRootReadmeApiDocsFullstack(readmePath: string): Promise<void> {
+  const content = `
+## Documentación de API
+
+La API incluye documentación OpenAPI interactiva servida con Swagger UI.
+
+### Activación y uso
+
+Por defecto está desactivada para evitar exponer la estructura de la API en producción.
+
+Para activarla:
+1. Configura \`ENABLE_API_DOCS=true\` en el archivo \`.env\` (en la raíz o en \`backend/.env\`).
+2. Accede en el navegador a:
+   - En desarrollo (con Vite): \`http://localhost:5173/api/docs/\` (o \`http://localhost:5173/api/docs\`).
+   - Con Docker: \`http://localhost:8080/api/docs/\` (o \`http://localhost:8080/api/docs\`).
+   (Se recomienda usar la barra final \`/api/docs/\`).
+
+### Mantenimiento de la especificación
+
+La especificación OpenAPI reside en \`backend/src/docs/openapi.json\` y se mantiene a mano. El backend incluye un test automatizado que detecta rutas registradas en Express no documentadas en la especificación.
+`;
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+async function appendComposeApiDocsEnv(composePath: string): Promise<void> {
+  try {
+    const content = await fs.readFile(composePath, "utf-8");
+    if (content.includes("ENABLE_API_DOCS")) {
+      return;
+    }
+    const updated = content.replace(
+      /(services:\s*\n\s*backend:\s*\n(?:.*\n)*?\s*environment:\s*\n)/,
+      `$1      ENABLE_API_DOCS: "\${ENABLE_API_DOCS:-false}"\n`,
+    );
+    await fs.writeFile(composePath, updated, "utf-8");
+  } catch {
+    // Si no existe compose.yaml, no hacer nada
+  }
+}
+
+async function applyApiDocsOverlay(targetBackendDir: string, language: Language): Promise<void> {
+  const overlayDir = path.join(templatesDir(), "api-docs", language);
+  await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
+
+  // Fusionar package.json deterministamente sin sobrescribir lo existente
+  const pkgPath = path.join(targetBackendDir, "package.json");
+  const pkgRaw = await fs.readFile(pkgPath, "utf-8");
+  const pkgJson = JSON.parse(pkgRaw) as PackageJson;
+
+  const overlayDeps: PackageJsonOverlay = {
+    allowScripts: {
+      esbuild: false,
+      "@scarf/scarf": false,
+    },
+    dependencies: {
+      "swagger-ui-express": "5.0.1",
+    },
+    ...(language === "ts"
+      ? {
+          devDependencies: {
+            "@types/swagger-ui-express": "4.1.8",
+          },
+        }
+      : {}),
+  };
+
+  const merged = mergePackageJson(pkgJson, overlayDeps);
+  if (!merged.allowScripts) {
+    merged.allowScripts = {};
+  }
+  merged.allowScripts["@scarf/scarf"] = false;
+
+  await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+
+  await appendEnvExampleApiDocs(path.join(targetBackendDir, ".env.example"));
+  await appendBackendReadmeApiDocs(path.join(targetBackendDir, "README.md"));
+}
+
+// ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
 
@@ -663,8 +790,17 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await appendRootReadmeDatabaseSqlite(path.join(outputDir, "README.md"));
       }
 
+      if (options.apiDocs) {
+        await applyApiDocsOverlay(backendDest, language);
+        await appendRootReadmeApiDocsFullstack(path.join(outputDir, "README.md"));
+      }
+
       if (options.docker) {
         await applyFullstackDockerOverlay(outputDir, frontendDest, backendDest, language, database);
+        if (options.apiDocs) {
+          await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
+          await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
+        }
       }
 
       return { ok: true };
@@ -699,8 +835,15 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       } else if (database === "sqlite") {
         await applySqliteOverlay(outputDir, language);
       }
+      if (options.apiDocs) {
+        await applyApiDocsOverlay(outputDir, language);
+      }
       if (options.docker) {
         await applyDockerOverlay(outputDir, language, database);
+        if (options.apiDocs) {
+          await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
+          await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
+        }
       }
     }
 
@@ -896,6 +1039,7 @@ export function nextStepsMessage(
   database?: Database,
   docker?: boolean,
   language?: Language,
+  apiDocs?: boolean,
 ): string {
   const name = path.basename(outputDir);
 
@@ -961,6 +1105,15 @@ export function nextStepsMessage(
       }
     }
 
+    if (apiDocs) {
+      lines.push(
+        "",
+        "  # Documentación de API:",
+        "  # 1. Configura ENABLE_API_DOCS=true en .env para activarla",
+        "  # 2. Accede en el navegador a http://localhost:5173/api/docs/ (o http://localhost:8080/api/docs/ con Docker)",
+      );
+    }
+
     lines.push("");
     return lines.join("\n");
   }
@@ -1014,6 +1167,15 @@ export function nextStepsMessage(
           : "docker compose run --rm backend npm run db:migrate";
       lines.push("  #    En Docker:", `  #    ${migrateCmd}`);
     }
+  }
+
+  if (apiDocs) {
+    lines.push(
+      "",
+      "  # Documentación de API:",
+      "  # 1. Configura ENABLE_API_DOCS=true en .env para activarla",
+      "  # 2. Accede en el navegador a http://localhost:3000/docs",
+    );
   }
 
   lines.push("");

@@ -18,6 +18,7 @@ export interface RawOptions {
   language: Language;
   database?: Database | undefined;
   docker?: boolean | undefined;
+  apiDocs?: boolean | undefined;
   /** Ruta tal como la escribe el usuario (puede ser relativa o con `..`). */
   outputDir: string;
 }
@@ -28,6 +29,7 @@ export interface UserOptions {
   language: Language;
   database?: Database | undefined;
   docker?: boolean | undefined;
+  apiDocs?: boolean | undefined;
   /** Ruta absoluta resuelta y validada del directorio de destino. */
   outputDir: string;
 }

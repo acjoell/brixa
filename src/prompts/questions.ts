@@ -50,12 +50,20 @@ export async function runPrompts(): Promise<RawOptions | null> {
       });
     }
 
+    let apiDocs = false;
+    if (modality === "backend" || modality === "fullstack") {
+      apiDocs = await confirm({
+        message: "¿Documentación de API?",
+        default: false,
+      });
+    }
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, database, docker, outputDir };
+    return { modality, language, database, docker, apiDocs, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

@@ -418,6 +418,8 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 **T-013b — Documentación de API (backend)**
 
+**Estado de T-013b:** COMPLETADA. Documentación de API opcional (OpenAPI manual + Swagger UI, desactivada por defecto) en backend y aplicación completa, ts y js, verificada en `verify:generated` (32/32 variantes). Compatibilidad verificada solo en Linux x64 con Node 24.
+
 - Evaluar herramientas (por ejemplo OpenAPI con una interfaz de consulta) y registrar la elección.
 - Definir su comportamiento por defecto en producción (no exponer información de la API sin una decisión explícita).
 - Criterios: opcional, solo backend y aplicación completa, JavaScript y TypeScript, documentación coherente con las rutas reales.
