@@ -1,6 +1,19 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { setupApiDocs } from "./docs/swagger.js";
 
+try {
+  process.loadEnvFile();
+} catch (err: unknown) {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: string }).code !== "ENOENT"
+  ) {
+    throw err;
+  }
+}
+
 export const app = express();
 
 app.disable("x-powered-by");

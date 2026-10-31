@@ -1,5 +1,13 @@
 import express from "express";
 
+try {
+  process.loadEnvFile();
+} catch (err) {
+  if (err.code !== "ENOENT") {
+    throw err;
+  }
+}
+
 export const app = express();
 
 app.disable("x-powered-by");

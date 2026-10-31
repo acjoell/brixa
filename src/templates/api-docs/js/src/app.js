@@ -1,6 +1,14 @@
 import express from "express";
 import { setupApiDocs } from "./docs/swagger.js";
 
+try {
+  process.loadEnvFile();
+} catch (err) {
+  if (err.code !== "ENOENT") {
+    throw err;
+  }
+}
+
 export const app = express();
 
 app.disable("x-powered-by");

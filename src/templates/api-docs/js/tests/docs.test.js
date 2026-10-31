@@ -1,28 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import express from "express";
 import { app } from "../src/app.js";
 import { openapiSpec, setupApiDocs } from "../src/docs/swagger.js";
 
 describe("Documentación de API", () => {
-  let server;
-  let baseUrl;
-
-  beforeAll(async () => {
-    await new Promise((resolve) => {
-      server = app.listen(0, () => {
-        const address = server.address();
-        baseUrl = `http://127.0.0.1:${address.port}`;
-        resolve();
-      });
-    });
-  });
-
-  afterAll(async () => {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
-  });
-
   // Nota: app.router.stack (o app._router.stack) es una propiedad interna de Express para inspeccionar capas de enrutamiento.
   it("las rutas registradas en Express coinciden con las documentadas en la especificación", () => {
     const router = app.router;
@@ -45,17 +26,39 @@ describe("Documentación de API", () => {
     }
   });
 
-  it("con ENABLE_API_DOCS sin definir devuelve 404, y con true responde con redirección relativa a docs/ y sirve la interfaz en /docs/", async () => {
-    // 1. Sin variable definida: /docs y /docs/ devuelven 404
-    const resNoVar = await fetch(`${baseUrl}/docs`);
-    expect(resNoVar.status).toBe(404);
-    const resNoVarSlash = await fetch(`${baseUrl}/docs/`);
-    expect(resNoVarSlash.status).toBe(404);
+  it("con ENABLE_API_DOCS=false devuelve 404 en /docs y /docs/", async () => {
+    const prevEnv = process.env.ENABLE_API_DOCS;
+    process.env.ENABLE_API_DOCS = "false";
+    const testApp = express();
+    testApp.get("/health", (_req, res) => {
+      res.status(200).json({ status: "ok" });
+    });
+    setupApiDocs(testApp);
+    const testServer = testApp.listen(0);
+    const port = testServer.address().port;
 
-    // 2. Con ENABLE_API_DOCS="true": /docs redirige relativamente a docs/ y /docs/ responde 200
+    try {
+      const resNoVar = await fetch(`http://127.0.0.1:${port}/docs`, { redirect: "manual" });
+      expect(resNoVar.status).toBe(404);
+      const resNoVarSlash = await fetch(`http://127.0.0.1:${port}/docs/`, { redirect: "manual" });
+      expect(resNoVarSlash.status).toBe(404);
+    } finally {
+      if (prevEnv !== undefined) {
+        process.env.ENABLE_API_DOCS = prevEnv;
+      } else {
+        delete process.env.ENABLE_API_DOCS;
+      }
+      await new Promise((resolve) => testServer.close(() => resolve()));
+    }
+  });
+
+  it("con ENABLE_API_DOCS=true: /docs devuelve 301 con Location docs/ y /docs/ devuelve 200 directo sin redirección", async () => {
     const prevEnv = process.env.ENABLE_API_DOCS;
     process.env.ENABLE_API_DOCS = "true";
     const testApp = express();
+    testApp.get("/health", (_req, res) => {
+      res.status(200).json({ status: "ok" });
+    });
     setupApiDocs(testApp);
     const testServer = testApp.listen(0);
     const port = testServer.address().port;
@@ -65,8 +68,9 @@ describe("Documentación de API", () => {
       expect(resRedirect.status).toBe(301);
       expect(resRedirect.headers.get("location")).toBe("docs/");
 
-      const resDocsSlash = await fetch(`http://127.0.0.1:${port}/docs/`);
+      const resDocsSlash = await fetch(`http://127.0.0.1:${port}/docs/`, { redirect: "manual" });
       expect(resDocsSlash.status).toBe(200);
+      expect(resDocsSlash.headers.get("location")).toBeNull();
       expect(await resDocsSlash.text()).toContain("swagger-ui");
     } finally {
       if (prevEnv !== undefined) {

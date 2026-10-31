@@ -722,6 +722,18 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 ---
 
+### D-051 — Override de minimatch por GHSA-g3hv-75wg-m249
+
+**Estado:** Confirmada (temporal).
+
+**Decisión:** Todas las plantillas base (frontend y backend, ts y js) y Foundry fijan `overrides: { "minimatch": "11.0.1" }`, que coexiste con el override de `esbuild-kit` de D-039. Todas las variantes de `verify:generated` ejecutan `npm audit --audit-level=moderate`.
+
+**Motivo:** `minimatch <11.0.1` tiene un aviso de denegación de servicio por amplificación. Ninguna versión publicada de `eslint`, `@eslint/config-array` ni `@typescript-eslint/typescript-estree` depende ya de `minimatch >=11`, por lo que el override es la única forma de dejar `npm audit` en 0. El riesgo práctico es bajo (los patrones los escribe el desarrollador), pero un proyecto nuevo no debe mostrar avisos en el primer `npm install`.
+
+**Consecuencias:** Es una dependencia forzada y puede quedar obsoleta. Retirar el override cuando ESLint publique versiones que dependan de `minimatch >=11.0.1`. `npm audit` puede volver a fallar por avisos nuevos sin que cambie el código. Verificado solo en Linux x64 con Node 24.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).

@@ -22,7 +22,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -232,30 +232,89 @@ async function checkBackendServer(projectDir, entryPoint = "dist/index.js") {
   }
 }
 
+/** Extrae y verifica los assets CSS y JS referenciados en el HTML de Swagger UI. */
+async function verifySwaggerUiAssets(html, docsUrl) {
+  const cssMatches = Array.from(html.matchAll(/<link[^>]+href=["']([^"']+\.css[^"']*)["']/gi)).map(
+    (m) => m[1],
+  );
+  const jsMatches = Array.from(html.matchAll(/<script[^>]+src=["']([^"']+\.js[^"']*)["']/gi)).map(
+    (m) => m[1],
+  );
+
+  if (cssMatches.length === 0 || jsMatches.length === 0) {
+    throw new Error(`No se encontraron suficientes referencias a assets CSS o JS en ${docsUrl}`);
+  }
+
+  for (const rel of cssMatches) {
+    const assetUrl = new URL(rel, docsUrl).href;
+    console.log(`Verificando asset CSS: ${assetUrl}...`);
+    const res = await fetch(assetUrl);
+    if (res.status !== 200) {
+      throw new Error(`Esperado status 200 para ${assetUrl}, recibido ${res.status}`);
+    }
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("text/css")) {
+      throw new Error(`Esperado Content-Type text/css para ${assetUrl}, recibido "${ct}"`);
+    }
+  }
+
+  for (const rel of jsMatches) {
+    const assetUrl = new URL(rel, docsUrl).href;
+    console.log(`Verificando asset JS: ${assetUrl}...`);
+    const res = await fetch(assetUrl);
+    if (res.status !== 200) {
+      throw new Error(`Esperado status 200 para ${assetUrl}, recibido ${res.status}`);
+    }
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("javascript")) {
+      throw new Error(`Esperado Content-Type javascript para ${assetUrl}, recibido "${ct}"`);
+    }
+  }
+}
+
 /** Comprueba que la documentación de API responde 404 por defecto y 200/301 con ENABLE_API_DOCS=true. */
 async function checkBackendDocs(projectDir, entryPoint = "dist/index.js") {
+  const envExample = path.join(projectDir, ".env.example");
+  const envFile = path.join(projectDir, ".env");
+
+  // 1. Sin ENABLE_API_DOCS: verificamos que /docs y /docs/ devuelven 404
   let backendWithoutDocs;
   try {
-    backendWithoutDocs = await startBackendServer(projectDir, entryPoint, {
-      ENABLE_API_DOCS: "false",
-    });
-    console.log(`Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin flag)...`);
+    backendWithoutDocs = await startBackendServer(projectDir, entryPoint);
+    console.log(
+      `Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin ENABLE_API_DOCS)...`,
+    );
     const res = await fetch(`http://localhost:${backendWithoutDocs.port}/docs`, {
       redirect: "manual",
     });
     if (res.status !== 404) {
+      throw new Error(`Esperado status 404 en /docs sin ENABLE_API_DOCS, recibido ${res.status}`);
+    }
+    const resSlash = await fetch(`http://localhost:${backendWithoutDocs.port}/docs/`, {
+      redirect: "manual",
+    });
+    if (resSlash.status !== 404) {
       throw new Error(
-        `Esperado status 404 en /docs con ENABLE_API_DOCS=false, recibido ${res.status}`,
+        `Esperado status 404 en /docs/ sin ENABLE_API_DOCS, recibido ${resSlash.status}`,
       );
     }
-    console.log("✔ GET /docs respondió 404 cuando ENABLE_API_DOCS=false");
+    console.log("✔ GET /docs y /docs/ respondieron 404 sin ENABLE_API_DOCS");
   } finally {
     if (backendWithoutDocs?.child) await stopProcess(backendWithoutDocs.child);
   }
 
+  // 2. Con ENABLE_API_DOCS=true cargado desde .env (copiado desde .env.example)
   let backendWithDocs;
   try {
-    backendWithDocs = await startBackendServer(projectDir, entryPoint, { ENABLE_API_DOCS: "true" });
+    let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
+    if (envContent.includes("ENABLE_API_DOCS=")) {
+      envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
+    } else {
+      envContent += "\nENABLE_API_DOCS=true\n";
+    }
+    fs.writeFileSync(envFile, envContent, "utf-8");
+
+    backendWithDocs = await startBackendServer(projectDir, entryPoint);
     console.log(`Verificando redirección GET http://localhost:${backendWithDocs.port}/docs...`);
     const resRedirect = await fetch(`http://localhost:${backendWithDocs.port}/docs`, {
       redirect: "manual",
@@ -270,22 +329,29 @@ async function checkBackendDocs(projectDir, entryPoint = "dist/index.js") {
     console.log("✔ GET /docs respondió 301 con Location: docs/");
 
     console.log(`Verificando GET http://localhost:${backendWithDocs.port}/docs/...`);
-    const resHtml = await fetch(`http://localhost:${backendWithDocs.port}/docs/`);
+    const resHtml = await fetch(`http://localhost:${backendWithDocs.port}/docs/`, {
+      redirect: "manual",
+    });
     if (resHtml.status !== 200) {
-      throw new Error(`Esperado status 200 en /docs/, recibido ${resHtml.status}`);
+      throw new Error(`Esperado status 200 directo en /docs/, recibido ${resHtml.status}`);
+    }
+    if (resHtml.headers.get("location")) {
+      throw new Error(
+        `Inesperada redirección en /docs/ con Location: '${resHtml.headers.get("location")}'`,
+      );
     }
     const html = await resHtml.text();
     if (!html.includes("swagger-ui")) {
       throw new Error("HTML en /docs/ no contiene 'swagger-ui'");
     }
-    console.log("✔ GET /docs/ respondió 200 con Swagger UI");
+    console.log("✔ GET /docs/ respondió 200 directo con Swagger UI");
 
-    const resCss = await fetch(`http://localhost:${backendWithDocs.port}/docs/swagger-ui.css`);
-    if (resCss.status !== 200) {
-      throw new Error(`Esperado status 200 en /docs/swagger-ui.css, recibido ${resCss.status}`);
-    }
-    console.log("✔ GET /docs/swagger-ui.css respondió 200");
+    await verifySwaggerUiAssets(html, `http://localhost:${backendWithDocs.port}/docs/`);
+    console.log(
+      "✔ Assets CSS y JS de Swagger UI verificados correctamente (status 200 y Content-Type)",
+    );
   } finally {
+    fs.rmSync(envFile, { force: true });
     if (backendWithDocs?.child) await stopProcess(backendWithDocs.child);
   }
 }
@@ -529,7 +595,9 @@ async function verifyDockerVariant(
     }
 
     run("npm", ["install"], backendDir);
+    run("npm", ["audit", "--audit-level=moderate"], backendDir);
     run("npm", ["install"], frontendDir);
+    run("npm", ["audit", "--audit-level=moderate"], frontendDir);
 
     if (database === "postgres") {
       const schemaFile = path.join(
@@ -664,25 +732,29 @@ export const testItems = sqliteTable("test_items", {
         console.log("✔ GET http://localhost:8080/api/docs respondió 301 con Location: docs/");
 
         console.log("Verificando GET http://localhost:8080/api/docs/...");
-        const resDocs = await fetch("http://localhost:8080/api/docs/");
+        const resDocs = await fetch("http://localhost:8080/api/docs/", {
+          redirect: "manual",
+        });
         if (resDocs.status !== 200) {
           throw new Error(
-            `Esperado status 200 en /api/docs/ vía Docker, recibido ${resDocs.status}`,
+            `Esperado status 200 directo en /api/docs/ vía Docker, recibido ${resDocs.status}`,
+          );
+        }
+        if (resDocs.headers.get("location")) {
+          throw new Error(
+            `Inesperada redirección en /api/docs/ vía Docker con Location: '${resDocs.headers.get("location")}'`,
           );
         }
         const docsHtml = await resDocs.text();
         if (!docsHtml.includes("swagger-ui")) {
           throw new Error("HTML en /api/docs/ vía Docker no contiene 'swagger-ui'");
         }
-        console.log("✔ GET http://localhost:8080/api/docs/ respondió 200 con Swagger UI");
+        console.log("✔ GET http://localhost:8080/api/docs/ respondió 200 directo con Swagger UI");
 
-        const resDocsCss = await fetch("http://localhost:8080/api/docs/swagger-ui.css");
-        if (resDocsCss.status !== 200) {
-          throw new Error(
-            `Esperado status 200 en /api/docs/swagger-ui.css vía Docker, recibido ${resDocsCss.status}`,
-          );
-        }
-        console.log("✔ GET http://localhost:8080/api/docs/swagger-ui.css respondió 200");
+        await verifySwaggerUiAssets(docsHtml, "http://localhost:8080/api/docs/");
+        console.log(
+          "✔ Assets CSS y JS de Swagger UI verificados correctamente vía Docker (status 200 y Content-Type)",
+        );
       }
 
       if (database === "postgres") {
@@ -757,8 +829,10 @@ export const testItems = sqliteTable("test_items", {
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
+  run("npm", ["install"], projectDir);
+  run("npm", ["audit", "--audit-level=moderate"], projectDir);
+
   if (database === "postgres") {
-    run("npm", ["install"], projectDir);
     const schemaFile = path.join(
       projectDir,
       "src",
@@ -776,7 +850,6 @@ export const testItems = pgTable("test_items", {
     fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
     run("npm", ["run", "db:generate"], projectDir);
   } else if (database === "sqlite") {
-    run("npm", ["install"], projectDir);
     const schemaFile = path.join(
       projectDir,
       "src",
@@ -936,16 +1009,15 @@ async function verifyVariant(variant, step, total, pgContext) {
         verifyNoDatabaseArtifacts(backendDir);
       }
 
-      // Frontend: install, build, lint
+      // Frontend: install, audit, build, lint
       run("npm", ["install"], frontendDir);
+      run("npm", ["audit", "--audit-level=moderate"], frontendDir);
       run("npm", ["run", "build"], frontendDir);
       run("npm", ["run", "lint"], frontendDir);
 
-      // Backend: install, build (si TS), lint, typecheck (si TS), test
+      // Backend: install, audit, build (si TS), lint, typecheck (si TS), test
       run("npm", ["install"], backendDir);
-      if (apiDocs) {
-        run("npm", ["audit", "--audit-level=moderate"], backendDir);
-      }
+      run("npm", ["audit", "--audit-level=moderate"], backendDir);
       if (language === "ts") {
         run("npm", ["run", "build"], backendDir);
         run("npm", ["run", "typecheck"], backendDir);
@@ -964,9 +1036,24 @@ async function verifyVariant(variant, step, total, pgContext) {
       const entryPoint = language === "ts" ? "dist/index.js" : "src/index.js";
       let backendChild;
       let viteChild;
+
+      const envExample = path.join(backendDir, ".env.example");
+      const envFile = path.join(backendDir, ".env");
+      let createdEnv = false;
+
       try {
-        const backendEnv = apiDocs ? { ENABLE_API_DOCS: "true" } : {};
-        const backend = await startBackendServer(backendDir, entryPoint, backendEnv);
+        if (apiDocs) {
+          let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
+          if (envContent.includes("ENABLE_API_DOCS=")) {
+            envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
+          } else {
+            envContent += "\nENABLE_API_DOCS=true\n";
+          }
+          fs.writeFileSync(envFile, envContent, "utf-8");
+          createdEnv = true;
+        }
+
+        const backend = await startBackendServer(backendDir, entryPoint);
         backendChild = backend.child;
 
         const vite = await startViteServer(frontendDir, backend.port);
@@ -1004,19 +1091,34 @@ async function verifyVariant(variant, step, total, pgContext) {
           console.log("✔ GET /api/docs vía Vite respondió 301 con Location: docs/");
 
           console.log(`Verificando GET http://127.0.0.1:${vite.port}/api/docs/...`);
-          const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`);
+          const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`, {
+            redirect: "manual",
+          });
           if (resDocs.status !== 200) {
             throw new Error(
-              `Esperado status 200 en /api/docs/ vía Vite, recibido ${resDocs.status}`,
+              `Esperado status 200 directo en /api/docs/ vía Vite, recibido ${resDocs.status}`,
+            );
+          }
+          if (resDocs.headers.get("location")) {
+            throw new Error(
+              `Inesperada redirección en /api/docs/ vía Vite con Location: '${resDocs.headers.get("location")}'`,
             );
           }
           const docsHtml = await resDocs.text();
           if (!docsHtml.includes("swagger-ui")) {
             throw new Error("HTML en /api/docs/ vía Vite no contiene 'swagger-ui'");
           }
-          console.log("✔ GET /api/docs/ vía Vite respondió 200 con Swagger UI");
+          console.log("✔ GET /api/docs/ vía Vite respondió 200 directo con Swagger UI");
+
+          await verifySwaggerUiAssets(docsHtml, `http://127.0.0.1:${vite.port}/api/docs/`);
+          console.log(
+            "✔ Assets CSS y JS de Swagger UI verificados correctamente vía Vite proxy (status 200 y Content-Type)",
+          );
         }
       } finally {
+        if (createdEnv) {
+          fs.rmSync(envFile, { force: true });
+        }
         console.log("Cerrando servidores Vite y backend...");
         await stopProcess(viteChild);
         await stopProcess(backendChild);
@@ -1027,9 +1129,7 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       run("npm", ["install"], projectDir);
-      if (apiDocs) {
-        run("npm", ["audit", "--audit-level=moderate"], projectDir);
-      }
+      run("npm", ["audit", "--audit-level=moderate"], projectDir);
       if (modality === "frontend" || language === "ts") {
         run("npm", ["run", "build"], projectDir);
       }
