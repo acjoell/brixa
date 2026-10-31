@@ -725,6 +725,95 @@ async function applyApiDocsOverlay(targetBackendDir: string, language: Language)
 }
 
 // ---------------------------------------------------------------------------
+// Overlay opcional: Internacionalización (i18n)
+// ---------------------------------------------------------------------------
+
+async function applyI18nOverlay(targetFrontendDir: string, language: Language): Promise<void> {
+  const overlayDir = path.join(templatesDir(), "i18n", language);
+
+  // 1. Copiar archivos del overlay sobre la plantilla base
+  await copyDir(overlayDir, targetFrontendDir, path.basename(targetFrontendDir));
+
+  // 2. Fusionar package.json: añadir dependencias i18n y script check:i18n
+  const pkgPath = path.join(targetFrontendDir, "package.json");
+  const pkgRaw = await fs.readFile(pkgPath, "utf-8");
+  const pkgJson = JSON.parse(pkgRaw) as PackageJson;
+
+  const overlayDeps: PackageJsonOverlay = {
+    scripts: {
+      "check:i18n": "node scripts/check-i18n.mjs",
+    },
+    dependencies: {
+      i18next: "26.5.12",
+      "react-i18next": "17.1.9",
+      "i18next-browser-languagedetector": "8.2.4",
+    },
+  };
+
+  const merged = mergePackageJson(pkgJson, overlayDeps);
+  await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+}
+
+async function appendFrontendReadmeI18n(readmePath: string): Promise<void> {
+  const content = `
+## Internacionalización (i18n)
+
+Este proyecto incluye soporte opcional de internacionalización con [i18next](https://www.i18next.com/) y [react-i18next](https://react.i18next.com/).
+
+Idiomas incluidos de ejemplo: inglés (\`en\`) y español (\`es\`).
+
+### Cómo añadir un idioma
+
+1. Crea el archivo \`src/locales/<código>.json\` con las mismas claves que \`src/locales/en.json\`.
+2. Importa el nuevo JSON en \`src/i18n.ts\` (o \`src/i18n.js\`) y regístralo en \`resources\`.
+3. Añade el código a la lista \`supportedLngs\` en la configuración de i18next.
+4. Añade la opción correspondiente en \`src/components/LanguageSelector\`.
+5. Ejecuta \`npm run check:i18n\` para verificar la paridad de claves.
+
+### Cómo añadir una clave de traducción
+
+1. Añade la clave anidada en \`src/locales/en.json\` (el idioma de referencia).
+2. Añade la correspondiente traducción en los demás archivos de idioma (\`src/locales/*.json\`).
+3. Ejecuta \`npm run check:i18n\` para comprobar la coherencia de claves y marcadores.
+4. En TypeScript, las claves se tipan automáticamente a partir de \`en.json\`.
+
+### Verificación de paridad de traducciones
+
+\`\`\`bash
+npm run check:i18n
+\`\`\`
+
+### Límites conocidos
+
+- El \`<title>\` del documento HTML es estático (no cambia dinámicamente según el idioma).
+- Solo se contemplan idiomas con dirección de lectura de izquierda a derecha (LTR).
+- El backend no incluye traducción de mensajes o respuestas.
+- Sin carga diferida de traducciones (los recursos se empaquetan en el bundle inicial).
+`;
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+async function appendRootReadmeI18nFullstack(readmePath: string): Promise<void> {
+  const content = `
+### Internacionalización (Frontend)
+El frontend incluye soporte de internacionalización con i18next y selector de idioma. Consulta \`frontend/README.md\` para añadir idiomas o claves, y ejecuta \`npm run check:i18n\` dentro de \`frontend/\` para verificar paridad.
+`;
+  try {
+    const existing = await fs.readFile(readmePath, "utf-8");
+    const separator = existing.endsWith("\n") ? "" : "\n";
+    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
+  } catch {
+    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
 
@@ -803,6 +892,12 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         }
       }
 
+      if (options.i18n) {
+        await applyI18nOverlay(frontendDest, language);
+        await appendFrontendReadmeI18n(path.join(frontendDest, "README.md"));
+        await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
+      }
+
       return { ok: true };
     } catch (err) {
       return {
@@ -828,6 +923,11 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
 
   try {
     await copyTemplate(templateSrc, outputDir);
+
+    if (modality === "frontend" && options.i18n) {
+      await applyI18nOverlay(outputDir, language);
+      await appendFrontendReadmeI18n(path.join(outputDir, "README.md"));
+    }
 
     if (modality === "backend") {
       if (database === "postgres") {
@@ -1040,6 +1140,7 @@ export function nextStepsMessage(
   docker?: boolean,
   language?: Language,
   apiDocs?: boolean,
+  i18n?: boolean,
 ): string {
   const name = path.basename(outputDir);
 
@@ -1114,6 +1215,15 @@ export function nextStepsMessage(
       );
     }
 
+    if (i18n) {
+      lines.push(
+        "",
+        "  # Internacionalización:",
+        "  # Verifica paridad de claves y marcadores:",
+        "  cd frontend && npm run check:i18n && cd ..",
+      );
+    }
+
     lines.push("");
     return lines.join("\n");
   }
@@ -1175,6 +1285,15 @@ export function nextStepsMessage(
       "  # Documentación de API:",
       "  # 1. Configura ENABLE_API_DOCS=true en .env para activarla",
       "  # 2. Accede en el navegador a http://localhost:3000/docs",
+    );
+  }
+
+  if (i18n) {
+    lines.push(
+      "",
+      "  # Internacionalización:",
+      "  # Verifica paridad de claves y marcadores:",
+      "  npm run check:i18n",
     );
   }
 

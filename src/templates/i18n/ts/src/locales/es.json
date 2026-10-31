@@ -1,0 +1,20 @@
+{
+  "home": {
+    "title": "Comenzar",
+    "edit": "Edita <codeFile>src/App.tsx</codeFile> y guarda para probar <codeHmr>HMR</codeHmr>",
+    "counter": "El contador es {{val}}"
+  },
+  "docs": {
+    "title": "Documentación",
+    "subtitle": "Tus dudas, resueltas",
+    "exploreVite": "Explorar Vite",
+    "learnMore": "Aprender más"
+  },
+  "social": {
+    "title": "Conéctate con nosotros",
+    "subtitle": "Únete a la comunidad de Vite"
+  },
+  "selector": {
+    "label": "Idioma"
+  }
+}

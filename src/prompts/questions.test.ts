@@ -26,18 +26,23 @@ describe("runPrompts", () => {
 
   it("devuelve las opciones cuando el usuario completa los prompts en frontend sin preguntar BD", async () => {
     selectMock.mockResolvedValueOnce("frontend").mockResolvedValueOnce("ts");
+    confirmMock.mockResolvedValueOnce(true);
     inputMock.mockResolvedValueOnce("./my-app");
 
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(2);
-    expect(confirmMock).not.toHaveBeenCalled();
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "¿Internacionalización (i18n)?" }),
+    );
     expect(result).toEqual({
       modality: "frontend",
       language: "ts",
       database: "none",
       docker: false,
       apiDocs: false,
+      i18n: true,
       outputDir: "./my-app",
     });
   });
@@ -69,6 +74,7 @@ describe("runPrompts", () => {
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(3);
+    // Backend pregunta docker y apiDocs, pero NO i18n
     expect(confirmMock).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
       modality: "backend",
@@ -76,6 +82,7 @@ describe("runPrompts", () => {
       database: "postgres",
       docker: false,
       apiDocs: true,
+      i18n: false,
       outputDir: "/home/user/projects/api",
     });
   });

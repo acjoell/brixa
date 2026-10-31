@@ -734,6 +734,30 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 ---
 
+### D-052 — Internacionalización opcional con i18next
+
+**Estado:** Confirmada.
+
+**Deuda:** V1–V4 y N1–N7 se ejecutaron una vez; falta integrarlos en verify:generated.
+
+**Contexto:** T-013c. Se compararon react-i18next, react-intl, Lingui e `Intl` + Context propio con `vite build` real (informe de investigación, 2026-10-31).
+
+**Decisión:** i18n es opcional, desactivada por defecto, y solo se ofrece en frontend y aplicación completa. Usa `i18next` 26.5.12, `react-i18next` 17.1.9 e `i18next-browser-languagedetector` 8.2.4 (dependencias de producción, solo en proyectos que la activan).
+
+Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resolución al idioma base (`es-CO` → `es`), detector restringido a `['localStorage','navigator']` con persistencia en `localStorage`, recursos JSON empaquetados con inicialización síncrona, `<html lang>` actualizado en cada cambio, selector `<select>` con etiqueta accesible que usa `resolvedLanguage`. En TypeScript, claves tipadas con `CustomTypeOptions` y `es` validado con `satisfies`. Script `check:i18n` (Node, sin dependencias) que compara claves y marcadores entre idiomas.
+
+**Motivo:** Ecosistema maduro, formato JSON estándar, y camino de crecimiento (más idiomas, namespaces) sin reescribir los puntos de uso. El coste (+18.6 KB gzip, +6 paquetes) solo lo asume quien activa la capacidad. Se descartó la opción propia (`Intl` + Context, +0.84 KB) porque obligaría a migrar si el proyecto crece; Lingui, por su integración incompleta con Vite 8 y +80 paquetes; react-intl, porque no se necesita ICU extensivo.
+
+**Consecuencias:**
+- Foundry debe revisar las subidas de versión mayor de las tres librerías.
+- Límites documentados: `<title>` estático, solo idiomas de izquierda a derecha, backend sin traducir, sin carga diferida ni namespaces.
+- Variable de interpolación `val` (no `count`) para evitar plurales implícitos.
+- No se necesita `resolveJsonModule` con `moduleResolution: bundler`.
+
+**No verificado:** clic real en el selector en un navegador (comprobación manual del responsable pendiente); e2e en navegador; SSR de producción.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).

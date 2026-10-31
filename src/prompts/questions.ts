@@ -58,12 +58,20 @@ export async function runPrompts(): Promise<RawOptions | null> {
       });
     }
 
+    let i18n = false;
+    if (modality === "frontend" || modality === "fullstack") {
+      i18n = await confirm({
+        message: "¿Internacionalización (i18n)?",
+        default: false,
+      });
+    }
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, database, docker, apiDocs, outputDir };
+    return { modality, language, database, docker, apiDocs, i18n, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

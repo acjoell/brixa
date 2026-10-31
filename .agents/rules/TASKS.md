@@ -441,6 +441,19 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 - Se puede activar sin incorporar dependencias innecesarias a otros proyectos.
 - Las combinaciones afectadas se verifican.
 
+**T-013d — Integrar la verificación de i18n en verify:generated**
+
+**Estado:** PENDIENTE
+**Prioridad:** P1
+**Fase:** 4
+**Dependencia:** T-013c
+**Bloquea:** T-016 (criterio P-005: todas las variantes con capacidades verificadas)
+
+- Añadir al arnés V1–V4 con el mínimo de variantes (frontend ts, frontend js, fullstack ts SQLite, fullstack js SQLite).
+- Convertir N1–N7 en controles repetibles.
+- Comprobar por variante typecheck, lint, format:check, build y audit.
+- Comprobar `tsc --showConfig` sobre `resolveJsonModule`.
+
 ### T-014 — Diseñar e implementar autenticación y autorización
 
 **Estado:** PENDIENTE  

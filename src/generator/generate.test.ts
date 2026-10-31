@@ -12,7 +12,12 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { generate, formatGenerateError, mergePackageJson } from "./generate.js";
+import {
+  generate,
+  formatGenerateError,
+  mergePackageJson,
+  nextStepsMessage,
+} from "./generate.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -650,5 +655,132 @@ describe("generate — apiDocs opcional", () => {
 
     const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
     expect(envContent).toContain("ENABLE_API_DOCS=false");
+  });
+});
+
+describe("generate — i18n opcional (T-013c)", () => {
+  it("(a) sin i18n, frontend ts no genera archivos i18n ni dependencias", async () => {
+    const dest = await mkTmp("frontend-ts-no-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      i18n: false,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "src", "i18n.ts"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "src", "locales"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "scripts", "check-i18n.mjs"))).rejects.toThrow();
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.["i18next"]).toBeUndefined();
+    expect(pkg.dependencies?.["react-i18next"]).toBeUndefined();
+    expect(pkg.dependencies?.["i18next-browser-languagedetector"]).toBeUndefined();
+    expect(pkg.scripts?.["check:i18n"]).toBeUndefined();
+  });
+
+  it("(b) con i18n, frontend ts añade exactamente las tres dependencias y el script check:i18n", async () => {
+    const dest = await mkTmp("frontend-ts-with-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    await expect(fs.access(path.join(dest, "src", "i18n.ts"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "locales", "en.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "locales", "es.json"))).resolves.toBeUndefined();
+    await expect(
+      fs.access(path.join(dest, "src", "components", "LanguageSelector.tsx")),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "scripts", "check-i18n.mjs"))).resolves.toBeUndefined();
+
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.["i18next"]).toBe("26.5.12");
+    expect(pkg.dependencies?.["react-i18next"]).toBe("17.1.9");
+    expect(pkg.dependencies?.["i18next-browser-languagedetector"]).toBe("8.2.4");
+    expect(pkg.scripts?.["check:i18n"]).toBe("node scripts/check-i18n.mjs");
+  });
+
+  it("(c) i18n no se aplica en backend aunque se solicite", async () => {
+    const dest = await mkTmp("backend-no-i18n");
+    const result = await generate({
+      modality: "backend",
+      language: "ts",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(dest, "src", "i18n.ts"))).rejects.toThrow();
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf-8")) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.["i18next"]).toBeUndefined();
+  });
+
+  it("(d) fullstack ts sqlite con i18n: overlay de proxy y de i18n se componen sin conflicto", async () => {
+    const dest = await mkTmp("fullstack-ts-sqlite-i18n");
+    const result = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "sqlite",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    // Proxy overlay presente
+    const viteContent = await fs.readFile(path.join(dest, "frontend", "vite.config.ts"), "utf-8");
+    expect(viteContent).toContain("proxy");
+    expect(viteContent).toContain("BACKEND_URL");
+
+    // i18n overlay presente en frontend
+    await expect(
+      fs.access(path.join(dest, "frontend", "src", "i18n.ts")),
+    ).resolves.toBeUndefined();
+    await expect(
+      fs.access(path.join(dest, "frontend", "src", "locales", "en.json")),
+    ).resolves.toBeUndefined();
+
+    // Backend sin i18n
+    await expect(fs.access(path.join(dest, "backend", "src", "i18n.ts"))).rejects.toThrow();
+
+    const frontPkg = JSON.parse(
+      await fs.readFile(path.join(dest, "frontend", "package.json"), "utf-8"),
+    ) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(frontPkg.dependencies?.["i18next"]).toBe("26.5.12");
+  });
+
+  it("(e) nextStepsMessage muestra check:i18n cuando i18n está activo", () => {
+    const frontendMsg = nextStepsMessage(
+      "/tmp/my-app",
+      "frontend",
+      "none",
+      false,
+      "ts",
+      false,
+      true,
+    );
+    expect(frontendMsg).toContain("npm run check:i18n");
+
+    const fullstackMsg = nextStepsMessage(
+      "/tmp/my-app",
+      "fullstack",
+      "sqlite",
+      false,
+      "ts",
+      false,
+      true,
+    );
+    expect(fullstackMsg).toContain("cd frontend && npm run check:i18n");
   });
 });
