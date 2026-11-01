@@ -23,6 +23,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
+import { verifyI18n } from "./verify-i18n.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -552,11 +553,20 @@ export async function generateProject(
   database = "none",
   docker = false,
   apiDocs = false,
+  i18n = false,
 ) {
   const distGenerate = path.join(root, "dist", "generator", "generate.js");
   const { generate } = await import(distGenerate);
 
-  const result = await generate({ modality, language, database, docker, apiDocs, outputDir });
+  const result = await generate({
+    modality,
+    language,
+    database,
+    docker,
+    apiDocs,
+    i18n,
+    outputDir,
+  });
 
   if (!result.ok) {
     throw new Error(`generate() falló: ${JSON.stringify(result.error)}`);
@@ -967,13 +977,33 @@ export const testItems = sqliteTable("test_items", {
 // Verificación de una variante
 // ---------------------------------------------------------------------------
 
-async function verifyVariant(variant, step, total, pgContext) {
-  const { modality, language, database = "none", docker = false, apiDocs = false } = variant;
+function getVariantLabel(variant) {
+  const {
+    modality,
+    language,
+    database = "none",
+    docker = false,
+    apiDocs = false,
+    i18n = false,
+  } = variant;
   const labelParts = [modality, language];
   if (database !== "none") labelParts.push(database);
   if (docker) labelParts.push("docker");
   if (apiDocs) labelParts.push("docs");
-  const label = labelParts.join("+");
+  if (i18n) labelParts.push("i18n");
+  return labelParts.join("+");
+}
+
+async function verifyVariant(variant, step, total, pgContext) {
+  const {
+    modality,
+    language,
+    database = "none",
+    docker = false,
+    apiDocs = false,
+    i18n = false,
+  } = variant;
+  const label = getVariantLabel(variant);
   console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
   const tmpBase = fs.mkdtempSync(
@@ -982,7 +1012,7 @@ async function verifyVariant(variant, step, total, pgContext) {
   const projectDir = path.join(tmpBase, "test-project");
 
   try {
-    await generateProject(modality, language, projectDir, database, docker, apiDocs);
+    await generateProject(modality, language, projectDir, database, docker, apiDocs, i18n);
     console.log(`Proyecto generado en: ${projectDir}`);
 
     if (docker) {
@@ -1123,6 +1153,10 @@ async function verifyVariant(variant, step, total, pgContext) {
         await stopProcess(viteChild);
         await stopProcess(backendChild);
       }
+
+      if (i18n) {
+        await verifyI18n(frontendDir, language);
+      }
     } else {
       if (modality === "backend" && !hasDb) {
         verifyNoDatabaseArtifacts(projectDir);
@@ -1134,6 +1168,10 @@ async function verifyVariant(variant, step, total, pgContext) {
         run("npm", ["run", "build"], projectDir);
       }
       run("npm", ["run", "lint"], projectDir);
+
+      if (modality === "frontend" && i18n) {
+        await verifyI18n(projectDir, language);
+      }
 
       if (modality === "backend") {
         if (language === "ts") {
@@ -1340,18 +1378,31 @@ const VARIANTS = [
   { modality: "backend", language: "js", database: "none", apiDocs: true },
   { modality: "fullstack", language: "ts", database: "postgres", docker: true, apiDocs: true },
   { modality: "fullstack", language: "js", database: "sqlite", docker: false, apiDocs: true },
+  { modality: "frontend", language: "ts", database: "none", i18n: true },
+  { modality: "fullstack", language: "js", database: "sqlite", docker: false, i18n: true },
 ];
 
 async function main() {
-  const total = VARIANTS.length + 2; // 1 build + N variantes + 1 resumen
+  const filterArgs = process.argv.slice(2);
+  const variantsToRun =
+    filterArgs.length > 0
+      ? VARIANTS.filter((v) => filterArgs.includes(getVariantLabel(v)))
+      : VARIANTS;
+
+  if (variantsToRun.length === 0) {
+    console.error(`Ninguna variante coincide con: ${filterArgs.join(", ")}`);
+    process.exit(1);
+  }
+
+  const total = variantsToRun.length + 2; // 1 build + N variantes + 1 resumen
   console.log(`=== 1/${total}  npm run build ===`);
   run("npm", ["run", "build"], root);
 
   const pgContext = await setupPostgres();
 
   try {
-    for (let i = 0; i < VARIANTS.length; i++) {
-      await verifyVariant(VARIANTS[i], i + 2, total, pgContext);
+    for (let i = 0; i < variantsToRun.length; i++) {
+      await verifyVariant(variantsToRun[i], i + 2, total, pgContext);
     }
   } finally {
     await pgContext.stop();
