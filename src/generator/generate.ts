@@ -1,5 +1,5 @@
 /**
- * Foundry — orquestación de la generación de proyectos.
+ * Brixa — orquestación de la generación de proyectos.
  *
  * Copia la plantilla al directorio de destino, renombra _gitignore a .gitignore
  * e interpola el nombre del proyecto en package.json e index.html.
@@ -90,7 +90,7 @@ const SINGLE_TEMPLATES: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function interpolate(content: string, projectName: string): string {
-  return content.replaceAll("foundry-tpl", projectName);
+  return content.replaceAll("brixa-tpl", projectName);
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,7 +1031,7 @@ function generateFullstackReadme(projectName: string, language: string): string 
   const langLabel = language === "ts" ? "TypeScript" : "JavaScript";
   return `# ${projectName}
 
-Aplicación fullstack generada con Foundry.
+Aplicación fullstack generada con Brixa.
 
 ## Estructura
 
@@ -1098,7 +1098,7 @@ BACKEND_URL=http://localhost:4000 npm run dev
 
 ## Despliegue en producción
 
-El proxy de Vite es exclusivo para desarrollo local. El despliegue en producción no está resuelto por Foundry. Para producción es necesario:
+El proxy de Vite es exclusivo para desarrollo local. El despliegue en producción no está resuelto por Brixa. Para producción es necesario:
 
 1. Compilar el frontend (\`npm run build\` dentro de \`frontend/\`).
 2. Servir los archivos estáticos resultantes (\`dist/\`) y enrutar las peticiones \`/api/*\` al backend mediante un proxy inverso (como Nginx, Caddy o un API gateway) o servir el frontend compilado desde el propio servidor backend.

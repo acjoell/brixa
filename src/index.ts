@@ -1,5 +1,5 @@
 /**
- * Foundry — punto de entrada del CLI.
+ * Brixa — punto de entrada del CLI.
  *
  * Devuelve el código de salida en lugar de llamar a process.exit directamente,
  * para que los tests puedan comprobar el resultado sin efectos secundarios.

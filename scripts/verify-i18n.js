@@ -18,7 +18,10 @@ function getLeaves(obj, prefix = "") {
 }
 
 function cleanVal(str) {
-  return str.replace(/<[^>]+>/g, "").replace(/\{\{val\}\}/g, "0").trim();
+  return str
+    .replace(/<[^>]+>/g, "")
+    .replace(/\{\{val\}\}/g, "0")
+    .trim();
 }
 
 async function verifyV2SSR(frontendDir, language) {

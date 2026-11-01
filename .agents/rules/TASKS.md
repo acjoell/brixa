@@ -399,7 +399,7 @@ Actividades:
 
 ### T-013 — Incorporar capacidades opcionales de desarrollo (incluidas en 0.1.0)
 
-**Estado:** PENDIENTE
+**Estado:** COMPLETADA
 **Prioridad:** P1
 **Fase:** 4
 **Dependencia:** T-012
@@ -443,7 +443,7 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 **T-013d — Integrar la verificación de i18n en verify:generated**
 
-**Estado:** PENDIENTE
+**Estado:** COMPLETADA (alcance reducido, 2026-11-01)
 **Prioridad:** P1
 **Fase:** 4
 **Dependencia:** T-013c

@@ -1,5 +1,5 @@
 {
-  "name": "foundry",
+  "name": "@acjoell/brixa",
   "version": "0.1.0",
   "description": "CLI interactivo para generar proyectos web configurables.",
   "type": "module",

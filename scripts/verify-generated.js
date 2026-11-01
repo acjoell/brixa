@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Foundry — verify:generated
+ * Brixa — verify:generated
  *
  * Verifica de forma reproducible que los proyectos generados se instalan,
  * compilan y pasan el lint correctamente, incluyendo las variantes con persistencia PostgreSQL.
  *
  * Pasos:
- *   1. npm run build (Foundry CLI)
+ *   1. npm run build (Brixa CLI)
  *   2. Para cada variante soportada:
  *      a. Genera el proyecto en un directorio temporal
  *      b. npm install, npm run build, npm run lint, tests
@@ -372,10 +372,10 @@ function isDockerAvailable() {
 
 async function startPostgresContainer() {
   const port = await getFreePort();
-  const containerName = `foundry-pg-verify-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const user = "foundry_test";
-  const pass = "foundry_pass";
-  const db = "foundry_db";
+  const containerName = `brixa-pg-verify-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const user = "brixa_test";
+  const pass = "brixa_pass";
+  const db = "brixa_db";
 
   console.log(`\nIniciando contenedor PostgreSQL desechable en 127.0.0.1:${port}...`);
   execFileSync(
@@ -591,9 +591,9 @@ async function verifyDockerVariant(
     const envLines = [];
     if (database === "postgres") {
       envLines.push(
-        "POSTGRES_USER=foundry_test",
-        "POSTGRES_PASSWORD=foundry_pass_123",
-        "POSTGRES_DB=foundry_db",
+        "POSTGRES_USER=brixa_test",
+        "POSTGRES_PASSWORD=brixa_pass_123",
+        "POSTGRES_DB=brixa_db",
       );
     }
     if (apiDocs) {
@@ -785,9 +785,9 @@ export const testItems = sqliteTable("test_items", {
             "postgres",
             "psql",
             "-U",
-            "foundry_test",
+            "brixa_test",
             "-d",
-            "foundry_db",
+            "brixa_db",
             "-tAc",
             checkSql,
           ],
@@ -831,11 +831,9 @@ export const testItems = sqliteTable("test_items", {
   if (database === "postgres") {
     const envFile = path.join(projectDir, ".env");
     const envContent =
-      [
-        "POSTGRES_USER=foundry_test",
-        "POSTGRES_PASSWORD=foundry_pass_123",
-        "POSTGRES_DB=foundry_db",
-      ].join("\n") + "\n";
+      ["POSTGRES_USER=brixa_test", "POSTGRES_PASSWORD=brixa_pass_123", "POSTGRES_DB=brixa_db"].join(
+        "\n",
+      ) + "\n";
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
@@ -934,9 +932,9 @@ export const testItems = sqliteTable("test_items", {
           "postgres",
           "psql",
           "-U",
-          "foundry_test",
+          "brixa_test",
           "-d",
-          "foundry_db",
+          "brixa_db",
           "-tAc",
           checkSql,
         ],
@@ -1007,7 +1005,7 @@ async function verifyVariant(variant, step, total, pgContext) {
   console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
   const tmpBase = fs.mkdtempSync(
-    path.join(os.tmpdir(), `foundry-verify-${label.replace(/\+/g, "-")}-`),
+    path.join(os.tmpdir(), `brixa-verify-${label.replace(/\+/g, "-")}-`),
   );
   const projectDir = path.join(tmpBase, "test-project");
 
@@ -1222,7 +1220,7 @@ async function verifyDatabaseIntegration(backendDir, language, pgContext, varian
   let databaseUrl = pgContext.databaseUrl;
   if (pgContext.containerName && pgContext.user && pgContext.pass && pgContext.port) {
     // Nombre seguro para la base de datos: solo letras, dígitos y guiones bajos
-    const dbName = `foundry_${variantLabel.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
+    const dbName = `brixa_${variantLabel.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
     console.log(`\nCreando base de datos aislada '${dbName}' para variante ${variantLabel}...`);
     execFileSync(
       "docker",

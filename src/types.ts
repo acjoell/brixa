@@ -1,5 +1,5 @@
 /**
- * Foundry — tipos compartidos entre módulos.
+ * Brixa — tipos compartidos entre módulos.
  * Contrato entre prompts, validation y generator.
  */
 

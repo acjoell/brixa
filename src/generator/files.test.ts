@@ -206,7 +206,7 @@ describe("validateTargetDir", () => {
 
 describe("validateTargetDir (I/O real con tmpdir)", () => {
   it("acepta directorio temporal vacío", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "foundry-test-"));
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-test-"));
     try {
       const result = await validateTargetDir(tmp);
       expect(result.ok).toBe(true);
@@ -220,7 +220,7 @@ describe("validateTargetDir (I/O real con tmpdir)", () => {
   });
 
   it("acepta ruta inexistente dentro de tmpdir", async () => {
-    const target = path.join(os.tmpdir(), `foundry-new-${Date.now()}`);
+    const target = path.join(os.tmpdir(), `brixa-new-${Date.now()}`);
     const result = await validateTargetDir(target);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.willBeCreated).toBe(true);
@@ -229,7 +229,7 @@ describe("validateTargetDir (I/O real con tmpdir)", () => {
   });
 
   it("rechaza directorio temporal no vacío", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "foundry-test-"));
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-test-"));
     try {
       await fs.writeFile(path.join(tmp, "file.txt"), "data");
       const result = await validateTargetDir(tmp);
@@ -241,7 +241,7 @@ describe("validateTargetDir (I/O real con tmpdir)", () => {
   });
 
   it("rechaza archivo en lugar de directorio", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "foundry-test-"));
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-test-"));
     const file = path.join(tmp, "project");
     try {
       await fs.writeFile(file, "not a dir");

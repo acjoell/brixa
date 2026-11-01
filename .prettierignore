@@ -3,7 +3,7 @@ dist/
 node_modules/
 coverage/
 
-# Plantillas estáticas (no son código fuente de Foundry)
+# Plantillas estáticas (no son código fuente de Brixa)
 src/templates/
 
 # Los archivos .md existentes tienen CRLF (pendiente de renormalización aprobada, D-028).

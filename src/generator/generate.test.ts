@@ -1,5 +1,5 @@
 /**
- * Foundry — pruebas de generate.ts
+ * Brixa — pruebas de generate.ts
  *
  * Máximo 4 tests según criterio de T-006:
  * 1. Archivos clave presentes tras la generación.
@@ -12,12 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import {
-  generate,
-  formatGenerateError,
-  mergePackageJson,
-  nextStepsMessage,
-} from "./generate.js";
+import { generate, formatGenerateError, mergePackageJson, nextStepsMessage } from "./generate.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -32,7 +27,7 @@ const KEY_FILES = [
 let tmpDir: string | undefined;
 
 async function mkTmp(projectName: string): Promise<string> {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), "foundry-gen-"));
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-gen-"));
   // generate() crea outputDir si no existe, así que usamos una sub-ruta con nombre real.
   tmpDir = base;
   return path.join(base, projectName);
@@ -73,11 +68,11 @@ describe("generate — frontend + ts", () => {
 
     const pkg = await fs.readFile(path.join(dest, "package.json"), "utf-8");
     expect(pkg).toContain(`"name": "${projectName}"`);
-    expect(pkg).not.toContain("foundry-tpl");
+    expect(pkg).not.toContain("brixa-tpl");
 
     const html = await fs.readFile(path.join(dest, "index.html"), "utf-8");
     expect(html).toContain(`<title>${projectName}</title>`);
-    expect(html).not.toContain("foundry-tpl");
+    expect(html).not.toContain("brixa-tpl");
   });
 });
 
@@ -133,7 +128,7 @@ describe("generate — backend + ts", () => {
 
     const pkg = await fs.readFile(path.join(dest, "package.json"), "utf-8");
     expect(pkg).toContain(`"name": "${projectName}"`);
-    expect(pkg).not.toContain("foundry-tpl");
+    expect(pkg).not.toContain("brixa-tpl");
   });
 });
 
@@ -167,7 +162,7 @@ describe("generate — backend + js", () => {
 
     const pkg = await fs.readFile(path.join(dest, "package.json"), "utf-8");
     expect(pkg).toContain(`"name": "${projectName}"`);
-    expect(pkg).not.toContain("foundry-tpl");
+    expect(pkg).not.toContain("brixa-tpl");
   });
 });
 
@@ -189,12 +184,12 @@ describe("generate — interpolación de nombre en las cuatro variantes base", (
       const pkgContent = await fs.readFile(path.join(dest, "package.json"), "utf-8");
       const pkg = JSON.parse(pkgContent) as { name: string };
       expect(pkg.name).toBe(projectName);
-      expect(pkgContent).not.toContain("foundry-tpl");
+      expect(pkgContent).not.toContain("brixa-tpl");
 
       if (modality === "frontend") {
         const html = await fs.readFile(path.join(dest, "index.html"), "utf-8");
         expect(html).toContain(`<title>${projectName}</title>`);
-        expect(html).not.toContain("foundry-tpl");
+        expect(html).not.toContain("brixa-tpl");
       }
     }
   });
@@ -742,9 +737,7 @@ describe("generate — i18n opcional (T-013c)", () => {
     expect(viteContent).toContain("BACKEND_URL");
 
     // i18n overlay presente en frontend
-    await expect(
-      fs.access(path.join(dest, "frontend", "src", "i18n.ts")),
-    ).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "frontend", "src", "i18n.ts"))).resolves.toBeUndefined();
     await expect(
       fs.access(path.join(dest, "frontend", "src", "locales", "en.json")),
     ).resolves.toBeUndefined();

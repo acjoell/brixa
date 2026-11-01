@@ -756,6 +756,8 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 **No verificado:** clic real en el selector en un navegador (comprobación manual del responsable pendiente); e2e en navegador; SSR de producción.
 
+**Alcance de verificación (reducido):** `verify:generated` (34 variantes) cubre i18n en 2: frontend ts y fullstack js con SQLite. Comprueba `check:i18n`, render en servidor por idioma, detección y persistencia, y cadenas en `dist/`. Quedan fuera las variantes js de frontend, fullstack ts y la de Docker. Los controles negativos (N1–N7) se ejecutaron una vez en T-013c y no son repetibles en el arnés, por lo que este no demuestra por sí mismo que detectaría un fallo de i18n. Ver T-013e.
+
 ---
 
 ## 5. Cuestiones pendientes

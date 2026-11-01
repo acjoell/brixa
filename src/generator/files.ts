@@ -1,5 +1,5 @@
 /**
- * Foundry — operaciones sobre el directorio de destino.
+ * Brixa — operaciones sobre el directorio de destino.
  *
  * Resuelve, valida y comprueba el directorio antes de escribir nada.
  * No realiza ninguna escritura; eso corresponde a T-006.
@@ -162,7 +162,7 @@ export function formatTargetDirError(error: TargetDirError): string {
     case "not_a_directory":
       return `La ruta ya existe y no es un directorio: "${error.resolved}"`;
     case "not_empty":
-      return `El directorio no está vacío: "${error.resolved}"\nFoundry no sobrescribe directorios existentes. Usa un directorio vacío o nuevo.`;
+      return `El directorio no está vacío: "${error.resolved}"\nBrixa no sobrescribe directorios existentes. Usa un directorio vacío o nuevo.`;
     case "permission_denied":
       return `Sin permiso de acceso al directorio: "${error.resolved}"`;
     case "stat_error":
