@@ -1,8 +1,8 @@
-# Foundry — Roadmap
+# Brixa — Roadmap
 
 ## 1. Propósito
 
-Este documento define la evolución prevista de Foundry, un generador de proyectos web configurable mediante una CLI interactiva.
+Este documento define la evolución prevista de Brixa, un generador de proyectos web configurable mediante una CLI interactiva.
 
 El roadmap establece prioridades y dependencias. No implica que una funcionalidad esté implementada ni que una fecha de entrega esté garantizada.
 
@@ -41,11 +41,11 @@ Actividades:
 
 ### Fase 1 — CLI mínimo funcional
 
-**Objetivo:** crear el flujo básico de Foundry y comprobar que puede generar un proyecto utilizable.
+**Objetivo:** crear el flujo básico de Brixa y comprobar que puede generar un proyecto utilizable.
 
 Alcance:
 
-- Comando de ejecución de Foundry.
+- Comando de ejecución de Brixa.
 - Interfaz interactiva sencilla.
 - Selección de modalidad: frontend, backend o aplicación completa.
 - Selección de JavaScript o TypeScript.
@@ -146,7 +146,7 @@ Estas capacidades no deben tratarse como simples fragmentos de código. Cada una
 
 ### Fase 6 — Publicación y mantenimiento
 
-**Objetivo:** distribuir Foundry de forma reproducible y facilitar su evolución.
+**Objetivo:** distribuir Brixa de forma reproducible y facilitar su evolución.
 
 Actividades:
 

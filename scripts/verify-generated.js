@@ -35,7 +35,12 @@ const root = path.resolve(here, "..");
 /** Ejecuta un comando sincrónico e imprime la salida heredada sin exponer variables de entorno sensibles. */
 function run(cmd, args, cwd, extraEnv = {}) {
   console.log(`\n$ ${cmd} ${args.join(" ")}  (cwd: ${cwd})`);
-  execFileSync(cmd, args, { cwd, stdio: "inherit", env: { ...process.env, ...extraEnv } });
+  // Excluir NODE_ENV del entorno heredado para que los builds de Vite usen "production".
+  // Vite establece NODE_ENV="development" cuando lanza createServer, y si ese valor
+  // se propaga a builds hijos, React se incluye en modo desarrollo (~70 kB extra).
+  const env = { ...process.env, ...extraEnv };
+  delete env.NODE_ENV;
+  execFileSync(cmd, args, { cwd, stdio: "inherit", env });
 }
 
 /** Cierra un proceso de forma limpia y fuerza el cierre de todo el árbol en Windows si es necesario. */
@@ -88,9 +93,11 @@ async function getFreePort() {
 /** Arranca el servidor backend en puerto efímero (PORT=0) y devuelve el proceso y el puerto asignado. */
 async function startBackendServer(projectDir, entryPoint = "dist/index.js", extraEnv = {}) {
   console.log(`\nIniciando servidor backend (${entryPoint})...`);
+  const serverEnv = { ...process.env, PORT: "0", ...extraEnv };
+  delete serverEnv.NODE_ENV;
   const child = spawn("node", [entryPoint], {
     cwd: projectDir,
-    env: { ...process.env, PORT: "0", ...extraEnv },
+    env: serverEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -135,9 +142,11 @@ async function startViteServer(frontendDir, backendPort) {
   console.log(
     `\nIniciando servidor de desarrollo de Vite en puerto ${vitePort} (BACKEND_URL=http://127.0.0.1:${backendPort})...`,
   );
+  const viteEnv = { ...process.env, BACKEND_URL: `http://127.0.0.1:${backendPort}` };
+  delete viteEnv.NODE_ENV;
   const child = spawn("node", [viteBin, "--port", String(vitePort), "--strictPort"], {
     cwd: frontendDir,
-    env: { ...process.env, BACKEND_URL: `http://127.0.0.1:${backendPort}` },
+    env: viteEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -1395,6 +1404,26 @@ async function main() {
   const total = variantsToRun.length + 2; // 1 build + N variantes + 1 resumen
   console.log(`=== 1/${total}  npm run build ===`);
   run("npm", ["run", "build"], root);
+
+  // Comprobar que VERIFIED_VARIANTS de dist/ coincide exactamente con VARIANTS del arnés.
+  // Si no coinciden, alguien modificó uno sin actualizar el otro.
+  {
+    const distVerified = await import(path.join(root, "dist", "verified-variants.js"));
+    const distLabels = new Set(distVerified.VERIFIED_VARIANTS.map(distVerified.variantLabel));
+    const arnésLabels = VARIANTS.map(getVariantLabel);
+    const missingInDist = arnésLabels.filter((l) => !distLabels.has(l));
+    const extraInDist = [...distLabels].filter((l) => !arnésLabels.includes(l));
+    if (missingInDist.length > 0 || extraInDist.length > 0) {
+      if (missingInDist.length > 0)
+        console.error(`✖ VERIFIED_VARIANTS falta en dist: ${missingInDist.join(", ")}`);
+      if (extraInDist.length > 0)
+        console.error(`✖ VERIFIED_VARIANTS tiene de más en dist: ${extraInDist.join(", ")}`);
+      process.exit(1);
+    }
+    console.log(
+      `✔ VERIFIED_VARIANTS coincide exactamente con VARIANTS del arnés (${VARIANTS.length} entradas).`,
+    );
+  }
 
   const pgContext = await setupPostgres();
 

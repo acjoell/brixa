@@ -760,6 +760,18 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ---
 
+### D-053 — Combinaciones no verificadas marcadas como experimentales
+
+**Estado:** Confirmada.
+
+**Contexto:** El CLI permite 76 combinaciones de modalidad, lenguaje y capacidades, y 32 están verificadas por `verify:generated`. ARCHITECTURE §13 exige que las no verificadas estén deshabilitadas o identificadas como experimentales.
+
+**Decisión:** El CLI no bloquea las combinaciones no verificadas, pero las identifica como EXPERIMENTALES en el resumen previo a la generación y en el mensaje final. Hay una lista única de variantes verificadas (`src/verified-variants.ts`) y el arnés comprueba que coincide exactamente con sus variantes; si difieren, falla.
+
+**Consecuencias:** Los usuarios mantienen la libertad de elegir. Al añadir una variante al arnés hay que añadirla a la lista. P-005 se reformula: las combinaciones declaradas como soportadas pasan la verificación y el resto son experimentales.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).

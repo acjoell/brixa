@@ -27,7 +27,7 @@ Las decisiones marcadas como pendientes no deben tratarse como requisitos confir
 
 ## Decisiones generales del producto
 
-- Nombre provisional: Foundry.
+- Nombre: Brixa.
 - CLI interactiva con modo simple para el MVP.
 - Generación de frontend, backend o aplicación completa.
 - Frontend inicial: React + Vite.
@@ -41,7 +41,6 @@ Las decisiones marcadas como pendientes no deben tratarse como requisitos confir
 - Licencia AGPL-3.0 para el CLI y las plantillas; el código generado puede usarse y licenciarse libremente, incluso comercialmente (D-042).
 - Contribuciones con DCO, sin CLA (D-043).
 - Versión 0.1.0: MVP técnico + Docker, documentación de API e i18n; autenticación, RBAC y multitenancy después (D-044).
-- Nombre: Foundry es provisional y el paquete `foundry` ya existe en npm (D-046).
 
 Consulta `DECISIONS.md` para conocer el estado y la justificación de cada decisión.
 

@@ -7,7 +7,7 @@
  * 3. Nombre del proyecto sustituido en package.json e index.html.
  * 4. Combinación no soportada devuelve error con código de salida 1.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -775,5 +775,49 @@ describe("generate — i18n opcional (T-013c)", () => {
       true,
     );
     expect(fullstackMsg).toContain("cd frontend && npm run check:i18n");
+  });
+
+  it("nextStepsMessage y generate avisan cuando la combinación no está verificada (experimental)", async () => {
+    // Combinación no verificada: frontend+js+i18n
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dest = await mkTmp("exp-fe-js-i18n");
+    const res = await generate({
+      modality: "frontend",
+      language: "js",
+      database: "none",
+      docker: false,
+      apiDocs: false,
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(res.ok).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("EXPERIMENTAL"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("frontend+js+i18n"));
+    warnSpy.mockRestore();
+
+    const msg = nextStepsMessage(dest, "frontend", "none", false, "js", false, true);
+    expect(msg).toContain("COMBINACIÓN EXPERIMENTAL: frontend+js+i18n");
+    expect(msg).toContain("no está entre las verificadas");
+  });
+
+  it("nextStepsMessage y generate no muestran aviso para una combinación verificada", async () => {
+    // Combinación verificada: frontend+ts+i18n
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dest = await mkTmp("ver-fe-ts-i18n");
+    const res = await generate({
+      modality: "frontend",
+      language: "ts",
+      database: "none",
+      docker: false,
+      apiDocs: false,
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(res.ok).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+
+    const msg = nextStepsMessage(dest, "frontend", "none", false, "ts", false, true);
+    expect(msg).not.toContain("COMBINACIÓN EXPERIMENTAL");
   });
 });

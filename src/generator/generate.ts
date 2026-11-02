@@ -10,6 +10,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type UserOptions, type Modality, type Database, type Language } from "../types.js";
+import { isVerified, variantLabel } from "../verified-variants.js";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -842,6 +843,29 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
     };
   }
 
+  // Resumen previo a la generación
+  const verified = isVerified({
+    modality,
+    language,
+    database,
+    docker: options.docker,
+    apiDocs: options.apiDocs,
+    i18n: options.i18n,
+  });
+  if (!verified) {
+    const label = variantLabel({
+      modality,
+      language,
+      database,
+      docker: options.docker,
+      apiDocs: options.apiDocs,
+      i18n: options.i18n,
+    });
+    console.warn(
+      `\n⚠ Aviso: la combinación ${label} es EXPERIMENTAL (no está entre las combinaciones verificadas por Brixa).\n`,
+    );
+  }
+
   if (modality === "fullstack") {
     try {
       const projectName = path.basename(outputDir);
@@ -1132,6 +1156,7 @@ export function formatGenerateError(error: GenerateError): string {
 
 /**
  * Devuelve los pasos a seguir tras la generación exitosa.
+ * Si la combinación no está entre las verificadas, incluye un aviso EXPERIMENTAL.
  */
 export function nextStepsMessage(
   outputDir: string,
@@ -1143,6 +1168,17 @@ export function nextStepsMessage(
   i18n?: boolean,
 ): string {
   const name = path.basename(outputDir);
+
+  const experimentalWarning =
+    modality && language && !isVerified({ modality, language, database, docker, apiDocs, i18n })
+      ? [
+          "",
+          "  ⚠ COMBINACIÓN EXPERIMENTAL: " +
+            variantLabel({ modality, language, database, docker, apiDocs, i18n }),
+          "  Esta combinación no está entre las verificadas por Brixa.",
+          "  Puede funcionar, pero no ha sido probada de extremo a extremo.",
+        ].join("\n")
+      : "";
 
   if (modality === "fullstack") {
     const lines = [
@@ -1224,6 +1260,7 @@ export function nextStepsMessage(
       );
     }
 
+    if (experimentalWarning) lines.push(experimentalWarning);
     lines.push("");
     return lines.join("\n");
   }
@@ -1297,6 +1334,7 @@ export function nextStepsMessage(
     );
   }
 
+  if (experimentalWarning) lines.push(experimentalWarning);
   lines.push("");
   return lines.join("\n");
 }

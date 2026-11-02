@@ -198,7 +198,6 @@ El generador debería:
 - Definir las versiones estables y combinaciones exactas de Node.js, React, Vite, Express y las herramientas asociadas.
 - Definir la matriz inicial de combinaciones soportadas.
 - Determinar las herramientas y el proceso para verificar cada combinación generada.
-- Nombre definitivo (D-046; el paquete `foundry` ya existe en npm).
 - Licencia: AGPL-3.0 con concesión sobre el código generado (D-042, provisional). Revisión legal recomendada.
 - Contribuciones: DCO sin CLA (D-043, temporal).
 

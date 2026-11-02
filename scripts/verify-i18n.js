@@ -1,275 +1,36 @@
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import fs from "node:fs";
 
-function getLeaves(obj, prefix = "") {
-  const leaves = [];
-  for (const [k, v] of Object.entries(obj)) {
-    const fullKey = prefix ? `${prefix}.${k}` : k;
-    if (typeof v === "object" && v !== null) {
-      leaves.push(...getLeaves(v, fullKey));
-    } else if (typeof v === "string") {
-      leaves.push({ key: fullKey, val: v });
-    }
-  }
-  return leaves;
-}
+const here = path.dirname(fileURLToPath(import.meta.url));
 
-function cleanVal(str) {
-  return str
-    .replace(/<[^>]+>/g, "")
-    .replace(/\{\{val\}\}/g, "0")
-    .trim();
-}
-
+/**
+ * Ejecuta V2 (SSR) en un subproceso aislado para que Vite createServer
+ * no contamine process.env.NODE_ENV del proceso padre del arnés.
+ */
 async function verifyV2SSR(frontendDir, language) {
-  const req = createRequire(path.join(frontendDir, "package.json"));
-  const { createServer } = await import(pathToFileURL(req.resolve("vite")).href);
-  const { renderToString } = await import(pathToFileURL(req.resolve("react-dom/server")).href);
-  const React = (await import(pathToFileURL(req.resolve("react")).href)).default;
-
-  const enJson = JSON.parse(
-    fs.readFileSync(path.join(frontendDir, "src", "locales", "en.json"), "utf-8"),
-  );
-  const esJson = JSON.parse(
-    fs.readFileSync(path.join(frontendDir, "src", "locales", "es.json"), "utf-8"),
-  );
-
-  const vite = await createServer({
-    root: frontendDir,
-    server: { middlewareMode: true },
-    appType: "custom",
+  const v2Script = path.join(here, "verify-i18n-v2.js");
+  // Construir entorno sin NODE_ENV para que Vite lo ponga en "production"
+  const childEnv = { ...process.env };
+  delete childEnv.NODE_ENV;
+  execFileSync(process.execPath, [v2Script, frontendDir, language], {
+    stdio: "inherit",
+    env: childEnv,
   });
-
-  try {
-    const appExt = language === "ts" ? "tsx" : "jsx";
-    const codeExt = language === "ts" ? "ts" : "js";
-    const { default: App } = await vite.ssrLoadModule(`/src/App.${appExt}`);
-    const { default: i18n } = await vite.ssrLoadModule(`/src/i18n.${codeExt}`);
-    const { I18nextProvider } = await vite.ssrLoadModule("react-i18next");
-
-    // Render inglés
-    await i18n.changeLanguage("en");
-    const htmlEn = renderToString(
-      React.createElement(I18nextProvider, { i18n }, React.createElement(App)),
-    );
-    const htmlEnText = htmlEn.replace(/<[^>]+>/g, "");
-
-    // Render español
-    await i18n.changeLanguage("es");
-    const htmlEs = renderToString(
-      React.createElement(I18nextProvider, { i18n }, React.createElement(App)),
-    );
-    const htmlEsText = htmlEs.replace(/<[^>]+>/g, "");
-
-    // a) Por idioma, todos los valores del JSON aparecen en el HTML (texto sin etiquetas)
-    const enLeaves = getLeaves(enJson);
-    for (const { val } of enLeaves) {
-      const cleaned = cleanVal(val);
-      if (!htmlEnText.includes(cleaned)) {
-        throw new Error(`[V2 SSR en] Valor no encontrado en HTML: "${cleaned}"`);
-      }
-    }
-
-    const esLeaves = getLeaves(esJson);
-    for (const { val } of esLeaves) {
-      const cleaned = cleanVal(val);
-      if (!htmlEsText.includes(cleaned)) {
-        throw new Error(`[V2 SSR es] Valor no encontrado en HTML: "${cleaned}"`);
-      }
-    }
-
-    // b) En español no aparece ningún valor inglés distinto del español
-    for (let i = 0; i < enLeaves.length; i++) {
-      const cleanedEn = cleanVal(enLeaves[i].val);
-      const cleanedEs = cleanVal(esLeaves[i].val);
-      if (cleanedEn !== cleanedEs) {
-        if (htmlEsText.includes(cleanedEn)) {
-          throw new Error(
-            `[V2 SSR es] Valor inglés ("${cleanedEn}") encontrado indebidamente en HTML español`,
-          );
-        }
-      }
-    }
-
-    // c) Ninguna clave visible como texto
-    for (const { key } of enLeaves) {
-      if (htmlEnText.includes(key)) {
-        throw new Error(`[V2 SSR en] Clave de traducción visible como texto: "${key}"`);
-      }
-      if (htmlEsText.includes(key)) {
-        throw new Error(`[V2 SSR es] Clave de traducción visible como texto: "${key}"`);
-      }
-    }
-  } finally {
-    await vite.close();
-  }
 }
 
+/**
+ * Ejecuta V3 (localStorage/navigator) en un subproceso aislado para no
+ * contaminar globalThis ni process.env del proceso padre del arnés.
+ */
 async function verifyV3StorageAndNavigator(frontendDir) {
-  const req = createRequire(path.join(frontendDir, "package.json"));
-  const i18next = (await import(pathToFileURL(req.resolve("i18next")).href)).default;
-  const LanguageDetector = (
-    await import(pathToFileURL(req.resolve("i18next-browser-languagedetector")).href)
-  ).default;
-
-  const enJson = JSON.parse(
-    fs.readFileSync(path.join(frontendDir, "src", "locales", "en.json"), "utf-8"),
-  );
-  const esJson = JSON.parse(
-    fs.readFileSync(path.join(frontendDir, "src", "locales", "es.json"), "utf-8"),
-  );
-
-  function createMockStorage(store = {}) {
-    return {
-      getItem: (k) => store[k] ?? null,
-      setItem: (k, v) => {
-        store[k] = String(v);
-      },
-      removeItem: (k) => {
-        Reflect.deleteProperty(store, k);
-      },
-      clear: () => {
-        for (const k of Object.keys(store)) {
-          Reflect.deleteProperty(store, k);
-        }
-      },
-    };
-  }
-
-  function setupEnvironment({ storageStore = {}, navLangs = ["en"] } = {}) {
-    const mockStorage = createMockStorage(storageStore);
-    const mockDoc = { documentElement: { lang: "" } };
-    const mockNav = { languages: navLangs, language: navLangs[0] };
-
-    globalThis.window = { localStorage: mockStorage };
-    globalThis.document = mockDoc;
-    Object.defineProperty(globalThis, "navigator", {
-      value: mockNav,
-      configurable: true,
-      writable: true,
-    });
-
-    const i18n = i18next.createInstance();
-    i18n.use(LanguageDetector);
-    i18n.init({
-      resources: { en: { translation: enJson }, es: { translation: esJson } },
-      supportedLngs: ["en", "es"],
-      fallbackLng: "en",
-      interpolation: { escapeValue: false },
-      detection: {
-        order: ["localStorage", "navigator"],
-        caches: ["localStorage"],
-      },
-    });
-
-    if (typeof globalThis.document !== "undefined") {
-      globalThis.document.documentElement.lang = i18n.resolvedLanguage ?? "en";
-    }
-    i18n.on("languageChanged", (lng) => {
-      if (typeof globalThis.document !== "undefined") {
-        globalThis.document.documentElement.lang = lng.split("-")[0];
-      }
-    });
-
-    return { i18n, mockStorage: storageStore, mockDoc };
-  }
-
-  // 1. es-CO -> es
-  {
-    const { i18n } = setupEnvironment({ navLangs: ["es-CO"] });
-    if (i18n.resolvedLanguage !== "es") {
-      throw new Error(`[V3 es-CO] Esperado 'es', obtenido '${i18n.resolvedLanguage}'`);
-    }
-  }
-
-  // 2. fr -> en
-  {
-    const { i18n } = setupEnvironment({ navLangs: ["fr-FR", "fr"] });
-    if (i18n.resolvedLanguage !== "en") {
-      throw new Error(`[V3 fr] Esperado fallback 'en', obtenido '${i18n.resolvedLanguage}'`);
-    }
-  }
-
-  // 3. localStorage prevalece sobre navigator
-  {
-    const { i18n } = setupEnvironment({
-      storageStore: { i18nextLng: "es" },
-      navLangs: ["en-US", "en"],
-    });
-    if (i18n.resolvedLanguage !== "es") {
-      throw new Error(
-        `[V3 localStorage prevalece] Esperado 'es', obtenido '${i18n.resolvedLanguage}'`,
-      );
-    }
-  }
-
-  // 4. changeLanguage('es') persiste y actualiza document.documentElement.lang
-  {
-    const store = { i18nextLng: "en" };
-    const { i18n, mockDoc } = setupEnvironment({
-      storageStore: store,
-      navLangs: ["en-US"],
-    });
-    await i18n.changeLanguage("es");
-    if (store.i18nextLng !== "es") {
-      throw new Error(
-        `[V3 persistencia] Esperado 'es' en localStorage, obtenido '${store.i18nextLng}'`,
-      );
-    }
-    if (mockDoc.documentElement.lang !== "es") {
-      throw new Error(
-        `[V3 doc.lang] Esperado 'es' en documentElement.lang, obtenido '${mockDoc.documentElement.lang}'`,
-      );
-    }
-  }
-
-  // 5. un localStorage que lanza error no rompe la inicialización (ejecutado en subproceso limpio)
-  const isolatedScript = `
-    import { createRequire } from "node:module";
-    import { pathToFileURL } from "node:url";
-    import fs from "node:fs";
-    import path from "node:path";
-
-    const frontendDir = ${JSON.stringify(frontendDir)};
-    const req = createRequire(path.join(frontendDir, "package.json"));
-    const i18next = (await import(pathToFileURL(req.resolve("i18next")).href)).default;
-    const LanguageDetector = (await import(pathToFileURL(req.resolve("i18next-browser-languagedetector")).href)).default;
-    const en = JSON.parse(fs.readFileSync(path.join(frontendDir, "src", "locales", "en.json"), "utf-8"));
-    const es = JSON.parse(fs.readFileSync(path.join(frontendDir, "src", "locales", "es.json"), "utf-8"));
-
-    globalThis.window = {
-      localStorage: {
-        getItem: () => { throw new Error("SecurityError: storage access denied"); },
-        setItem: () => { throw new Error("SecurityError: storage access denied"); },
-        removeItem: () => { throw new Error("SecurityError: storage access denied"); },
-      }
-    };
-    globalThis.document = { documentElement: { lang: "" } };
-    Object.defineProperty(globalThis, "navigator", {
-      value: { languages: ["es-ES"], language: "es-ES" },
-      configurable: true,
-      writable: true,
-    });
-
-    const i18n = i18next.createInstance();
-    i18n.use(LanguageDetector);
-    i18n.init({
-      resources: { en: { translation: en }, es: { translation: es } },
-      supportedLngs: ["en", "es"],
-      fallbackLng: "en",
-      detection: { order: ["localStorage", "navigator"], caches: ["localStorage"] },
-    });
-
-    if (!i18n.isInitialized || i18n.resolvedLanguage !== "es") {
-      process.exit(1);
-    }
-  `;
-  execFileSync(process.execPath, ["--input-type=module", "-e", isolatedScript], {
-    cwd: frontendDir,
+  const v3Script = path.join(here, "verify-i18n-v3.js");
+  const childEnv = { ...process.env };
+  delete childEnv.NODE_ENV;
+  execFileSync(process.execPath, [v3Script, frontendDir], {
     stdio: "inherit",
+    env: childEnv,
   });
 }
 
@@ -309,14 +70,25 @@ export async function verifyI18n(frontendDir, language) {
   execFileSync("npm", ["run", "check:i18n"], { cwd: frontendDir, stdio: "inherit" });
   console.log("✔ V1. check:i18n completado con éxito.");
 
-  // V2. SSR con Vite createServer + ssrLoadModule + react-dom/server
-  console.log("V2. Verificando SSR con Vite y react-dom/server...");
+  // V2. SSR con Vite createServer en subproceso aislado (evita contaminación de NODE_ENV)
+  const nodeEnvBefore = process.env.NODE_ENV;
+  console.log("V2. Verificando SSR con Vite y react-dom/server (subproceso aislado)...");
   await verifyV2SSR(frontendDir, language);
+  if (process.env.NODE_ENV !== nodeEnvBefore) {
+    throw new Error(
+      `[Arnés] NODE_ENV fue alterado por V2: era ${JSON.stringify(nodeEnvBefore)}, ahora es ${JSON.stringify(process.env.NODE_ENV)}. El aislamiento del subproceso no funcionó.`,
+    );
+  }
   console.log("✔ V2. SSR completado con éxito.");
 
-  // V3. localStorage y navigator simulados
-  console.log("V3. Verificando localStorage y navigator simulados...");
+  // V3. localStorage y navigator simulados en subproceso aislado
+  console.log("V3. Verificando localStorage y navigator simulados (subproceso aislado)...");
   await verifyV3StorageAndNavigator(frontendDir);
+  if (process.env.NODE_ENV !== nodeEnvBefore) {
+    throw new Error(
+      `[Arnés] NODE_ENV fue alterado por V3: era ${JSON.stringify(nodeEnvBefore)}, ahora es ${JSON.stringify(process.env.NODE_ENV)}. El aislamiento del subproceso no funcionó.`,
+    );
+  }
   console.log("✔ V3. localStorage y navigator completado con éxito.");
 
   // V4. Cadenas distintivas de en y es presentes en dist/
