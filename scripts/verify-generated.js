@@ -108,14 +108,25 @@ async function startBackendServer(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  const stdoutLines = [];
+  const stderrLines = [];
+
   const port = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error("Timeout esperando a que el servidor backend arranque"));
+      const outTail = stdoutLines.slice(-30).join("\n").trim();
+      const errTail = stderrLines.slice(-30).join("\n").trim();
+      reject(
+        new Error(
+          `Timeout esperando a que el servidor backend arranque.\n--- Últimas líneas stdout del backend ---\n${outTail || "(vacío)"}\n--- Últimas líneas stderr del backend ---\n${errTail || "(vacío)"}`,
+        ),
+      );
     }, 10000);
 
     let stdout = "";
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const str = chunk.toString();
+      stdoutLines.push(...str.split("\n"));
+      stdout += str;
       const match = stdout.match(/http:\/\/localhost:(\d+)/);
       if (match) {
         clearTimeout(timeout);
@@ -124,6 +135,7 @@ async function startBackendServer(
     });
 
     child.stderr.on("data", (chunk) => {
+      stderrLines.push(...chunk.toString().split("\n"));
       process.stderr.write(chunk);
     });
 
@@ -138,11 +150,11 @@ async function startBackendServer(
     });
   });
 
-  return { child, port };
+  return { child, port, stdoutLines, stderrLines };
 }
 
 /** Arranca el servidor de desarrollo de Vite sin usar npm run, con puerto libre, --strictPort y BACKEND_URL. */
-async function startViteServer(frontendDir, backendPort) {
+async function startViteServer(frontendDir, backendPort, backendLogs = null) {
   const vitePort = await getFreePort();
   const viteBin = path.join(frontendDir, "node_modules", "vite", "bin", "vite.js");
 
@@ -151,18 +163,44 @@ async function startViteServer(frontendDir, backendPort) {
   );
   const viteEnv = { ...process.env, BACKEND_URL: `http://127.0.0.1:${backendPort}` };
   delete viteEnv.NODE_ENV;
-  const child = spawn("node", [viteBin, "--port", String(vitePort), "--strictPort"], {
-    cwd: frontendDir,
-    env: viteEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    "node",
+    [viteBin, "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"],
+    {
+      cwd: frontendDir,
+      env: viteEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  const stdoutLines = [];
+  const stderrLines = [];
 
   await new Promise((resolve, reject) => {
     let resolved = false;
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        reject(new Error("Timeout esperando a que el servidor de Vite arranque"));
+        const outTail = stdoutLines.slice(-30).join("\n").trim();
+        const errTail = stderrLines.slice(-30).join("\n").trim();
+        const parts = [
+          "Timeout esperando a que el servidor de Vite arranque (15s).",
+          "--- Últimas líneas stdout de Vite ---",
+          outTail || "(vacío)",
+          "--- Últimas líneas stderr de Vite ---",
+          errTail || "(vacío)",
+        ];
+        if (backendLogs) {
+          const bOut = backendLogs.stdoutLines?.slice(-30).join("\n").trim();
+          const bErr = backendLogs.stderrLines?.slice(-30).join("\n").trim();
+          parts.push(
+            "--- Últimas líneas stdout del backend ---",
+            bOut || "(vacío)",
+            "--- Últimas líneas stderr del backend ---",
+            bErr || "(vacío)",
+          );
+        }
+        reject(new Error(parts.join("\n")));
       }
     }, 15000);
 
@@ -176,12 +214,14 @@ async function startViteServer(frontendDir, backendPort) {
 
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();
+      stdoutLines.push(...text.split("\n"));
       if (text.includes("Local:") || text.includes(`:${vitePort}`)) {
         checkReady();
       }
     });
 
     child.stderr.on("data", (chunk) => {
+      stderrLines.push(...chunk.toString().split("\n"));
       process.stderr.write(chunk);
     });
 
@@ -1101,7 +1141,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         const backend = await startBackendServer(backendDir, entryPoint);
         backendChild = backend.child;
 
-        const vite = await startViteServer(frontendDir, backend.port);
+        const vite = await startViteServer(frontendDir, backend.port, backend);
         viteChild = vite.child;
 
         console.log(`Vite escuchando en puerto ${vite.port}. Verificando GET /api/health...`);
