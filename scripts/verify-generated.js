@@ -22,7 +22,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, URL } from "node:url";
+import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { verifyI18n } from "./verify-i18n.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,9 @@ function run(cmd, args, cwd, extraEnv = {}) {
   // se propaga a builds hijos, React se incluye en modo desarrollo (~70 kB extra).
   const env = { ...process.env, ...extraEnv };
   delete env.NODE_ENV;
-  execFileSync(cmd, args, { cwd, stdio: "inherit", env });
+  const isWindows = process.platform === "win32";
+  const actualCmd = isWindows && cmd === "npm" ? "npm.cmd" : cmd;
+  execFileSync(actualCmd, args, { cwd, stdio: "inherit", env, shell: isWindows });
 }
 
 /** Cierra un proceso de forma limpia y fuerza el cierre de todo el árbol en Windows si es necesario. */
@@ -91,11 +93,16 @@ async function getFreePort() {
 }
 
 /** Arranca el servidor backend en puerto efímero (PORT=0) y devuelve el proceso y el puerto asignado. */
-async function startBackendServer(projectDir, entryPoint = "dist/index.js", extraEnv = {}) {
-  console.log(`\nIniciando servidor backend (${entryPoint})...`);
+async function startBackendServer(
+  projectDir,
+  entryPoint = path.join("dist", "index.js"),
+  extraEnv = {},
+) {
+  const normEntryPoint = path.normalize(entryPoint);
+  console.log(`\nIniciando servidor backend (${normEntryPoint})...`);
   const serverEnv = { ...process.env, PORT: "0", ...extraEnv };
   delete serverEnv.NODE_ENV;
-  const child = spawn("node", [entryPoint], {
+  const child = spawn("node", [normEntryPoint], {
     cwd: projectDir,
     env: serverEnv,
     stdio: ["ignore", "pipe", "pipe"],
@@ -216,7 +223,7 @@ async function startViteServer(frontendDir, backendPort) {
 }
 
 /** Comprueba que el servidor backend arranca y responde 200 en /health antes de cerrarlo. */
-async function checkBackendServer(projectDir, entryPoint = "dist/index.js") {
+async function checkBackendServer(projectDir, entryPoint = path.join("dist", "index.js")) {
   let backend;
   try {
     backend = await startBackendServer(projectDir, entryPoint);
@@ -283,7 +290,7 @@ async function verifySwaggerUiAssets(html, docsUrl) {
 }
 
 /** Comprueba que la documentación de API responde 404 por defecto y 200/301 con ENABLE_API_DOCS=true. */
-async function checkBackendDocs(projectDir, entryPoint = "dist/index.js") {
+async function checkBackendDocs(projectDir, entryPoint = path.join("dist", "index.js")) {
   const envExample = path.join(projectDir, ".env.example");
   const envFile = path.join(projectDir, ".env");
 
@@ -564,7 +571,7 @@ export async function generateProject(
   apiDocs = false,
   i18n = false,
 ) {
-  const distGenerate = path.join(root, "dist", "generator", "generate.js");
+  const distGenerate = pathToFileURL(path.join(root, "dist", "generator", "generate.js")).href;
   const { generate } = await import(distGenerate);
 
   const result = await generate({
@@ -1070,7 +1077,8 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       // Verificación de comunicación frontend-backend vía proxy Vite
-      const entryPoint = language === "ts" ? "dist/index.js" : "src/index.js";
+      const entryPoint =
+        language === "ts" ? path.join("dist", "index.js") : path.join("src", "index.js");
       let backendChild;
       let viteChild;
 
@@ -1193,7 +1201,8 @@ async function verifyVariant(variant, step, total, pgContext) {
           run("npm", ["run", "test"], projectDir);
         }
 
-        const entryPoint = language === "ts" ? "dist/index.js" : "src/index.js";
+        const entryPoint =
+          language === "ts" ? path.join("dist", "index.js") : path.join("src", "index.js");
         await checkBackendServer(projectDir, entryPoint);
         if (apiDocs) {
           await checkBackendDocs(projectDir, entryPoint);
@@ -1390,14 +1399,28 @@ const VARIANTS = [
 ];
 
 async function main() {
+  const scope = process.env.VERIFY_SCOPE || "full";
+  if (scope !== "portable" && scope !== "full") {
+    console.error(`VERIFY_SCOPE inválido: '${scope}'. Valores permitidos: 'portable' o 'full'.`);
+    process.exit(1);
+  }
+
   const filterArgs = process.argv.slice(2);
-  const variantsToRun =
+  let variantsToRun =
     filterArgs.length > 0
       ? VARIANTS.filter((v) => filterArgs.includes(getVariantLabel(v)))
       : VARIANTS;
 
+  if (scope === "portable") {
+    variantsToRun = variantsToRun.filter((v) => !v.docker && v.database !== "postgres");
+  }
+
   if (variantsToRun.length === 0) {
-    console.error(`Ninguna variante coincide con: ${filterArgs.join(", ")}`);
+    console.error(
+      filterArgs.length > 0
+        ? `Ninguna variante coincide con: ${filterArgs.join(", ")} (ámbito: ${scope})`
+        : `Ninguna variante coincide con los criterios (ámbito: ${scope})`,
+    );
     process.exit(1);
   }
 
@@ -1407,8 +1430,11 @@ async function main() {
 
   // Comprobar que VERIFIED_VARIANTS de dist/ coincide exactamente con VARIANTS del arnés.
   // Si no coinciden, alguien modificó uno sin actualizar el otro.
+  // D-053: La comprobación se hace contra la lista COMPLETA de VARIANTS antes de filtrar por VERIFY_SCOPE.
   {
-    const distVerified = await import(path.join(root, "dist", "verified-variants.js"));
+    const distVerified = await import(
+      pathToFileURL(path.join(root, "dist", "verified-variants.js")).href
+    );
     const distLabels = new Set(distVerified.VERIFIED_VARIANTS.map(distVerified.variantLabel));
     const arnésLabels = VARIANTS.map(getVariantLabel);
     const missingInDist = arnésLabels.filter((l) => !distLabels.has(l));
@@ -1425,7 +1451,11 @@ async function main() {
     );
   }
 
-  const pgContext = await setupPostgres();
+  // El contenedor de PostgreSQL solo se arranca si alguna variante seleccionada lo necesita.
+  const needsPostgres = variantsToRun.some((v) => v.database === "postgres" && !v.docker);
+  const pgContext = needsPostgres
+    ? await setupPostgres()
+    : { databaseUrl: null, stop: async () => {}, available: true };
 
   try {
     for (let i = 0; i < variantsToRun.length; i++) {

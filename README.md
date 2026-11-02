@@ -107,6 +107,6 @@ Lee [CONTRIBUTING.md](CONTRIBUTING.md). Las vulnerabilidades se reportan según 
 
 ## Licencia
 
-El código de Brixa (el CLI y las plantillas) se distribuye bajo la licencia [AGPL-3.0](LICENSE).
+El código de Brixa (el CLI y las plantillas) se distribuye bajo la licencia [AGPL-3.0](LICENSE.md).
 
 **Código generado.** Los proyectos que genera Brixa son tuyos. Puedes usar, modificar, distribuir y licenciar libremente el código generado, incluso con fines comerciales y bajo la licencia que elijas. La AGPL-3.0 se aplica al código de Brixa, no al código que genera. Detalles en [GENERATED_CODE_LICENSE.md](GENERATED_CODE_LICENSE.md).

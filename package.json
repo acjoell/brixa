@@ -3,12 +3,24 @@
   "version": "0.1.0",
   "description": "CLI interactivo para generar proyectos web configurables.",
   "type": "module",
+  "bin": {
+    "brixa": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "GENERATED_CODE_LICENSE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "SECURITY.md"
+  ],
   "engines": {
     "node": "^24.0.0 || >=26.0.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node -e \"require('fs').cpSync('src/templates','dist/templates',{recursive:true})\"",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

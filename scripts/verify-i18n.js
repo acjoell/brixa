@@ -67,7 +67,13 @@ export async function verifyI18n(frontendDir, language) {
 
   // V1. npm run check:i18n
   console.log("V1. Ejecutando check:i18n...");
-  execFileSync("npm", ["run", "check:i18n"], { cwd: frontendDir, stdio: "inherit" });
+  const isWindows = process.platform === "win32";
+  const npmCmd = isWindows ? "npm.cmd" : "npm";
+  execFileSync(npmCmd, ["run", "check:i18n"], {
+    cwd: frontendDir,
+    stdio: "inherit",
+    shell: isWindows,
+  });
   console.log("✔ V1. check:i18n completado con éxito.");
 
   // V2. SSR con Vite createServer en subproceso aislado (evita contaminación de NODE_ENV)

@@ -1,0 +1,78 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matriz inicial reducida a ubuntu-latest y Node 24.
+        # Se ampliará a windows-latest, macos-latest y Node 26 cuando pase la verificación inicial.
+        os: [ubuntu-latest]
+        node-version: [24]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack and verify package contents
+        run: |
+          TARBALL=$(npm pack)
+          echo "Tarball generado: $TARBALL"
+          tar -tf "$TARBALL"
+          ! tar -tf "$TARBALL" | grep -E '^package/(src|tests|scripts|\.agents)/'
+
+      - name: Verify generated projects (portable)
+        run: VERIFY_SCOPE=portable npm run verify:generated
+
+  verify-full:
+    name: Verify Generated Projects (Full Scope with Docker & PostgreSQL)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify generated projects (full)
+        run: VERIFY_SCOPE=full npm run verify:generated
