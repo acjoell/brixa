@@ -178,7 +178,7 @@ async function startViteServer(frontendDir, backendPort, backendLogs = null) {
 
   await new Promise((resolve, reject) => {
     let resolved = false;
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       if (!resolved) {
         resolved = true;
         const outTail = stdoutLines.slice(-30).join("\n").trim();
@@ -200,6 +200,7 @@ async function startViteServer(frontendDir, backendPort, backendLogs = null) {
             bErr || "(vacío)",
           );
         }
+        await stopProcess(child);
         reject(new Error(parts.join("\n")));
       }
     }, 15000);
@@ -1060,9 +1061,8 @@ async function verifyVariant(variant, step, total, pgContext) {
   const label = getVariantLabel(variant);
   console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
 
-  const tmpBase = fs.mkdtempSync(
-    path.join(os.tmpdir(), `brixa-verify-${label.replace(/\+/g, "-")}-`),
-  );
+  const tmpRoot = fs.realpathSync.native(os.tmpdir());
+  const tmpBase = fs.mkdtempSync(path.join(tmpRoot, `brixa-verify-${label.replace(/\+/g, "-")}-`));
   const projectDir = path.join(tmpBase, "test-project");
 
   try {
@@ -1256,8 +1256,12 @@ async function verifyVariant(variant, step, total, pgContext) {
       console.log(`\n✔ ${label} verificado correctamente`);
     }
   } finally {
-    console.log(`\nLimpiando ${tmpBase} …`);
-    fs.rmSync(tmpBase, { recursive: true, force: true });
+    try {
+      console.log(`\nLimpiando ${tmpBase} …`);
+      fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (error) {
+      console.warn(`Aviso: no se pudo limpiar ${tmpBase}: ${error.message}`);
+    }
   }
 }
 
