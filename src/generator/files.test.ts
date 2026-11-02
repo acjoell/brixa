@@ -31,27 +31,27 @@ describe("resolveTargetPath", () => {
     const cwd = "/home/user/projects";
     const result = resolveTargetPath("my-app", cwd);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("/home/user/projects/my-app");
+    if (result.ok) expect(result.value).toBe(path.resolve("/home/user/projects/my-app"));
   });
 
   it("resuelve ruta con '..' a absoluta", () => {
     const cwd = "/home/user/projects/sub";
     const result = resolveTargetPath("../other", cwd);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("/home/user/projects/other");
+    if (result.ok) expect(result.value).toBe(path.resolve("/home/user/projects/other"));
   });
 
   it("devuelve ruta absoluta tal cual", () => {
     const result = resolveTargetPath("/tmp/my-project", "/anything");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("/tmp/my-project");
+    if (result.ok) expect(result.value).toBe(path.resolve("/tmp/my-project"));
   });
 
   it("elimina espacios en el extremo antes de resolver", () => {
     const cwd = "/home/user";
     const result = resolveTargetPath("  app  ", cwd);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("/home/user/app");
+    if (result.ok) expect(result.value).toBe(path.resolve("/home/user/app"));
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { validateOptions, validateOptionsWithDir, formatValidationError } from "./options.js";
 import type { FsAccess } from "../generator/files.js";
+import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Helpers de FsAccess para tests de validateOptionsWithDir
@@ -114,7 +115,7 @@ describe("validateOptionsWithDir", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.outputDir).toBe("/home/user/projects/my-app");
+      expect(result.value.outputDir).toBe(path.resolve("/home/user/projects/my-app"));
       expect(result.value.modality).toBe("frontend");
       expect(result.value.language).toBe("ts");
     }
@@ -137,7 +138,7 @@ describe("validateOptionsWithDir", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.outputDir).toBe("/home/user/projects/sibling");
+      expect(result.value.outputDir).toBe(path.resolve("/home/user/projects/sibling"));
     }
   });
 
