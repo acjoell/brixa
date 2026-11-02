@@ -1,4 +1,3 @@
-
 # Project Decisions
 
 ## 1. Propósito
@@ -159,7 +158,7 @@ No debe añadirse todavía una licencia definitiva al repositorio.
 
 ### D-019 — Nombre provisional Foundry
 
-**Estado:** Propuesta provisional.
+**Estado:** Reemplazada por D-046.
 
 Se utilizará Foundry como nombre de trabajo del proyecto.
 
@@ -262,7 +261,7 @@ No debe considerarse definitiva hasta completar la evaluación correspondiente.
 
 ### P-007 — Confirmación del nombre del proyecto
 
-**Estado:** Pendiente. Comprobado el 2026-10-28: el paquete npm «foundry» ya existe; «create-foundry-app» está ocupado por otro producto (FoundryDB); «@acjoell/foundry» está libre y no se encontró el repositorio acjoell/foundry en GitHub. Ver D-046.
+**Estado:** Resuelta por D-046 (nombre definitivo: Brixa). Histórico: comprobado el 2026-10-28, el paquete npm «foundry» ya existe; «create-foundry-app» está ocupado por otro producto (FoundryDB); «@acjoell/foundry» está libre y no se encontró el repositorio acjoell/foundry en GitHub. Ver D-046.
 
 Foundry es el nombre provisional del proyecto.
 
@@ -566,7 +565,7 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Decisión:** `overrides` de `@esbuild-kit/core-utils` a `esbuild ^0.25.0` para eliminar 4 vulnerabilidades moderadas (GHSA-67mh-4wv8-2f99, que afecta al servidor de desarrollo de esbuild, no usado por `drizzle-kit`); `allowScripts: { esbuild: false }`; `npm audit --audit-level=moderate` forma parte de `verify:generated`. Los avisos de deprecación de `@esbuild-kit` no se pueden evitar con `drizzle-kit` 0.31 y están explicados en el README del backend.
 
-**Consecuencias:** `npm audit` puede fallar en el futuro por avisos nuevos sin que cambie el código (no sería un bug de Foundry). `drizzle-kit` 1.0.0-rc.5 ya no depende de `@esbuild-kit`: reevaluar cuando 1.0 sea la versión estable (`latest`).
+**Consecuencias:** `npm audit` puede fallar en el futuro por avisos nuevos sin que cambie el código (no sería un bug de Brixa). `drizzle-kit` 1.0.0-rc.5 ya no depende de `@esbuild-kit`: reevaluar cuando 1.0 sea la versión estable (`latest`).
 
 ---
 
@@ -600,7 +599,7 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Contexto:** D-018 dejaba AGPL-3.0 como propuesta. El responsable quiere una herramienta abierta y comunitaria, sin restringir las aplicaciones creadas con ella.
 
-**Decisión:** El CLI y las plantillas se distribuyen bajo AGPL-3.0. El código generado por Foundry puede usarse, modificarse, distribuirse y licenciarse libremente, incluso con fines comerciales y bajo la licencia que elija quien lo genera. La concesión se documenta en el README público y en `GENERATED_CODE_LICENSE.md`, junto al `LICENSE`.
+**Decisión:** El CLI y las plantillas se distribuyen bajo AGPL-3.0. El código generado por Brixa puede usarse, modificarse, distribuirse y licenciarse libremente, incluso con fines comerciales y bajo la licencia que elija quien lo genera. La concesión se documenta en el README público y en `GENERATED_CODE_LICENSE.md`, junto al `LICENSE`.
 
 **Motivo:** Las plantillas forman parte del CLI y se copian a los proyectos de los usuarios. Sin una concesión expresa, esa copia podría interpretarse como material AGPL.
 
@@ -648,17 +647,13 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 ### D-046 — Nombre del proyecto
 
-**Estado:** Propuesta (pendiente de aprobación).
+**Estado:** Confirmada (2026-11-02). Reemplaza a D-019 y resuelve P-007.
 
-**Contexto:** Comprobado por el responsable el 2026-10-28: `foundry` ya existe en npm; `create-foundry-app` pertenece a FoundryDB; `@acjoell/foundry` está libre; no se encontró `acjoell/foundry` en GitHub. «Foundry» también es el nombre de otros productos conocidos (confusión en buscadores y marca).
+**Contexto:** Comprobado por el responsable el 2026-10-28: `foundry` ya existe en npm; `create-foundry-app` pertenece a FoundryDB; «Foundry» es además el nombre de otros productos conocidos (confusión en buscadores y marca).
 
-**Decisión pendiente:** elegir un nombre definitivo. Hasta que se apruebe, no se renombra nada (`package.json`, `bin`, token `foundry-tpl` de D-032, documentación, repositorio).
+**Decisión:** El proyecto se llama **Brixa**. Paquete npm `@acjoell/brixa` (con scope, publicación con acceso público) y repositorio `acjoell/brixa`.
 
-**Criterios:** que `@acjoell/<nombre>` esté libre (el scope evita colisiones de paquete), que el nombre de comando no choque con herramientas existentes, que no haya un producto conocido con el mismo nombre y que el repositorio `acjoell/<nombre>` esté libre.
-
-**Candidatos (sin verificar):** Fragua, Moldkit, Forjakit, Smeltkit, Castwork, Crisol. Lista y script de comprobación en la sección 6.
-
-**Consecuencias:** Renombrar es más barato antes de publicar. Afecta a metadatos del paquete, comando, token de plantillas, documentación y nombre del repositorio.
+**Consecuencias:** Los metadatos del paquete, la documentación y el repositorio usan Brixa. Comprobar que no quedan referencias a «Foundry» en el código y las plantillas (incluido el token `foundry-tpl` de D-032, si sigue en uso). El nombre no se ha comprobado en registros de marcas.
 
 ---
 
@@ -726,7 +721,7 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Estado:** Confirmada (temporal).
 
-**Decisión:** Todas las plantillas base (frontend y backend, ts y js) y Foundry fijan `overrides: { "minimatch": "11.0.1" }`, que coexiste con el override de `esbuild-kit` de D-039. Todas las variantes de `verify:generated` ejecutan `npm audit --audit-level=moderate`.
+**Decisión:** Todas las plantillas base (frontend y backend, ts y js) y Brixa fijan `overrides: { "minimatch": "11.0.1" }`, que coexiste con el override de `esbuild-kit` de D-039. Todas las variantes de `verify:generated` ejecutan `npm audit --audit-level=moderate`.
 
 **Motivo:** `minimatch <11.0.1` tiene un aviso de denegación de servicio por amplificación. Ninguna versión publicada de `eslint`, `@eslint/config-array` ni `@typescript-eslint/typescript-estree` depende ya de `minimatch >=11`, por lo que el override es la única forma de dejar `npm audit` en 0. El riesgo práctico es bajo (los patrones los escribe el desarrollador), pero un proyecto nuevo no debe mostrar avisos en el primer `npm install`.
 
@@ -749,7 +744,7 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 **Motivo:** Ecosistema maduro, formato JSON estándar, y camino de crecimiento (más idiomas, namespaces) sin reescribir los puntos de uso. El coste (+18.6 KB gzip, +6 paquetes) solo lo asume quien activa la capacidad. Se descartó la opción propia (`Intl` + Context, +0.84 KB) porque obligaría a migrar si el proyecto crece; Lingui, por su integración incompleta con Vite 8 y +80 paquetes; react-intl, porque no se necesita ICU extensivo.
 
 **Consecuencias:**
-- Foundry debe revisar las subidas de versión mayor de las tres librerías.
+- Brixa debe revisar las subidas de versión mayor de las tres librerías.
 - Límites documentados: `<title>` estático, solo idiomas de izquierda a derecha, backend sin traducir, sin carga diferida ni namespaces.
 - Variable de interpolación `val` (no `count`) para evitar plurales implícitos.
 - No se necesita `resolveJsonModule` con `moduleResolution: bundler`.
@@ -772,10 +767,60 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ---
 
+### D-054 — Aviso de terceros de create-vite y plantillas generadas
+
+**Estado:** Confirmada (revisable).
+
+**Contexto:** Las plantillas de frontend derivan de `create-vite` 9.3.3 (licencia MIT): `App.*`, `*.css`, `assets/*` (incluido `hero.png`), `public/*`, `index.html`, `package.json`, `README.md` y configuraciones. `eslint.config.js` no procede de create-vite (usa `_oxlintrc.json`).
+
+**Decisión:** El paquete de Brixa incluye `THIRD_PARTY_NOTICES.md` con el aviso de copyright y el texto de la licencia MIT copiados del paquete `create-vite`. Los proyectos generados no incluyen ese aviso.
+
+**Motivo:** El responsable prevé sustituir la página de inicio y los logotipos de la plantilla al añadir las capacidades posteriores (T-014), por lo que no quedaría material sustancial de create-vite en los proyectos generados.
+
+**Consecuencias:** La licencia MIT exige conservar su aviso en copias y partes sustanciales; mientras los proyectos generados mantengan archivos derivados de create-vite, la omisión es un riesgo bajo asumido y no consta revisión legal. Reevaluar cuando se sustituya la plantilla o si se decide incluir el aviso en los proyectos generados. Los logotipos de Vite y React quedan sujetos a las condiciones de sus proyectos (no verificado).
+
+---
+
+### D-055 — CI con GitHub Actions y verificación por alcance
+
+**Estado:** Confirmada. La ampliación de la matriz a Windows, macOS y Node 26 está en curso: sus resultados aún no constan.
+
+**Decisión:**
+- Workflow `.github/workflows/ci.yml` con `permissions: contents: read`, acciones fijadas por SHA de commit (comprobado con `git ls-remote`), `fail-fast: false` y `shell: bash` por defecto.
+- Job `test` en matriz: `npm ci`, typecheck, lint, format:check, test, build, `npm pack` con comprobación de contenido y `VERIFY_SCOPE=portable npm run verify:generated` (15 variantes sin Docker ni PostgreSQL). Matriz inicial: Ubuntu y Node 24 (verde); prevista: Ubuntu, Windows y macOS con Node 24 y 26.
+- Job `verify-full` (Docker y PostgreSQL, `VERIFY_SCOPE=full`) solo con `workflow_dispatch`, en Ubuntu.
+- `verify:generated` acepta `VERIFY_SCOPE=portable|full` (por defecto `full`). La comprobación de D-053 compara siempre contra la lista completa antes de filtrar. El contenedor de PostgreSQL solo se arranca si alguna variante seleccionada lo necesita.
+- Arnés adaptado a Windows (`npm.cmd` con `shell: true`, `pathToFileURL` en `import()` dinámicos, rutas con `path`). Sin verificar en Windows: cierre del árbol de procesos y bloqueo de archivos de SQLite en NTFS.
+
+**Defectos encontrados y lecciones:**
+- `NODE_ENV` heredado: `createServer` de Vite dejaba `NODE_ENV=development` en el proceso del arnés y los builds posteriores empaquetaban React en modo desarrollo. Toda verificación que use Vite dentro del arnés se ejecuta en un subproceso (V2 y V3 de i18n).
+- Lockfile desactualizado: al añadir el override de `minimatch` (D-051) no se regeneró `package-lock.json` y `npm ci` falló en la CI. Tras cambiar `overrides`, ejecutar `npm install` y comprobar `npm ci --dry-run` antes de subir.
+- `npm pack` con `prepack`: la salida de `build` se mezclaba con stdout y el nombre del tarball salía corrupto; además `! tar | grep` no hacía fallar el paso. Se usa `npm pack --ignore-scripts` y un `if` explícito.
+- Timeout de Vite en el runner: el arnés arranca ahora Vite con `--host 127.0.0.1` y sondea esa misma dirección; al agotar el tiempo muestra la salida de Vite y del backend. La causa exacta no está confirmada (hipótesis: `localhost` resolvía a `::1`); el cambio resolvió el fallo.
+
+**Consecuencias:** Un fallo de la CI puede deberse a avisos nuevos de `npm audit` sin que cambie el código. Las variantes con PostgreSQL y Docker solo se verifican en Linux, de forma manual (D-045).
+
+---
+
+### D-056 — Contenido del paquete npm
+
+**Estado:** Confirmada.
+
+**Decisión:** `package.json` define `files` con `dist/` (que incluye las plantillas copiadas por `build`) y los documentos de licencia, aviso de terceros, seguridad y README. `prepack` ejecuta `npm run build` para que el tarball nunca salga sin `dist/`. El tarball no contiene `src/`, pruebas, `scripts/`, `.agents/` ni archivos de configuración del repositorio. Comprobado con `npm pack --dry-run` (158 archivos, 87,5 kB) y con una instalación del `.tgz` en un directorio temporal que llega al primer prompt.
+
+**Motivo:** Sin `files`, npm usaba `.gitignore` como lista de exclusión, omitía `dist/` y publicaba el código fuente y la documentación interna.
+
+**Consecuencias:** La instalación del tarball en Windows sigue pendiente (T-016). `engines` no se ha modificado: depende del resultado de Node 26 en la CI.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).
-- P-007 / D-046: nombre definitivo.
+- Verificación en la CI de Windows, macOS y Node 26 (D-055); si Node 26 no pasa, declararlo no soportado y ajustar `engines`.
+- Instalación del tarball en Windows por un tercero (T-016, D-045).
+- Activar el reporte privado de vulnerabilidades de GitHub (T-016).
+- Revisar la omisión del aviso de create-vite en los proyectos generados al sustituir la plantilla (D-054).
 - Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
 - Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia.
 - Reevaluar Drizzle Kit 1.0 estable por los avisos de `@esbuild-kit` (D-039).

@@ -1,8 +1,8 @@
-# Foundry — Tasks
+# Brixa — Tasks
 
 ## 1. Propósito
 
-Este documento organiza el trabajo de desarrollo de Foundry en tareas pequeñas, verificables y ordenadas por dependencias.
+Este documento organiza el trabajo de desarrollo de Brixa en tareas pequeñas, verificables y ordenadas por dependencias.
 
 `TASKS.md` complementa a `ROADMAP.md`:
 
@@ -504,18 +504,23 @@ Actividades:
 
 ### T-016 — CI multiplataforma y preparación del repositorio público
 
-**Estado:** PENDIENTE
+**Estado:** EN PROGRESO (2026-11-02)
 **Prioridad:** P1
 **Fase:** 6
 **Dependencia:** T-013
 **Bloquea:** T-015
 
+**Avance (2026-11-02):**
+
+- Hecho: historial revisado sin secretos ni `.env` (el correo del autor permanece en el historial); nombre definitivo Brixa (D-046); `LICENSE.md` (AGPL-3.0), `GENERATED_CODE_LICENSE.md`, `CONTRIBUTING.md`, `SECURITY.md` corto en la raíz, `THIRD_PARTY_NOTICES.md` (D-054) y README público; guía interna de seguridad en `.agents/rules/`; `files` y `prepack` en `package.json` (D-056); arnés con `VERIFY_SCOPE` y adaptaciones para Windows (D-055); repositorio `acjoell/brixa` creado y subido.
+- CI en GitHub Actions: Ubuntu con Node 24 en verde (15 variantes portable). Ampliación a Windows, macOS y Node 26 preparada, sin resultados todavía.
+- Pendiente: CI verde en Windows, macOS y Node 26 (o declarar Node 26 no soportado); ejecutar una vez el job manual `verify-full` (Docker y PostgreSQL); activar el reporte privado de vulnerabilidades; instalar el tarball en Windows y registrar el resultado; ajustar el README a lo verificado.
+
 Actividades:
 
 - Preparar el repositorio para hacerlo público: revisar el historial de git en busca de secretos y archivos `.env`; añadir `LICENSE` (AGPL-3.0), `GENERATED_CODE_LICENSE.md`, un README público (instalación, uso, combinaciones soportadas, limitaciones, aviso de que 0.1.0 no incluye autenticación ni RBAC ni multitenancy) y `CONTRIBUTING.md` con DCO.
-- Resolver el conflicto de nombre de `SECURITY.md`: el actual es una guía interna de seguridad y GitHub usa ese nombre para la política de reporte de vulnerabilidades. Mover la guía interna (por ejemplo a `docs/`) o añadir al inicio una sección de reporte privado. Activar el reporte privado de vulnerabilidades de GitHub.
-- Decidir el nombre definitivo (D-046) antes de crear el repositorio público.
-- Crear el repositorio y subir el código.
+- `SECURITY.md`: el corto en la raíz (política de reporte de vulnerabilidades); la guía interna ya estaba en `.agents/rules/`. Activar el reporte privado de vulnerabilidades de GitHub.
+- Nombre definitivo decidido (D-046) y repositorio creado.
 - Crear `.github/workflows/ci.yml`: matriz `ubuntu-latest`, `windows-latest` y `macos-latest`, con Node 24 y Node 26. Pasos: instalar con `npm ci`, `typecheck`, `lint`, `format:check`, `test`, `build`, `npm pack` y comprobación de su contenido, y `verify:generated` para las variantes que no requieren Docker (frontend, backend sin base de datos y backend/fullstack con SQLite).
 - Job aparte en Linux con PostgreSQL y las variantes que dependen de Docker.
 - Permisos mínimos del workflow (`contents: read`) y acciones fijadas a una versión concreta.

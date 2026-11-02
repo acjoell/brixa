@@ -22,7 +22,7 @@ Ninguna se añade si no la seleccionas.
 
 | Capacidad | Disponible en | Qué añade |
 |---|---|---|
-| Persistencia (PostgreSQL o SQLite) | Backend, aplicación completa | Drizzle ORM, un esquema de ejemplo y los scripts `db:generate` y `db:migrate`. |
+| Persistencia (PostgreSQL o SQLite) | Backend, aplicación completa | Drizzle ORM, un esquema vacío con comentarios guía y los scripts `db:generate` y `db:migrate`. |
 | Docker y Docker Compose | Backend, aplicación completa | `Dockerfile` y `compose`. En la aplicación completa, el frontend se sirve con nginx y el puerto del backend no se expone al host. No está disponible para solo frontend. |
 | Documentación de API | Backend, aplicación completa | OpenAPI con Swagger UI, **desactivada por defecto**. Se activa con la variable de entorno `ENABLE_API_DOCS`. Queda en `/docs` (backend) o `/api/docs` (aplicación completa). |
 | Internacionalización | Frontend, aplicación completa | i18next y react-i18next, inglés y español, detección del idioma del navegador, selector de idioma accesible con la elección guardada en `localStorage` y el script `check:i18n`. |
@@ -62,7 +62,7 @@ Según la variante, la verificación comprueba:
 - Compilación, lint y, en TypeScript, la comprobación de tipos.
 - Pruebas del backend con Vitest.
 - Que el servidor arranca y responde en `/health`. En la aplicación completa se comprueba también `/api/health` a través del proxy de Vite.
-- Con base de datos: generación y aplicación de migraciones, y que la tabla de ejemplo existe.
+- Con base de datos: generación y aplicación de migraciones con una tabla de prueba que el arnés añade al esquema, y que esa tabla existe.
 - Con Docker: `docker compose build` y `up`, servicios en estado *healthy*, respuesta HTTP y que el puerto 3000 del backend no es accesible desde el host (aplicación completa).
 - Con documentación de API: que `/docs` devuelve 404 sin `ENABLE_API_DOCS` y que Swagger UI y sus recursos cargan cuando está activada.
 - Con internacionalización: coherencia de claves entre idiomas (`check:i18n`), renderizado en servidor en cada idioma, detección y persistencia del idioma, y presencia de las cadenas de ambos idiomas en `dist/`.
@@ -72,7 +72,7 @@ El CLI permite cualquier combinación de las capacidades soportadas, pero marca 
 ## Limitaciones
 
 - **La versión 0.1.0 no incluye autenticación, RBAC ni multitenancy.** Los proyectos generados no tienen control de acceso: no los despliegues con datos sensibles sin añadirlo.
-- **Compatibilidad declarada: Linux x64 con Node.js 24.** Windows y macOS se verificarán antes de publicar en npm. La verificación de PostgreSQL y de Docker solo se ejecuta en Linux.
+- **Compatibilidad declarada: Linux x64 con Node.js 24**, verificada también en GitHub Actions (Ubuntu). Windows, macOS y Node.js 26 se están verificando en la CI y no se declaran compatibles hasta que pasen. La verificación de PostgreSQL y de Docker solo se ejecuta en Linux.
 - Los proyectos de solo frontend se verifican con compilación y lint, sin arrancar un servidor. En la aplicación completa sí se arranca el servidor de desarrollo de Vite.
 - La plantilla de frontend no incluye pruebas.
 - No hay pruebas automáticas en un navegador real, incluido el selector de idioma.
@@ -93,7 +93,7 @@ npm run build
 npm run verify:generated
 ```
 
-`verify:generated` tarda unos 15 minutos y necesita Docker (las variantes con PostgreSQL usan un contenedor desechable). Para ejecutar solo algunas variantes:
+`verify:generated` tarda unos 15 minutos y necesita Docker (las variantes con PostgreSQL y Docker usan contenedores desechables). Sin Docker, `VERIFY_SCOPE=portable npm run verify:generated` ejecuta las 15 variantes que no lo necesitan, que es lo que ejecuta la CI en cada sistema. Para ejecutar solo algunas variantes:
 
 ```bash
 npm run verify:generated -- frontend+ts fullstack+js+sqlite+i18n
@@ -110,3 +110,5 @@ Lee [CONTRIBUTING.md](CONTRIBUTING.md). Las vulnerabilidades se reportan según 
 El código de Brixa (el CLI y las plantillas) se distribuye bajo la licencia [AGPL-3.0](LICENSE.md).
 
 **Código generado.** Los proyectos que genera Brixa son tuyos. Puedes usar, modificar, distribuir y licenciar libremente el código generado, incluso con fines comerciales y bajo la licencia que elijas. La AGPL-3.0 se aplica al código de Brixa, no al código que genera. Detalles en [GENERATED_CODE_LICENSE.md](GENERATED_CODE_LICENSE.md).
+
+**Terceros.** Las plantillas de frontend derivan de `create-vite` (MIT). Ver [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
