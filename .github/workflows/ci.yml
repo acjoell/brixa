@@ -48,11 +48,16 @@ jobs:
         run: npm run build
 
       - name: Pack and verify package contents
+        shell: bash
         run: |
-          TARBALL=$(npm pack)
+          npm pack --ignore-scripts > pack.log
+          TARBALL=$(tail -n 1 pack.log)
           echo "Tarball generado: $TARBALL"
           tar -tf "$TARBALL"
-          ! tar -tf "$TARBALL" | grep -E '^package/(src|tests|scripts|\.agents)/'
+          if tar -tf "$TARBALL" | grep -E '^package/(src|tests|scripts|\.agents)/'; then
+            echo "El tarball contiene archivos que no deben publicarse"
+            exit 1
+          fi
 
       - name: Verify generated projects (portable)
         run: VERIFY_SCOPE=portable npm run verify:generated
