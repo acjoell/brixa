@@ -456,10 +456,10 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 ### T-014 — Diseñar e implementar autenticación y autorización
 
-**Estado:** PENDIENTE  
+**Estado:** EN PROGRESO (solo diseño)
 **Prioridad:** P2  
 **Fase:** 5
-**Dependencia:** T-015 (versión 0.1.0 publicada). Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas.
+**Dependencia:** T-015 (versión 0.1.0 publicada) para escribir código. Excepción acordada el 2026-11-02 (D-059): el modelo de amenazas y las decisiones de diseño pueden empezar mientras T-015 está bloqueada. No se modifica código de plantillas ni del paquete hasta publicar 0.1.0. Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas.
 
 Actividades:
 
@@ -478,10 +478,16 @@ Actividades:
 
 ### T-015 — Preparar la distribución mediante npm y GitHub
 
-**Estado:** EN PROGRESO
+**Estado:** BLOQUEADA
 **Prioridad:** P1
 **Fase:** 6
 **Dependencias:** T-013 y T-016
+
+**Bloqueo (2026-11-02):** `npm publish` de `brixa@0.1.0` falló con 403: npm rechaza el nombre por similitud con el paquete `urix` (obsoleto, repositorio archivado en 2023, otro propósito). Reclamación enviada a soporte de npm el 2026-11-02 («My package publish is blocked or delayed»). Plan B si no hay respuesta favorable antes del 2026-11-09: publicar como `@acjoell/brixa` con `--access public` (D-059).
+
+Verificado antes del bloqueo: `npm publish --dry-run` correcto (162 archivos, 90,4 kB); tarball instalado en un directorio limpio, con banner `v0.1.0` y un proyecto `fullstack+ts+sqlite` generado cuyo backend y frontend pasan lint, tests y build; `dist/cli.js` con shebang.
+
+Pendiente tras resolver el nombre: publicar, verificar con `npx` desde un directorio limpio y etiquetar `v0.1.0`.
 
 Hecho:
 - README público con logo y GIF de demostración (`docs/assets/`, guion reproducible en `docs/demo.tape`, generado con VHS); sección «Uso» con `npx brixa`; banner de arranque y avisos experimentales más breves (D-058).

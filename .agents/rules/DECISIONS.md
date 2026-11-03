@@ -846,6 +846,18 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ---
 
+### D-059 — Publicación de 0.1.0 bloqueada por similitud de nombre; espera y plan B
+
+**Estado:** Confirmada (temporal). Matiza D-046.
+
+**Contexto:** El 2026-11-02 `npm publish` de `brixa` devolvió 403: «Package name too similar to existing package urix». `npm view brixa` no detecta esta política; solo aparece al publicar. `urix` está obsoleto (última publicación en 2022, repositorio archivado en 2023), hace otra cosa (normalizar rutas de Windows) y es de otro autor.
+
+**Decisión:** Se envía una reclamación a soporte de npm y se espera hasta el 2026-11-09. Si no hay respuesta favorable, el paquete se publica como `@acjoell/brixa` con acceso público; el comando instalado sigue siendo `brixa` y el producto y el repositorio siguen llamándose Brixa. Mientras tanto no se etiqueta `v0.1.0` ni se cambia la versión de `package.json`. El diseño de T-014 puede empezar sin tocar código del paquete.
+
+**Consecuencias:** Si se publica con scope hay que cambiar `name` en `package.json`, el lockfile, el README (`npx @acjoell/brixa`) y T-015, y repetir `npm publish --dry-run`. El README actual dice `npx brixa`, que no funciona hasta resolverlo. La cuenta de npm solo ofrece llaves de seguridad como método de 2FA y no hay hardware disponible; el intento de publicación usó un token granular temporal con omisión de 2FA, ya revocado. Para publicar habrá que crear otro token con caducidad corta y revocarlo después. Pendiente: configurar la 2FA y evaluar Trusted Publishing.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados, el baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055).
@@ -854,6 +866,8 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 - Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
 - Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia.
 - Reevaluar Drizzle Kit 1.0 estable por los avisos de `@esbuild-kit` (D-039).
+- D-059: respuesta de soporte de npm sobre el nombre `brixa` (plazo 2026-11-09; si no, `@acjoell/brixa`).
+- Antes de publicar, recordar que el nombre puede rechazarse por similitud aunque `npm view` dé 404.
 
 
 ## 6. Registro de nuevas decisiones
