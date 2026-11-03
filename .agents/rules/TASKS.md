@@ -478,10 +478,15 @@ Actividades:
 
 ### T-015 — Preparar la distribución mediante npm y GitHub
 
-**Estado:** PENDIENTE
+**Estado:** EN PROGRESO
 **Prioridad:** P1
 **Fase:** 6
 **Dependencias:** T-013 y T-016
+
+Hecho:
+- README público con logo y GIF de demostración (`docs/assets/`, guion reproducible en `docs/demo.tape`, generado con VHS); sección «Uso» con `npx brixa`; banner de arranque y avisos experimentales más breves (D-058).
+Pendiente:
+- Comprobaciones previas a la publicación, `npm publish` de `0.1.0` y verificación del paquete publicado.
 
 Actividades:
 
@@ -491,7 +496,7 @@ Actividades:
 - Preparar el procedimiento de publicación manual.
 - Verificar el paquete en un entorno limpio.
 - Confirmar la licencia antes de publicar.
-- Publicar la versión `0.1.0` (SemVer) con el nombre definitivo (D-046). Si es un paquete con scope, publicarlo con acceso público.
+- Publicar la versión `0.1.0` (SemVer) con el nombre definitivo (D-046). El paquete se publica sin scope (D-046).
 - Publicar manualmente con 2FA activada en npm y GitHub.
 - Confirmar que la licencia y la concesión sobre código generado (D-042) figuran en el paquete.
 

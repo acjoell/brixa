@@ -1,8 +1,19 @@
-# Brixa
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Logo de Brixa" width="120">
+</p>
 
-CLI interactivo que genera la base de aplicaciones web: frontend con React y Vite, backend con Node.js y Express, o ambos en un mismo proyecto, en JavaScript o TypeScript y con las capacidades opcionales que elijas.
+<h1 align="center">Brixa</h1>
 
-> **Estado: versión 0.1.0 en preparación.** Todavía no está publicado en npm. Esta versión **no incluye autenticación, RBAC ni multitenancy** (ver [Limitaciones](#limitaciones)).
+<p align="center">
+  CLI interactivo que genera la base de aplicaciones web con React, Vite, Node.js y Express.
+</p>
+
+> **Nota:** la versión 0.1.0 no incluye autenticación, RBAC ni multitenancy (ver [Limitaciones](#limitaciones)).
+
+![Brixa generando una aplicación completa con TypeScript y SQLite](docs/assets/demo.gif)
+
+Brixa genera frontend con React y Vite, backend con Node.js y Express, o ambos en un mismo proyecto, en JavaScript o TypeScript y con las capacidades opcionales que elijas.
+
 
 ## Qué genera
 
@@ -29,18 +40,11 @@ Ninguna se añade si no la seleccionas.
 
 ## Uso
 
-Brixa aún no está publicado en npm. Para probarlo desde el código fuente:
-
 ```bash
-git clone https://github.com/acjoell/brixa.git
-cd brixa
-npm install
-npm run build
-node dist/cli.js
+npx brixa
 ```
 
-Cuando se publique la versión 0.1.0 se podrá ejecutar con `npx`, y este apartado se actualizará.
-
+Requiere Node.js 24 o 26 en adelante. Brixa te hace preguntas guiadas y, antes de crear ningún archivo, muestra un resumen de lo que va a generar.
 ## Combinaciones verificadas
 
 `npm run verify:generated` genera, instala y comprueba **32 variantes** en un directorio temporal. Estas son las que existen hoy:

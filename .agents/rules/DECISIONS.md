@@ -251,6 +251,7 @@ La versión `0.1.0` se considera lista cuando se cumple todo lo siguiente:
 - El README público incluye combinaciones soportadas, limitaciones y el aviso de que no incluye autenticación, RBAC ni multitenancy.
 - `LICENSE`, `GENERATED_CODE_LICENSE.md` y `CONTRIBUTING.md` están presentes y no hay secretos en el historial.
 - La deuda de `redact` está cerrada.
+
 ### P-006 — Evaluación definitiva de la licencia
 
 **Estado:** Resuelta de forma provisional por D-042 (revisable).
@@ -651,9 +652,9 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Contexto:** Comprobado por el responsable el 2026-10-28: `foundry` ya existe en npm; `create-foundry-app` pertenece a FoundryDB; «Foundry» es además el nombre de otros productos conocidos (confusión en buscadores y marca).
 
-**Decisión:** El proyecto se llama **Brixa**. Paquete npm `@acjoell/brixa` (con scope, publicación con acceso público) y repositorio `acjoell/brixa`.
+**Decisión:** El proyecto se llama **Brixa**. Paquete npm `brixa` (sin scope; comprobado libre el 2026-11-03, igual que `create-brixa`) y repositorio `acjoell/brixa`. Se prefiere `npx brixa` a `npx @acjoell/brixa` por comodidad de uso; el comando instalado es `brixa`.
 
-**Consecuencias:** Los metadatos del paquete, la documentación y el repositorio usan Brixa. Comprobar que no quedan referencias a «Foundry» en el código y las plantillas (incluido el token `foundry-tpl` de D-032, si sigue en uso). El nombre no se ha comprobado en registros de marcas.
+**Consecuencias:** Los metadatos del paquete, la documentación y el repositorio usan Brixa. Comprobar que no quedan referencias a «Foundry» en el código y las plantillas (incluido el token `foundry-tpl` de D-032, si sigue en uso). El nombre no se ha comprobado en registros de marcas. El paquete `create-brixa` (para `npm create brixa`) queda sin publicar; se podrá añadir después como paquete aparte. Un nombre ya publicado en npm no se puede mover.
 
 ---
 
@@ -828,6 +829,20 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 **Motivo:** El responsable no dispone de una máquina con Windows y la CI ya ejecuta en Windows el generador, sus pruebas y los proyectos generados.
 
 **Consecuencias:** Queda sin cubrir la instalación global del paquete publicado y el uso interactivo del CLI en una terminal real de Windows; el README lo indica como limitación. Se reevalúa si llegan reportes de usuarios de Windows. Una prueba de humo del binario instalado desde el tarball en la CI sería una alternativa barata.
+
+---
+
+### D-058 — Banner de arranque y avisos experimentales más breves
+
+**Estado:** Confirmada.
+
+**Contexto:** El arranque del CLI era un prompt seco y el aviso de combinación experimental (D-053) salía dos veces, en bloque y con un tono que sugería más inestabilidad de la real.
+
+**Decisión:** Al iniciar en una terminal interactiva, el CLI muestra un banner en un recuadro de ancho fijo (47 columnas) con el logo, la versión y el lema, en índigo y gris. No se muestra si la salida no es una terminal (`isTTY`) ni con `TERM=dumb`. `NO_COLOR` quita el color pero no el banner. En terminales de menos de 53 columnas se muestra sin recuadro. Los avisos experimentales pasan a una línea antes de generar y otra al final, esta con enlace a los issues. D-053 y ARCHITECTURE §13 siguen cumplidos: las combinaciones no verificadas se identifican como experimentales.
+
+**Motivo:** Mejor primera impresión sin dependencias nuevas (solo códigos ANSI), y avisos honestos pero menos alarmantes.
+
+**Consecuencias:** El banner no tiene animaciones ni emojis. Los tests comprueban el texto nuevo de los avisos. El GIF del README se regenera con `docs/demo.tape` (requiere VHS) si cambia el banner o el flujo de preguntas. Una combinación verificada no muestra ningún aviso.
 
 ---
 

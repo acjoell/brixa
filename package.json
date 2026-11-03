@@ -1,7 +1,26 @@
 {
-  "name": "@acjoell/brixa",
+  "name": "brixa",
   "version": "0.1.0",
   "description": "CLI interactivo para generar proyectos web configurables.",
+  "license": "AGPL-3.0-only",
+  "author": "acjoell",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acjoell/brixa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/acjoell/brixa/issues"
+  },
+  "homepage": "https://github.com/acjoell/brixa#readme",
+  "keywords": [
+    "cli",
+    "scaffold",
+    "generator",
+    "react",
+    "vite",
+    "express",
+    "typescript"
+  ],
   "type": "module",
   "bin": {
     "brixa": "dist/cli.js"

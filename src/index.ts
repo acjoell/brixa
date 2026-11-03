@@ -4,11 +4,22 @@
  * Devuelve el código de salida en lugar de llamar a process.exit directamente,
  * para que los tests puedan comprobar el resultado sin efectos secundarios.
  */
+import { renderBanner, readVersion, shouldShowBanner, shouldUseColor } from "./banner.js";
 import { runPrompts } from "./prompts/questions.js";
 import { validateOptionsWithDir, formatValidationError } from "./validation/options.js";
 import { generate, formatGenerateError, nextStepsMessage } from "./generator/generate.js";
 
 export async function main(): Promise<number> {
+  if (shouldShowBanner(process.stdout, process.env)) {
+    console.log(
+      renderBanner(
+        readVersion(),
+        shouldUseColor(process.stdout, process.env),
+        process.stdout.columns,
+      ),
+    );
+  }
+
   const raw = await runPrompts();
 
   if (raw === null) {

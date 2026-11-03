@@ -862,7 +862,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       i18n: options.i18n,
     });
     console.warn(
-      `\n⚠ Aviso: la combinación ${label} es EXPERIMENTAL (no está entre las combinaciones verificadas por Brixa).\n`,
+      `\nNota: combinación experimental (${label}), aún no verificada de extremo a extremo por Brixa.\n`,
     );
   }
 
@@ -1171,13 +1171,9 @@ export function nextStepsMessage(
 
   const experimentalWarning =
     modality && language && !isVerified({ modality, language, database, docker, apiDocs, i18n })
-      ? [
-          "",
-          "  ⚠ COMBINACIÓN EXPERIMENTAL: " +
-            variantLabel({ modality, language, database, docker, apiDocs, i18n }),
-          "  Esta combinación no está entre las verificadas por Brixa.",
-          "  Puede funcionar, pero no ha sido probada de extremo a extremo.",
-        ].join("\n")
+      ? "\n  Combinación experimental (" +
+        variantLabel({ modality, language, database, docker, apiDocs, i18n }) +
+        "). Si algo falla, abre un issue: https://github.com/acjoell/brixa/issues"
       : "";
 
   if (modality === "fullstack") {

@@ -791,13 +791,13 @@ describe("generate — i18n opcional (T-013c)", () => {
       outputDir: dest,
     });
     expect(res.ok).toBe(true);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("EXPERIMENTAL"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("experimental"));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("frontend+js+i18n"));
     warnSpy.mockRestore();
 
     const msg = nextStepsMessage(dest, "frontend", "none", false, "js", false, true);
-    expect(msg).toContain("COMBINACIÓN EXPERIMENTAL: frontend+js+i18n");
-    expect(msg).toContain("no está entre las verificadas");
+    expect(msg).toContain("Combinación experimental (frontend+js+i18n)");
+    expect(msg).toContain("abre un issue");
   });
 
   it("nextStepsMessage y generate no muestran aviso para una combinación verificada", async () => {
@@ -818,6 +818,6 @@ describe("generate — i18n opcional (T-013c)", () => {
     warnSpy.mockRestore();
 
     const msg = nextStepsMessage(dest, "frontend", "none", false, "ts", false, true);
-    expect(msg).not.toContain("COMBINACIÓN EXPERIMENTAL");
+    expect(msg).not.toContain("experimental");
   });
 });
