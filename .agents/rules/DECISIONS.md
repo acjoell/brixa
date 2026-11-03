@@ -247,7 +247,7 @@ La versión `0.1.0` se considera lista cuando se cumple todo lo siguiente:
 - Todas las variantes de la matriz (frontend, backend y fullstack; ts y js; sin base de datos, PostgreSQL y SQLite; con y sin las capacidades de T-013) se generan, se instalan, pasan lint, tipos, tests y `npm audit --audit-level=moderate`, y arrancan.
 - La CI es verde en Ubuntu, Windows y macOS para las variantes sin Docker, y en Linux para PostgreSQL y Docker.
 - Node 26 está verificado o se declara no soportado.
-- El tarball de `npm pack` se instala y funciona en un entorno limpio, incluido Windows.
+- El tarball de `npm pack` se instala y funciona en un entorno limpio (Linux; Windows se verifica solo mediante la CI, ver D-057).
 - El README público incluye combinaciones soportadas, limitaciones y el aviso de que no incluye autenticación, RBAC ni multitenancy.
 - `LICENSE`, `GENERATED_CODE_LICENSE.md` y `CONTRIBUTING.md` están presentes y no hay secretos en el historial.
 - La deuda de `redact` está cerrada.
@@ -639,7 +639,7 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Estado:** Confirmada.
 
-**Decisión:** El repositorio se hace público en GitHub antes de publicar en npm. Antes de `npm publish` se comprueba el CLI en Ubuntu, Windows y macOS mediante GitHub Actions (T-016) y mediante una instalación manual en Windows a partir del tarball de `npm pack`. Las variantes con PostgreSQL o Docker solo se verifican en Linux.
+**Decisión:** El repositorio se hace público en GitHub antes de publicar en npm. Antes de `npm publish` se comprueba el CLI en Ubuntu, Windows y macOS mediante GitHub Actions (T-016) (la instalación manual en Windows a partir del tarball se retiró como requisito, ver D-057). Las variantes con PostgreSQL o Docker solo se verifican en Linux.
 
 **Consecuencias:** Los fallos de compatibilidad que aparezcan se corrigen o se documentan como limitaciones antes de publicar. Hasta entonces, la compatibilidad declarada sigue siendo Linux x64 con Node 24.
 
@@ -783,14 +783,14 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ### D-055 — CI con GitHub Actions y verificación por alcance
 
-**Estado:** Confirmada. La ampliación de la matriz a Windows, macOS y Node 26 está en curso: sus resultados aún no constan.
+**Estado:** Confirmada. Matriz completa en verde el 2026-11-02 (run #8, commit `9ece94d`): Ubuntu, Windows y macOS con Node 24 y 26.
 
 **Decisión:**
 - Workflow `.github/workflows/ci.yml` con `permissions: contents: read`, acciones fijadas por SHA de commit (comprobado con `git ls-remote`), `fail-fast: false` y `shell: bash` por defecto.
-- Job `test` en matriz: `npm ci`, typecheck, lint, format:check, test, build, `npm pack` con comprobación de contenido y `VERIFY_SCOPE=portable npm run verify:generated` (15 variantes sin Docker ni PostgreSQL). Matriz inicial: Ubuntu y Node 24 (verde); prevista: Ubuntu, Windows y macOS con Node 24 y 26.
+- Job `test` en matriz: `npm ci`, typecheck, lint, format:check, test, build, `npm pack` con comprobación de contenido y `VERIFY_SCOPE=portable npm run verify:generated` (15 variantes sin Docker ni PostgreSQL). Matriz: Ubuntu, Windows y macOS con Node 24 y 26 (6 jobs).
 - Job `verify-full` (Docker y PostgreSQL, `VERIFY_SCOPE=full`) solo con `workflow_dispatch`, en Ubuntu.
 - `verify:generated` acepta `VERIFY_SCOPE=portable|full` (por defecto `full`). La comprobación de D-053 compara siempre contra la lista completa antes de filtrar. El contenedor de PostgreSQL solo se arranca si alguna variante seleccionada lo necesita.
-- Arnés adaptado a Windows (`npm.cmd` con `shell: true`, `pathToFileURL` en `import()` dinámicos, rutas con `path`). Sin verificar en Windows: cierre del árbol de procesos y bloqueo de archivos de SQLite en NTFS.
+- Arnés adaptado a Windows (`npm.cmd` con `shell: true`, `pathToFileURL` en `import()` dinámicos, rutas con `path`, cierre del árbol de procesos con `taskkill`, directorio temporal en ruta larga). Verificado en la CI de Windows con Node 24 y 26 para las variantes portable, incluidas las de SQLite.
 
 **Defectos encontrados y lecciones:**
 - `NODE_ENV` heredado: `createServer` de Vite dejaba `NODE_ENV=development` en el proceso del arnés y los builds posteriores empaquetaban React en modo desarrollo. Toda verificación que use Vite dentro del arnés se ejecuta en un subproceso (V2 y V3 de i18n).
@@ -798,7 +798,12 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 - `npm pack` con `prepack`: la salida de `build` se mezclaba con stdout y el nombre del tarball salía corrupto; además `! tar | grep` no hacía fallar el paso. Se usa `npm pack --ignore-scripts` y un `if` explícito.
 - Timeout de Vite en el runner: el arnés arranca ahora Vite con `--host 127.0.0.1` y sondea esa misma dirección; al agotar el tiempo muestra la salida de Vite y del backend. La causa exacta no está confirmada (hipótesis: `localhost` resolvía a `::1`); el cambio resolvió el fallo.
 
-**Consecuencias:** Un fallo de la CI puede deberse a avisos nuevos de `npm audit` sin que cambie el código. Las variantes con PostgreSQL y Docker solo se verifican en Linux, de forma manual (D-045).
+- Tests con rutas POSIX: seis tests comparaban rutas literales como `/home/user/...` y fallaron en Windows; los valores esperados se calculan con `path.resolve`.
+- Ruta temporal corta de Windows: la carpeta temporal del runner (`C:\Users\RUNNER~1\...`) hacía que Vite rechazara servir el proyecto («outside of Vite serving allow list»), y la limpieza posterior fallaba con `EPERM` porque Vite seguía vivo y ocultaba el error original. Se corrigió en el arnés con la ruta larga y el cierre del árbol de procesos (commit `9ece94d`).
+- `format:check` también revisa `.github/workflows/ci.yml`: formatear el workflow con Prettier antes de subirlo.
+- Las acciones fijadas (`checkout` v4.2.2 y `setup-node` v4.2.0) usan Node 20 y GitHub avisa de su deprecación (hoy se ejecutan forzadas en Node 24). El aviso de caché 409 entre jobs de la matriz es inocuo.
+
+**Consecuencias:** Un fallo de la CI puede deberse a avisos nuevos de `npm audit` sin que cambie el código. Las variantes con PostgreSQL y Docker solo se verifican en Linux, de forma manual (D-045); el job `verify-full` pasó en verde el 2026-11-02 (32 variantes, Ubuntu, Node 24). Compatibilidad verificada: Ubuntu, Windows y macOS con Node 24 y 26 para las 15 variantes portable. La instalación del tarball en un Windows real no se prueba (D-057).
 
 ---
 
@@ -810,16 +815,26 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 **Motivo:** Sin `files`, npm usaba `.gitignore` como lista de exclusión, omitía `dist/` y publicaba el código fuente y la documentación interna.
 
-**Consecuencias:** La instalación del tarball en Windows sigue pendiente (T-016). `engines` no se ha modificado: depende del resultado de Node 26 en la CI.
+**Consecuencias:** La instalación del tarball en Windows no se prueba en un equipo real (D-057). `engines` (`^24.0.0 || >=26.0.0`) queda confirmado por la CI: Node 26 pasa en los tres sistemas.
+
+---
+
+### D-057 — Windows real no es criterio de aceptación de 0.1.0
+
+**Estado:** Confirmada (2026-11-02). Matiza D-045 y P-005.
+
+**Decisión:** No se exige instalar el tarball en un Windows real antes de publicar `0.1.0`. La compatibilidad con Windows se declara solo con lo verificado en la CI (`windows-latest`, Node 24 y 26, 15 variantes sin Docker ni PostgreSQL).
+
+**Motivo:** El responsable no dispone de una máquina con Windows y la CI ya ejecuta en Windows el generador, sus pruebas y los proyectos generados.
+
+**Consecuencias:** Queda sin cubrir la instalación global del paquete publicado y el uso interactivo del CLI en una terminal real de Windows; el README lo indica como limitación. Se reevalúa si llegan reportes de usuarios de Windows. Una prueba de humo del binario instalado desde el tarball en la CI sería una alternativa barata.
 
 ---
 
 ## 5. Cuestiones pendientes
 
-- P-002: confirmación definitiva de versiones de dependencias de proyectos generados, incluida la verificación del baseline de Node.js con Node 26 (`^24.0.0 || >=26.0.0` es el candidato; solo se declara lo verificado).
-- Verificación en la CI de Windows, macOS y Node 26 (D-055); si Node 26 no pasa, declararlo no soportado y ajustar `engines`.
-- Instalación del tarball en Windows por un tercero (T-016, D-045).
-- Activar el reporte privado de vulnerabilidades de GitHub (T-016).
+- P-002: confirmación definitiva de versiones de dependencias de proyectos generados, el baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055).
+- Subir `actions/checkout` y `actions/setup-node` a versiones que no usen Node 20, con SHA comprobados (D-055).
 - Revisar la omisión del aviso de create-vite en los proyectos generados al sustituir la plantilla (D-054).
 - Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
 - Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia.

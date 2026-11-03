@@ -72,7 +72,7 @@ El CLI permite cualquier combinación de las capacidades soportadas, pero marca 
 ## Limitaciones
 
 - **La versión 0.1.0 no incluye autenticación, RBAC ni multitenancy.** Los proyectos generados no tienen control de acceso: no los despliegues con datos sensibles sin añadirlo.
-- **Compatibilidad declarada: Linux x64 con Node.js 24**, verificada también en GitHub Actions (Ubuntu). Windows, macOS y Node.js 26 se están verificando en la CI y no se declaran compatibles hasta que pasen. La verificación de PostgreSQL y de Docker solo se ejecuta en Linux.
+- **Compatibilidad verificada en GitHub Actions:** Ubuntu, Windows y macOS con Node.js 24 y 26, para las variantes que no requieren Docker ni PostgreSQL. PostgreSQL y Docker solo se verifican en Linux con Node.js 24, mediante un job de CI que se lanza manualmente. El CLI interactivo y la instalación del paquete en un Windows real no se han probado: la CI verifica el generador y los proyectos generados.
 - Los proyectos de solo frontend se verifican con compilación y lint, sin arrancar un servidor. En la aplicación completa sí se arranca el servidor de desarrollo de Vite.
 - La plantilla de frontend no incluye pruebas.
 - No hay pruebas automáticas en un navegador real, incluido el selector de idioma.
