@@ -10,6 +10,7 @@ Este documento organiza el trabajo de desarrollo de Brixa en tareas pequeñas, v
 - `TASKS.md` registra el trabajo concreto.
 - `DECISIONS.md` registra las decisiones adoptadas y pendientes.
 - `AGENTS.md` define las reglas de trabajo para los agentes de IA.
+- `TASKS_POST_MVP.md` continúa este archivo desde 0.1.0: contiene T-014-0, T-014a a T-014d, T-017a, T-017a-ui, T-017b, T-018, T-019, T-020 y T-021, y las investigaciones INV-xx. Los identificadores `T-xxx` no se renumeran. Este archivo conserva el historial hasta T-016 y mantiene T-014 y T-015 como referencia.
 
 ## 2. Estados
 
@@ -32,7 +33,7 @@ No marcar una tarea como completada basándose únicamente en que se hayan cread
 - Registrar las decisiones nuevas en `DECISIONS.md`.
 - Actualizar los estados y añadir tareas derivadas cuando sea necesario.
 - No marcar como soportada una combinación tecnológica que no se haya verificado.
-- Orden de ejecución vigente (D-044): T-013 → T-016 → T-015 → T-014. Los identificadores no se renumeran.
+- Orden de ejecución histórico (D-044): T-013 → T-016 → T-015 → T-014. Desde 2026-11-07 el orden de las tareas posteriores a 0.1.0 se define en `TASKS_POST_MVP.md`.
 
 ## 4. Inventario inicial del repositorio
 
@@ -374,7 +375,7 @@ Actividades:
 - Las vulnerabilidades moderadas de `esbuild` introducidas por `drizzle-kit` se resolvieron mediante un override.
 - Verificación: `npm run verify:generated`, con PostgreSQL en backend y fullstack, JavaScript y TypeScript. Migraciones, creación de tablas, tests y proxy `/api/health` verificados.
 - Enmascarado de credenciales comprobado para `db:migrate` y el test de conexión.
-- Pendiente técnico no bloqueante: comprobar que el test del CLI sobre `redact` ejecuta la función real de la plantilla y no una copia; si utiliza una copia, valorar extraer `redact` a un archivo sin dependencias.
+- Pendiente técnico no bloqueante: comprobar que el test del CLI sobre `redact` ejecuta la función real de la plantilla y no una copia; si utiliza una copia, valorar extraer `redact` a un archivo sin dependencias. Inspección estática del 2026-11-07: `redact` existe en cuatro archivos (overlays de PostgreSQL y SQLite, JS y TS), se usa solo en el `catch` de los migradores y no en el manejador global de errores. La comprobación del test está en T-020 y la consolidación en T-017b.
 - Los avisos de deprecación de `@esbuild-kit` siguen presentes en las instalaciones que utilizan `drizzle-kit`. Reevaluar cuando Drizzle Kit 1.0 estable esté disponible.
 
 **T-012b — SQLite opcional con Drizzle ORM (COMPLETADA):**
@@ -426,6 +427,8 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 **T-013c — Internacionalización (frontend)**
 
+**Estado de T-013c:** COMPLETADA (decisión D-052; verificación en T-013d con alcance reducido).
+
 - Evaluar la librería, el formato de mensajes y los idiomas iniciales, y registrar la elección.
 - Criterios: opcional, solo frontend y aplicación completa, JavaScript y TypeScript, sin cambiar la generación de quien no la selecciona.
 
@@ -434,12 +437,6 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 - Cada capacidad tiene alcance y dependencias documentados.
 - Se activa sin incorporar dependencias innecesarias a otros proyectos.
 - Las combinaciones afectadas se verifican y la matriz de combinaciones se actualiza.
-
-**Criterios de aceptación:**
-
-- Cada capacidad tiene alcance y dependencias documentados.
-- Se puede activar sin incorporar dependencias innecesarias a otros proyectos.
-- Las combinaciones afectadas se verifican.
 
 **T-013d — Integrar la verificación de i18n en verify:generated**
 
@@ -454,14 +451,16 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 - Comprobar por variante typecheck, lint, format:check, build y audit.
 - Comprobar `tsc --showConfig` sobre `resolveJsonModule`.
 
+**Nota (2026-11-07):** D-052 indica que el alcance quedó reducido a dos variantes con i18n (frontend TypeScript y aplicación completa JavaScript con SQLite) y que los controles negativos N1–N7 no son repetibles en el arnés. D-052 remite a una tarea T-013e que no existe en este archivo; la decisión de abrirla o de que T-018 la absorba sigue pendiente (`TASKS_POST_MVP.md`, cuestiones abiertas).
+
 ### T-014 — Diseñar e implementar autenticación y autorización
 
-**Estado:** EN PROGRESO (solo diseño)
+**Estado:** EN PROGRESO (solo diseño). Dividida: sus subtareas se registran en `TASKS_POST_MVP.md` (T-014-0, T-014a, T-014a-ui, T-014b1, T-014b2, T-014c y T-014d), con alcance aprobado en D-064.
 **Prioridad:** P2  
 **Fase:** 5
-**Dependencia:** T-015 (versión 0.1.0 publicada) para escribir código. Excepción acordada el 2026-11-02 (D-059): el modelo de amenazas y las decisiones de diseño pueden empezar mientras T-015 está bloqueada. No se modifica código de plantillas ni del paquete hasta publicar 0.1.0. Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas.
+**Dependencia:** T-019 (0.1.0 preservada por el tag `v0.1.0`, D-060). Ya no se exige que 0.1.0 esté publicada en npm para trabajar en `main`; sustituye a la condición anterior de D-059. Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas. Las capacidades dependen además de la composición de overlays (T-017a), la seguridad base (T-017b) y el arnés de verificación (T-018).
 
-Actividades:
+Actividades (detalle en `TASKS_POST_MVP.md`):
 
 - Definir el alcance de autenticación, RBAC y multitenancy.
 - Documentar amenazas y controles requeridos.
@@ -478,16 +477,16 @@ Actividades:
 
 ### T-015 — Preparar la distribución mediante npm y GitHub
 
-**Estado:** BLOQUEADA
+**Estado:** BLOQUEADA (respuesta de npm sobre el nombre)
 **Prioridad:** P1
 **Fase:** 6
-**Dependencias:** T-013 y T-016
+**Dependencias:** T-013, T-016 y T-019
 
-**Bloqueo (2026-11-02):** `npm publish` de `brixa@0.1.0` falló con 403: npm rechaza el nombre por similitud con el paquete `urix` (obsoleto, repositorio archivado en 2023, otro propósito). Reclamación enviada a soporte de npm el 2026-11-02 («My package publish is blocked or delayed»). Plan B si no hay respuesta favorable antes del 2026-11-09: publicar como `@acjoell/brixa` con `--access public` (D-059).
+**Bloqueo (2026-11-02):** `npm publish` de `brixa@0.1.0` falló con 403: npm rechaza el nombre por similitud con el paquete `urix` (obsoleto, repositorio archivado en 2023, otro propósito). Reclamación enviada a soporte de npm el 2026-11-02 («My package publish is blocked or delayed»). El propietario decidió mantener el nombre `brixa` sin scope y esperar la respuesta del ticket (D-060); el plan B con scope queda descartado.
 
 Verificado antes del bloqueo: `npm publish --dry-run` correcto (162 archivos, 90,4 kB); tarball instalado en un directorio limpio, con banner `v0.1.0` y un proyecto `fullstack+ts+sqlite` generado cuyo backend y frontend pasan lint, tests y build; `dist/cli.js` con shebang.
 
-Pendiente tras resolver el nombre: publicar, verificar con `npx` desde un directorio limpio y etiquetar `v0.1.0`.
+Preservación (2026-11-07): el tag anotado `v0.1.0` y el GitHub Release pre-release están creados (T-019, D-060). Pendiente tras resolver el nombre: publicar desde un checkout limpio del tag `v0.1.0` (nunca desde un `main` posterior), verificar con `npx` desde un directorio limpio y pasar el Release de pre-release a estable sin mover el tag.
 
 Hecho:
 - README público con logo y GIF de demostración (`docs/assets/`, guion reproducible en `docs/demo.tape`, generado con VHS); sección «Uso» con `npx brixa`; banner de arranque y avisos experimentales más breves (D-058).
@@ -502,7 +501,7 @@ Actividades:
 - Preparar el procedimiento de publicación manual.
 - Verificar el paquete en un entorno limpio.
 - Confirmar la licencia antes de publicar.
-- Publicar la versión `0.1.0` (SemVer) con el nombre definitivo (D-046). El paquete se publica sin scope (D-046).
+- Publicar la versión `0.1.0` (SemVer) con el nombre definitivo (D-046), sin scope, desde el checkout del tag `v0.1.0` (D-060).
 - Publicar manualmente con 2FA activada en npm y GitHub.
 - Confirmar que la licencia y la concesión sobre código generado (D-042) figuran en el paquete.
 

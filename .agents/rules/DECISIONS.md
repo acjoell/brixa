@@ -269,6 +269,66 @@ Foundry es el nombre provisional del proyecto.
 Antes de una publicación pública, se debe comprobar su disponibilidad y posibles conflictos en npm, GitHub, dominios y registros de marcas relevantes.
 
 
+### P-008 — Reproducibilidad de las plantillas generadas
+
+**Estado:** Pendiente.
+
+La inspección del 2026-11-07 indica que las plantillas no tienen lockfile y que React y Vite usan rangos (`^19.3.1`, `^8.3.4`, `@vitejs/plugin-react` `^6.1.2`). Los backends declaran Drizzle 0.45.4, Drizzle Kit 0.31.11, `pg` 8.23.1, `@libsql/client` 0.18.0 y Express 5.3.0. Las versiones resueltas no están confirmadas, y lo que `verify:generated` y `npm audit` comprueban es lo que npm resuelve ese día. Opciones: versiones exactas, lockfile generado o rangos con el riesgo asumido. Las versiones resueltas se medirán en T-020.
+
+### P-009 — Hash de contraseñas y rango de Node
+
+**Estado:** Pendiente de evidencia (INV-01, INV-07).
+
+`crypto.argon2` existe desde Node 24.7.0 (reportado) y `engines.node` admite `^24.0.0`. Con `@types/node` 26.x en el backend TypeScript, el código compilaría aunque el runtime fuera una versión anterior (inferencia). La estabilidad de la API por versión no está verificada en documentación oficial. El anexo de INV-01 usa Base64URL en el formato del hash: no debe llamarse PHC sin aclarar que es una variante. Candidatos: Argon2id `m=19456, t=2, p=1` con `crypto.argon2` y `engines` propio del proyecto generado, o una librería externa. Ninguna está aprobada.
+
+### P-010 — Sesiones, transporte, CSRF y router
+
+**Estado:** Pendiente de evidencia (INV-03).
+
+Solo se dispone del complemento INV-03b (Chromium 156 y Firefox 157; Safari no verificado). Reportado: los navegadores no aíslan cookies por puerto; `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; el refresh rotativo con peticiones simultáneas puede destruir la sesión. React Router no está instalado en Brixa: la elección del router y la accesibilidad de la navegación (título, foco, anuncios) siguen abiertas.
+
+### P-011 — Modelo de acceso: estados, alcances y primer administrador
+
+**Estado:** Pendiente (continuación de D-063).
+
+Estados de la concesión de acceso: borrado de la fila, `revoked_at` o un estado explícito, sin `isActive` universal. Alcances de la primera versión (sistema y organización) y si se incluye desde el inicio una columna de alcance, dado que un proyecto generado no recibe migraciones de Brixa. Primer administrador mediante un script del propio proyecto generado, sin credenciales por defecto y sin depender del CLI.
+
+### P-012 — Estrategia de composición de overlays
+
+**Estado:** Pendiente (INV-05a).
+
+Estado real (inspección): copia recursiva; overlays que reemplazan archivos completos (API Docs reemplaza `src/app`, `src/index` y `tsconfig.json`; i18n reemplaza `App` y `main`; fullstack reemplaza `vite.config`); sin slots; `compose.yaml` copiado entero; API Docs modifica configuración por sustitución de texto; la fusión de `package.json` conserva las claves de la base sin detectar conflictos; las dependencias de API Docs están duplicadas entre archivos de plantilla y el generador, y las de i18n están en el generador. Pendiente elegir reglas por archivo, la forma de componer Compose (fusión estructurada o composición nativa) y cómo detectar rutas para OpenAPI en Express 5.3.0. La propuesta de INV-05a de generar siempre `en.json` contradice D-052 y no se adopta por defecto.
+
+### P-013 — Estrategia JavaScript/TypeScript
+
+**Estado:** Pendiente (INV-05b).
+
+Alternativas: plantillas separadas, TypeScript como fuente con JavaScript derivado y versionado, JSDoc. `ts-blank-space` 0.6 exige TypeScript 5.1–5.7 y el CLI usa 6.0.3. El postprocesado de imports por expresiones regulares es frágil; se prefiere evaluar una transformación por AST. Se necesita un piloto (INV-08).
+
+### P-014 — Seguridad base del backend: errores, cabeceras, CORS y contadores
+
+**Estado:** Pendiente de evidencia (INV-02); el alcance está aprobado en T-017b.
+
+Hecho confirmado: `redact` existe en cuatro archivos (overlays de PostgreSQL y SQLite, JS y TS) y solo se usa en el `catch` de los migradores; el manejador global de errores ejecuta `console.error(err)` sin redacción. Pendiente: diseño de la redacción común, `trust proxy` por topología, cabeceras (nativas o `helmet`), CORS, configuración de Nginx y almacén de contadores.
+
+### P-015 — Alineación de imágenes y tipos
+
+**Estado:** Pendiente.
+
+Los Compose generados usan `postgres:17.4-alpine`; el arnés usa `postgres:17-alpine`, así que no prueba exactamente lo que se entrega. `@types/node` es `^24.19.2` en la plantilla frontend TypeScript y 26.x en el CLI y el backend TypeScript. Decidir la alineación y si los tipos deben seguir el mínimo real de `engines`.
+
+### P-016 — Versión de `package.json` en `main` y guarda de publicación
+
+**Estado:** Pendiente.
+
+Tras el tag (D-060), decidir qué versión declara `main` y si se añade una guarda que impida publicar desde un commit sin tag. Valor por defecto propuesto en TASKS_POST_MVP: una versión de preparación (por ejemplo `0.2.0-dev.0`). Hasta decidirlo, solo se publica desde el checkout del tag.
+
+### P-017 — Pruebas en navegador real
+
+**Estado:** Pendiente.
+
+Incorporar un conjunto mínimo de pruebas E2E (por ejemplo con Playwright, en un único job de Linux) cuando exista autenticación con cookies. Hoy no hay pruebas en navegador real y la plantilla de frontend no incluye pruebas.
+
 ## 3b. Decisiones confirmadas en T-002
 
 Las siguientes decisiones resuelven las cuestiones técnicas que bloqueaban el MVP. Quedan registradas aquí por orden de aprobación. Las versiones concretas se verificarán y fijarán al crear `package.json` en T-001.
@@ -664,6 +724,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Decisión:** El CLI pregunta «¿Docker?» (por defecto No) solo para backend. Con Docker genera `Dockerfile` multi-etapa (`node:24.22.1-slim`, usuario no root, solo dependencias de producción), `.dockerignore` y `compose.yaml` (servicio `backend`, más `postgres:17` o un volumen para `data/` en SQLite). Sin Docker, la generación no cambia. Frontend y fullstack quedan para la fase 2.
 
+**Nota (2026-11-07):** la inspección estática del repositorio (HEAD `fc19490…`) indica que los Compose generados usan `postgres:17.4-alpine`, no `postgres:17`, y que el arnés de verificación usa `postgres:17-alpine`. El texto original de la decisión se conserva; la alineación queda pendiente en P-015.
+
 **Migraciones:** explícitas, como en D-037. En JavaScript: `docker compose run --rm backend npm run db:migrate`. En TypeScript: `docker compose run --rm backend node dist/db/migrate.js` (ejecuta el JS compilado; `tsx` es una devDependency y no existe en la imagen de producción). `db:generate` se ejecuta en el host antes de construir la imagen para que `drizzle/` exista en ella.
 
 **Secretos:** `compose.yaml` no contiene valores de contraseña; `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica.
@@ -693,6 +755,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 **Estado:** Confirmada.
 
 **Decisión:** El CLI pregunta «¿Docker?» (por defecto No) también en aplicación completa. Con Docker genera `compose.yaml` en la raíz con los servicios `backend`, `frontend` y, según la base de datos, `postgres:17` o un volumen para `data/` en SQLite. El backend reutiliza su `Dockerfile` (D-047). El frontend se construye con `node:24.22.1-slim` y se sirve con `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, sin privilegios, con fallback SPA y proxy de `/api/` al backend quitando el prefijo (misma semántica que el rewrite de Vite de D-034). Solo el frontend publica puerto al host (8080); backend y PostgreSQL permanecen internos. Sin Docker, la generación no cambia.
+
+**Nota (2026-11-07):** igual que en D-047, la imagen de PostgreSQL generada es `postgres:17.4-alpine` según la inspección; ver P-015.
 
 **Secretos y `.gitignore` raíz:** `POSTGRES_PASSWORD` es obligatoria, sin valor por defecto. Como Compose lee el `.env` de la raíz y los `.gitignore` de `frontend/` y `backend/` no lo cubren, con Docker se genera un `.gitignore` raíz que contiene solo `.env`. Esto matiza D-034 (fullstack sin `.gitignore` raíz): sigue sin existir cuando no se elige Docker. La plantilla se guarda como `_gitignore` y se copia con renombrado explícito, porque `copyDir()` (D-032) solo se aplica a las subcarpetas y npm descarta los `.gitignore` en los paquetes publicados.
 
@@ -752,7 +816,7 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 **No verificado:** clic real en el selector en un navegador (comprobación manual del responsable pendiente); e2e en navegador; SSR de producción.
 
-**Alcance de verificación (reducido):** `verify:generated` (34 variantes) cubre i18n en 2: frontend ts y fullstack js con SQLite. Comprueba `check:i18n`, render en servidor por idioma, detección y persistencia, y cadenas en `dist/`. Quedan fuera las variantes js de frontend, fullstack ts y la de Docker. Los controles negativos (N1–N7) se ejecutaron una vez en T-013c y no son repetibles en el arnés, por lo que este no demuestra por sí mismo que detectaría un fallo de i18n. Ver T-013e.
+**Alcance de verificación (reducido):** `verify:generated` (32 variantes; corregido el 2026-11-07, el texto original decía 34) cubre i18n en 2: frontend ts y fullstack js con SQLite. Comprueba `check:i18n`, render en servidor por idioma, detección y persistencia, y cadenas en `dist/`. Quedan fuera las variantes js de frontend, fullstack ts y la de Docker. Los controles negativos (N1–N7) se ejecutaron una vez en T-013c y no son repetibles en el arnés, por lo que este no demuestra por sí mismo que detectaría un fallo de i18n. Esta deuda sigue abierta: la referencia original a T-013e no corresponde a ninguna tarea de `TASKS.md`; falta decidir si se abre esa tarea o si T-018 (`TASKS_POST_MVP.md`) absorbe el trabajo.
 
 ---
 
@@ -848,7 +912,7 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ### D-059 — Publicación de 0.1.0 bloqueada por similitud de nombre; espera y plan B
 
-**Estado:** Confirmada (temporal). Matiza D-046.
+**Estado:** Reemplazada parcialmente por D-060 (2026-11-07). Siguen vigentes el contexto del bloqueo y lo relativo a 2FA y token; dejan de aplicar el plan B con scope, la prohibición de etiquetar `v0.1.0` y la restricción de no tocar plantillas hasta publicar. Matiza D-046.
 
 **Contexto:** El 2026-11-02 `npm publish` de `brixa` devolvió 403: «Package name too similar to existing package urix». `npm view brixa` no detecta esta política; solo aparece al publicar. `urix` está obsoleto (última publicación en 2022, repositorio archivado en 2023), hace otra cosa (normalizar rutas de Windows) y es de otro autor.
 
@@ -858,17 +922,98 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ---
 
+### D-060 — Congelación de 0.1.0 mediante tag y pre-release; nombre `brixa` sin scope
+
+**Estado:** Confirmada (2026-11-07). Reemplaza parcialmente a D-059.
+
+**Contexto:** `npm publish` de `brixa@0.1.0` devolvió 403 por similitud de nombre (D-059). El propietario decidió mantener el nombre y esperar la respuesta de npm, sin detener el desarrollo.
+
+**Decisión:**
+- El paquete se llama `brixa`, sin scope. El plan B `@acjoell/brixa` queda descartado. Si npm rechazara el nombre de forma definitiva se abrirá una decisión nueva; no hay alternativa asumida.
+- El commit `fc1949068373220cc1048deb6f0f6eb0ac88870f` (CI en verde confirmada por el propietario; `package.json` en `0.1.0`) se conserva como versión 0.1.0 mediante un tag anotado `v0.1.0` y un GitHub Release `Brixa v0.1.0` marcado como pre-release.
+- No se usa `v0.1.0-rc.1`: el sufijo `-rc.1` formaría parte de la versión SemVer y exigiría otro `package.json`, de modo que lo publicado ya no coincidiría con lo etiquetado. La marca de pre-release es un atributo del Release de GitHub, no de la versión ni del tag.
+- `main` puede avanzar. El tag no se mueve, no se borra y no se reutiliza. Si hay que corregir el código congelado, se crea otro commit y otro tag con la versión que se apruebe (por ejemplo `0.1.1`).
+- Cuando npm autorice, la publicación se hace desde un checkout limpio del tag, nunca desde un `main` posterior. Después, el Release pasa de pre-release a estable sin tocar el tag.
+
+**Estado de ejecución:** el propietario informó el 2026-11-07 de que el tag está creado y de que se completaron las verificaciones de T-019. Los datos del informe de Antigravity (objeto del tag, URL del Release, estado de la protección de tags `v*`) no figuran en los documentos revisados al redactar esta entrada: deben registrarse en T-019.
+
+**Consecuencias:**
+- La restricción de D-059 y de T-014 («no tocar plantillas hasta publicar 0.1.0») pasa a ser «0.1.0 preservada por tag».
+- El README del tag dice `npx brixa`, que no funciona hasta publicar; las notas del Release lo advierten.
+- El código fuente del tag y el tarball publicado en npm son artefactos distintos: no se afirma igualdad byte a byte.
+- Crear reglas de protección de tags es un cambio de configuración del repositorio que no estaba incluido en la autorización de la operación.
+- La versión que declara `package.json` en `main` tras el tag y una guarda contra publicaciones accidentales desde `main` siguen pendientes (P-016).
+
+---
+
+### D-061 — Zod obligatorio en el backend
+
+**Estado:** Confirmada como decisión de producto. Implementación pendiente.
+
+**Decisión:** Todo proyecto con backend incluirá Zod como dependencia, usada desde el inicio para validar la configuración central del servidor (no como dependencia sin uso), y para validar `body`, `params` y `query`.
+
+**Estado real (inspección 2026-11-07):** Zod no está instalado en las plantillas ni en el CLI. La implementación se planifica en T-017b.
+
+**Pendiente de evidencia:** versión concreta (INV-02 estudió 4.6.7 sin fuente registrada); validación de variables de entorno (una cadena vacía no debe convertirse en 0, p. ej. `PORT`); dónde guardar los datos validados, porque `req.query` es de solo lectura en Express 5 (reportado en INV-02); política de propiedades desconocidas; que los errores no filtren datos.
+
+---
+
+### D-062 — Dependencias de verificación: caché npm compartida e instalaciones independientes
+
+**Estado:** Confirmada. Optimización aplazada, no descartada para siempre.
+
+**Decisión:** Los proyectos de prueba conservan su propio `node_modules`, cada instalación es independiente y se reutiliza la caché compartida de npm. La reutilización de `node_modules` mediante symlinks se aplaza y no forma parte de ningún plan actual.
+
+**Motivo:** Priorizar la reproducibilidad y el aislamiento físico de cada variante.
+
+---
+
+### D-063 — Modelo genérico de identidad y acceso (dirección)
+
+**Estado:** Confirmada como dirección. Detalles pendientes (ver P-011).
+
+**Decisión:** Las futuras capacidades de autenticación, autorización y multitenancy se modelan con estos conceptos separados: **usuario** (identidad global), **organización** (contexto de administración y aislamiento de datos), **concesión de acceso** (relación que determina a qué organización puede acceder un usuario; se evita el término «membresía» por su connotación comercial), **roles**, **permisos** y **alcances** de autorización (sistema, organización y, si se decide, unidad o recurso).
+
+**No se presupone:** suscripciones, planes ni límites comerciales; que cada usuario pertenezca a una sola organización; que cada organización sea un cliente que paga; una jerarquía empresarial obligatoria; un campo `isActive` universal. Los roles globales y los organizacionales no se mezclan automáticamente.
+
+**Pendiente:** estados de la concesión de acceso, alcances en la primera versión y primer administrador (P-011).
+
+---
+
+### D-064 — Alcance de seguridad y autorización posterior a 0.1.0
+
+**Estado:** Confirmada en alcance (aprobada por el propietario el 2026-11-04; registrada el 2026-11-07). Los detalles técnicos siguen pendientes de evidencia y decisión.
+
+**Decisión:** El trabajo de T-014 se divide y se registra en `TASKS_POST_MVP.md`: diseño previo (T-014-0); autenticación con dos opciones en el CLI, cookies o Bearer, sobre un núcleo común (T-014a) y sus vistas en aplicación completa (T-014a-ui); RBAC con motor, API administrativa y auditoría mínima (T-014b1) y panel de administración (T-014b2); multitenancy con PostgreSQL RLS, **independiente de RBAC** (T-014c); integración de RBAC con multitenancy (T-014d). Antes de ellas: composición de overlays (T-017a, T-017a-ui), seguridad base con Zod (T-017b) y arnés de verificación (T-018).
+
+**Reglas de alcance aprobadas:** multitenancy solo con PostgreSQL en esta etapa (SQLite sin multitenancy); multitenancy requiere autenticación de Brixa o una identidad externa verificada; se mantienen JavaScript y TypeScript para toda capacidad; quedan fuera de esta etapa MFA, OAuth/SSO, auditoría avanzada, registro público y recuperación de contraseña (salvo razón importante), integración con proveedores de identidad externos (solo contrato) y MongoDB.
+
+**Pendiente de evidencia o decisión:** hash de contraseñas, tipo de credencial (opaca o JWT), Bearer en fullstack, CSRF, versión de Zod, almacén de contadores de abuso, catálogo de permisos, contexto del actor, estrategia JS/TS, mecanismo de composición y forma del esquema (ver P-008 a P-017).
+
+---
+
+### D-065 — Verificación de capacidades de seguridad
+
+**Estado:** Confirmada en alcance (2026-11-04; registrada el 2026-11-07).
+
+**Decisión:** Cada capacidad de seguridad llega con pruebas positivas y negativas. Se distinguen `verify:generated` (matriz base), `verify:security` (pruebas profundas) y `verify:all` (ambas; una publicación lo exige en verde). Las mutaciones y los controles negativos viven en el arnés de Brixa sobre copias temporales y no forman parte del proyecto generado. Una combinación con autenticación, RBAC o multitenancy que no haya superado `verify:security` se marca EXPERIMENTAL (D-053).
+
+**Motivo:** Ninguna capacidad se considera segura por compilar, generar archivos o pasar `verify:generated`.
+
+---
+
 ## 5. Cuestiones pendientes
 
-- P-002: confirmación definitiva de versiones de dependencias de proyectos generados, el baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055).
+- P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008.
 - Subir `actions/checkout` y `actions/setup-node` a versiones que no usen Node 20, con SHA comprobados (D-055).
 - Revisar la omisión del aviso de create-vite en los proyectos generados al sustituir la plantilla (D-054).
 - Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
-- Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia.
+- Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia. La inspección del 2026-11-07 confirmó cuatro copias de `redact` usadas solo en migradores y ninguna en el manejador global (P-014); falta comprobar el test (T-020).
 - Reevaluar Drizzle Kit 1.0 estable por los avisos de `@esbuild-kit` (D-039).
-- D-059: respuesta de soporte de npm sobre el nombre `brixa` (plazo 2026-11-09; si no, `@acjoell/brixa`).
-- Antes de publicar, recordar que el nombre puede rechazarse por similitud aunque `npm view` dé 404.
-
+- D-060: respuesta de soporte de npm sobre el nombre `brixa`. La publicación se hará desde el checkout del tag `v0.1.0`. Recordar que el nombre puede rechazarse por similitud aunque `npm view` dé 404.
+- Registrar en T-019 los datos del tag y del Release (objeto del tag, URL, estado de protección de tags).
+- Cifras: el número de variantes verificadas es 32 (inspección 2026-11-07). Cualquier documento que diga 34 está desactualizado.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017.
 
 ## 6. Registro de nuevas decisiones
 
