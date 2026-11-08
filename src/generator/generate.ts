@@ -415,7 +415,7 @@ async function appendBackendReadmeDocker(
     dbSection = `
 ### Migraciones de base de datos
 
-> **Importante:** \`npm run db:generate\` debe ejecutarse en el host ANTES de construir la imagen, porque el directorio \`drizzle/\` debe existir en ella.
+> **Importante:** ejecuta \`npm run db:generate\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
 
 Aplica las migraciones en la base de datos dentro del contenedor:
 
@@ -476,7 +476,7 @@ async function appendRootReadmeDockerFullstack(
     dbSection = `
 ### Migraciones de base de datos
 
-> **Importante:** \`npm run db:generate\` debe ejecutarse dentro de \`backend/\` en el host ANTES de construir la imagen, porque el directorio \`drizzle/\` debe existir en ella.
+> **Importante:** ejecuta \`npm run db:generate\` dentro de \`backend/\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
 
 Aplica las migraciones en la base de datos desde la raíz del proyecto:
 
@@ -1204,6 +1204,13 @@ export function nextStepsMessage(
         "",
         "  # O con Docker:",
         "  # (Recomendado: ejecuta npm install en frontend/ y backend/ antes de construir para fijar el lockfile)",
+      );
+      if (database === "postgres" || database === "sqlite") {
+        lines.push(
+          "  # (Importante: ejecuta npm run db:generate dentro de backend/ antes de docker compose build; sin la carpeta drizzle/ el build falla)",
+        );
+      }
+      lines.push(
         "  docker compose up -d",
         "  # Aplicación web disponible en: http://localhost:8080",
         "  # Ruta de salud: http://localhost:8080/api/health",
@@ -1280,8 +1287,13 @@ export function nextStepsMessage(
       "",
       "  # O con Docker:",
       "  # (Recomendado: ejecuta npm install antes de docker compose build para fijar el lockfile)",
-      "  docker compose up -d",
     );
+    if (database === "postgres" || database === "sqlite") {
+      lines.push(
+        "  # (Importante: ejecuta npm run db:generate antes de docker compose build; sin la carpeta drizzle/ el build falla)",
+      );
+    }
+    lines.push("  docker compose up -d");
   }
 
   if (database === "postgres") {
