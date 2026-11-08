@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
+import { redact } from "../redact.js";
 
 try {
   process.loadEnvFile();
@@ -77,11 +78,6 @@ async function runMigrations() {
   } finally {
     client.close();
   }
-}
-
-/** Elimina credenciales o tokens de una cadena para que no aparezcan en logs. */
-export function redact(text) {
-  return text.replace(/(?:authToken=|token=)[^&\s]+/gi, "token=***");
 }
 
 const isMain =

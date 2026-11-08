@@ -11,8 +11,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { inspect } from "node:util";
 import { fileURLToPath } from "node:url";
 import { generate, formatGenerateError, mergePackageJson, nextStepsMessage } from "./generate.js";
+import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
+// @ts-expect-error La plantilla JavaScript no incluye archivo de declaraciones .d.ts
+import { redact as redactJs } from "../templates/backend-express-js/src/redact.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -385,35 +389,95 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
     }
   });
 
-  it("enmascara credenciales en src/db/migrate (ts y js) con contraseña normal, con '@' y con ':'", async () => {
-    const templatesRoot = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "templates",
-      "database-postgres",
-    );
+  it("enmascara credenciales y tokens mediante las implementaciones reales de redact (ts y js)", () => {
+    const testCases = [
+      {
+        name: "URL PostgreSQL con usuario y contraseña",
+        input: "postgresql://u:password123@127.0.0.1:5432/db",
+        expected: "postgresql://***:***@127.0.0.1:5432/db",
+      },
+      {
+        name: "URL PostgreSQL con contraseña con '@'",
+        input: "postgresql://u:SECR@ETO@127.0.0.1:5432/db",
+        expected: "postgresql://***:***@127.0.0.1:5432/db",
+      },
+      {
+        name: "URL PostgreSQL con contraseña con ':'",
+        input: "postgresql://u:SEC:RET:O@127.0.0.1:5432/db",
+        expected: "postgresql://***:***@127.0.0.1:5432/db",
+      },
+      {
+        name: "URL PostgreSQL con contraseña con caracteres especiales codificados",
+        input: "postgresql://admin:p%40ss%3Aw0rd@127.0.0.1:5432/mydb",
+        expected: "postgresql://***:***@127.0.0.1:5432/mydb",
+      },
+      {
+        name: "URL HTTP con credenciales",
+        input: "http://dummy_user:dummy_pass@127.0.0.1:3000/api",
+        expected: "http://***:***@127.0.0.1:3000/api",
+      },
+      {
+        name: "URL libSQL con credenciales",
+        input: "libsql://dummy_user:dummy_pass@127.0.0.1:8080/data",
+        expected: "libsql://***:***@127.0.0.1:8080/data",
+      },
+      {
+        name: "Parámetro authToken",
+        input: "libsql://host/database?authToken=SECRET_TOKEN",
+        expected: "libsql://host/database?authToken=***",
+      },
+      {
+        name: "Parámetro token",
+        input: "https://host/database?token=SECRET_TOKEN",
+        expected: "https://host/database?token=***",
+      },
+      {
+        name: "Varias URLs en una misma cadena",
+        input:
+          "Error al conectar con postgresql://u:p@127.0.0.1/db y http://admin:pass@127.0.0.1/status",
+        expected:
+          "Error al conectar con postgresql://***:***@127.0.0.1/db y http://***:***@127.0.0.1/status",
+      },
+      {
+        name: "Texto sin credenciales ni tokens",
+        input: "Error: connect ECONNREFUSED 127.0.0.1:5432",
+        expected: "Error: connect ECONNREFUSED 127.0.0.1:5432",
+      },
+      {
+        name: "No alteración de los valores no sensibles",
+        input: "https://host/database?safe=true&token=SECRET_TOKEN&page=2#section",
+        expected: "https://host/database?safe=true&token=***&page=2#section",
+      },
+    ];
 
-    for (const lang of ["ts", "js"] as const) {
-      const filePath = path.join(templatesRoot, lang, "src", "db", `migrate.${lang}`);
-      const content = await fs.readFile(filePath, "utf-8");
+    for (const tc of testCases) {
+      const resTs = redactTs(tc.input);
+      const resJs = redactJs(tc.input);
+      expect(resTs, `Caso TS: ${tc.name}`).toBe(tc.expected);
+      expect(resJs, `Caso JS: ${tc.name}`).toBe(tc.expected);
+      expect(resTs).toBe(resJs);
+    }
+  });
 
-      const fnMatch = content.match(/function redact\([^)]*\)(?::\s*\w+)?\s*\{([\s\S]*?)\}/);
-      expect(fnMatch).not.toBeNull();
-      const fnBody = fnMatch?.[1] ?? "";
-      const redact = new Function("text", fnBody) as (text: string) => string;
+  it("oculta secretos en errores inspeccionados incluyendo Error.cause y propiedades adicionales", () => {
+    const cause = new Error("Causa interna con postgresql://inner_user:inner_pass@127.0.0.1/db");
+    const err = new Error("Error principal con http://main_user:main_pass@127.0.0.1/api", {
+      cause,
+    });
+    (err as unknown as { extraProp: string }).extraProp =
+      "libsql://host/db?authToken=SECRET_EXTRA&other=safe";
 
-      const normal = "postgresql://u:password123@127.0.0.1:5432/db";
-      const withAt = "postgresql://u:SECR@ETO@127.0.0.1:5432/db";
-      const withColon = "postgresql://u:SEC:RET:O@127.0.0.1:5432/db";
-
-      expect(redact(normal)).toBe("postgresql://***:***@127.0.0.1:5432/db");
-      expect(redact(withAt)).toBe("postgresql://***:***@127.0.0.1:5432/db");
-      expect(redact(withColon)).toBe("postgresql://***:***@127.0.0.1:5432/db");
-
-      expect(redact(withAt)).not.toContain("SECR");
-      expect(redact(withAt)).not.toContain("ETO");
-      expect(redact(withColon)).not.toContain("SEC");
-      expect(redact(withColon)).not.toContain("RET");
+    for (const [, redactFn] of [
+      ["ts", redactTs],
+      ["js", redactJs],
+    ] as const) {
+      const formatted = redactFn(inspect(err, { depth: 5 }));
+      expect(formatted).not.toContain("inner_pass");
+      expect(formatted).not.toContain("main_pass");
+      expect(formatted).not.toContain("SECRET_EXTRA");
+      expect(formatted).toContain("postgresql://***:***@127.0.0.1/db");
+      expect(formatted).toContain("http://***:***@127.0.0.1/api");
+      expect(formatted).toContain("authToken=***&other=safe");
     }
   });
 });
@@ -525,6 +589,22 @@ describe("generate — docker opcional en backend", () => {
     const composeContent = await fs.readFile(path.join(dest, "compose.yaml"), "utf-8");
     expect(composeContent).toContain("${POSTGRES_PASSWORD:?");
     expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
+
+    const dockerfileWithDb = await fs.readFile(path.join(dest, "Dockerfile"), "utf-8");
+    expect(dockerfileWithDb).toContain("COPY --chown=node:node drizzle/ ./drizzle/");
+
+    // Variante backend con Docker pero sin base de datos
+    const nodbDest = await mkTmp("backend-docker-nodb");
+    const nodbResult = await generate({
+      modality: "backend",
+      language: "ts",
+      database: "none",
+      docker: true,
+      outputDir: nodbDest,
+    });
+    expect(nodbResult.ok).toBe(true);
+    const nodbDockerfile = await fs.readFile(path.join(nodbDest, "Dockerfile"), "utf-8");
+    expect(nodbDockerfile).not.toContain("drizzle");
   });
 });
 

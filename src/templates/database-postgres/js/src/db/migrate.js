@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { redact } from "../redact.js";
 
 const { Pool } = pg;
 
@@ -65,11 +66,6 @@ async function runMigrations() {
   } finally {
     await pool.end();
   }
-}
-
-/** Elimina credenciales de una cadena para que no aparezcan en logs. */
-export function redact(text) {
-  return text.replace(/postgres(?:ql)?:\/\/[^/\s]*@/gi, "postgresql://***:***@");
 }
 
 runMigrations().catch((err) => {
