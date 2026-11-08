@@ -1107,6 +1107,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         run("npm", ["run", "typecheck"], backendDir);
       }
       run("npm", ["run", "lint"], backendDir);
+      run("npm", ["run", "format:check"], backendDir);
 
       if (hasPostgres) {
         await verifyDatabaseIntegration(backendDir, language, pgContext, label);
@@ -1229,6 +1230,7 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       if (modality === "backend") {
+        run("npm", ["run", "format:check"], projectDir);
         if (language === "ts") {
           run("npm", ["run", "typecheck"], projectDir);
         }

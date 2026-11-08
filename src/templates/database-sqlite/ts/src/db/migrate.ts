@@ -80,8 +80,7 @@ async function runMigrations(): Promise<void> {
   }
 }
 
-const isMain =
-  process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (isMain) {
   runMigrations().catch((err: unknown) => {
