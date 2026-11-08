@@ -1,5 +1,6 @@
 import express from "express";
 import { inspect } from "node:util";
+// @@INSERT:imports@@
 import { redact } from "./redact.js";
 
 try {
@@ -20,6 +21,7 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+// @@INSERT:routes@@
 // Manejo de errores centralizado (sin exponer trazas al cliente y con redacción en logs)
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {

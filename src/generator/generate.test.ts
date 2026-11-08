@@ -306,7 +306,7 @@ describe("generate — combinación no soportada", () => {
 });
 
 describe("generate — persistencia PostgreSQL (T-012)", () => {
-  it("fusión de package.json sin pisar nada", () => {
+  it("fusión de package.json: claves nuevas del overlay se añaden", () => {
     const base = {
       name: "app",
       scripts: { test: "vitest run" },
@@ -315,10 +315,10 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
     };
 
     const overlay = {
-      scripts: { test: "should-not-overwrite", "db:generate": "drizzle-kit generate" },
-      dependencies: { express: "99.0.0", "drizzle-orm": "0.45.4" },
+      scripts: { "db:generate": "drizzle-kit generate" },
+      dependencies: { "drizzle-orm": "0.45.4" },
       devDependencies: { "drizzle-kit": "0.31.11" },
-      allowScripts: { esbuild: true, other: false },
+      allowScripts: { other: false },
     };
 
     const result = mergePackageJson(base, overlay);
@@ -330,6 +330,36 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
     expect(result.devDependencies?.["drizzle-kit"]).toBe("0.31.11");
     expect(result.allowScripts?.esbuild).toBe(false);
     expect(result.allowScripts?.other).toBe(false);
+  });
+
+  it("fusión de package.json: clave con el MISMO valor no es conflicto", () => {
+    const base = {
+      name: "app",
+      scripts: { test: "vitest run" },
+      allowScripts: { esbuild: false },
+    };
+    const overlay = {
+      scripts: { test: "vitest run" }, // mismo valor → ok
+      allowScripts: { esbuild: false }, // mismo valor → ok
+    };
+    // No debe lanzar
+    const result = mergePackageJson(base, overlay, "test-overlay");
+    expect(result.scripts?.test).toBe("vitest run");
+    expect(result.allowScripts?.esbuild).toBe(false);
+  });
+
+  it("fusión de package.json: valor distinto lanza error nombrando al contribuyente", () => {
+    const base = {
+      name: "app",
+      scripts: { test: "vitest run" },
+      dependencies: { express: "5.3.0" },
+    };
+    const overlay = {
+      dependencies: { express: "99.0.0" }, // distinto → conflicto
+    };
+    expect(() => mergePackageJson(base, overlay, "my-overlay")).toThrow(
+      /conflicto.*express.*my-overlay/i,
+    );
   });
 
   it("'Ninguna' no altera el resultado y genera el backend sin persistencia", async () => {
@@ -899,5 +929,36 @@ describe("generate — i18n opcional (T-013c)", () => {
 
     const msg = nextStepsMessage(dest, "frontend", "none", false, "ts", false, true);
     expect(msg).not.toContain("experimental");
+  });
+
+  it("generate falla con copy_error si un archivo contiene un marcador con typo no reconocido", async () => {
+    // Si la plantilla backend contuviera un marcador con typo (simulamos modificando un archivo generado antes de cleanup o mediante mock)
+    // Para probar directamente el camino de fallo en generate(), usamos spy en fs.readFile para inyectar un typo en app.ts
+    const originalReadFile = fs.readFile;
+    const readSpy = vi.spyOn(fs, "readFile").mockImplementation(async (filepath, ...args) => {
+      const pathStr = String(filepath);
+      if (pathStr.endsWith("app.ts") && !pathStr.includes("_fragments")) {
+        const raw = await originalReadFile(filepath, ...args);
+        return String(raw) + "\n// @@INSERT:impots@@\n";
+      }
+      return originalReadFile(filepath, ...args);
+    });
+
+    const dest = await mkTmp("backend-typo-test");
+    const res = await generate({
+      modality: "backend",
+      language: "ts",
+      outputDir: dest,
+    });
+
+    readSpy.mockRestore();
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.kind).toBe("copy_error");
+      if (res.error.kind === "copy_error") {
+        expect(res.error.message).toMatch(/marcador de inserción no reconocido.*impots/i);
+      }
+    }
   });
 });

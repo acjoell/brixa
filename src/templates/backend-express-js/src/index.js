@@ -1,4 +1,5 @@
 import { app } from "./app.js";
+// @@INSERT:imports@@
 
 try {
   process.loadEnvFile();
@@ -23,6 +24,7 @@ function parsePort(val) {
 
 let port;
 try {
+  // @@INSERT:startup@@
   port = parsePort(process.env.PORT);
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));

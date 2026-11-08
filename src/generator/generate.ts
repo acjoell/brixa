@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type UserOptions, type Modality, type Database, type Language } from "../types.js";
 import { isVerified, variantLabel } from "../verified-variants.js";
+import { resolveInsertionPoints, cleanupInsertionPoints, type InsertionMap } from "./insertions.js";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -95,18 +96,43 @@ function interpolate(content: string, projectName: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Fusión determinista de package.json sin sobrescribir claves existentes
+// Fusión determinista de package.json con detección de conflicto
 // ---------------------------------------------------------------------------
 
+/**
+ * Compara dos valores con igualdad profunda (vía serialización JSON).
+ * Funciona para primitivos, arrays y objetos simples (sin referencias circulares).
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Fusiona dos secciones de package.json (scripts, dependencies, etc.).
+ *
+ * - Si una clave existe en ambos con el MISMO valor → se conserva sin error.
+ * - Si una clave existe en ambos con VALORES DISTINTOS → lanza error nombrando al contribuyente.
+ * - Si una clave sólo existe en el overlay → se añade.
+ *
+ * @param contributorLabel Nombre del overlay/contribuyente, para el mensaje de error.
+ */
 export function mergeSection<T>(
   base?: Record<string, T>,
   overlay?: Record<string, T>,
+  contributorLabel: string = "overlay",
 ): Record<string, T> | undefined {
   if (!base && !overlay) return undefined;
   const merged: Record<string, T> = { ...(base ?? {}) };
   if (overlay) {
     for (const [key, value] of Object.entries(overlay)) {
-      if (!(key in merged)) {
+      if (key in merged) {
+        if (!deepEqual(merged[key], value)) {
+          throw new Error(
+            `Conflicto en package.json: la clave "${key}" ya existe con un valor distinto. Contribuyente: "${contributorLabel}".`,
+          );
+        }
+        // Mismo valor → no es conflicto, se conserva.
+      } else {
         merged[key] = value;
       }
     }
@@ -114,30 +140,46 @@ export function mergeSection<T>(
   return merged;
 }
 
-export function mergePackageJson(base: PackageJson, overlay: PackageJsonOverlay): PackageJson {
+export function mergePackageJson(
+  base: PackageJson,
+  overlay: PackageJsonOverlay,
+  contributorLabel: string = "overlay",
+): PackageJson {
   const result: PackageJson = { ...base };
 
-  const mergedAllowScripts = mergeSection(base.allowScripts, overlay.allowScripts);
+  const mergedAllowScripts = mergeSection(
+    base.allowScripts,
+    overlay.allowScripts,
+    contributorLabel,
+  );
   if (mergedAllowScripts) {
     result.allowScripts = mergedAllowScripts;
   }
 
-  const mergedScripts = mergeSection(base.scripts, overlay.scripts);
+  const mergedScripts = mergeSection(base.scripts, overlay.scripts, contributorLabel);
   if (mergedScripts) {
     result.scripts = mergedScripts;
   }
 
-  const mergedDependencies = mergeSection(base.dependencies, overlay.dependencies);
+  const mergedDependencies = mergeSection(
+    base.dependencies,
+    overlay.dependencies,
+    contributorLabel,
+  );
   if (mergedDependencies) {
     result.dependencies = mergedDependencies;
   }
 
-  const mergedDevDependencies = mergeSection(base.devDependencies, overlay.devDependencies);
+  const mergedDevDependencies = mergeSection(
+    base.devDependencies,
+    overlay.devDependencies,
+    contributorLabel,
+  );
   if (mergedDevDependencies) {
     result.devDependencies = mergedDevDependencies;
   }
 
-  const mergedOverrides = mergeSection(base.overrides, overlay.overrides);
+  const mergedOverrides = mergeSection(base.overrides, overlay.overrides, contributorLabel);
   if (mergedOverrides) {
     result.overrides = mergedOverrides;
   }
@@ -691,11 +733,52 @@ async function appendComposeApiDocsEnv(composePath: string): Promise<void> {
   }
 }
 
+/**
+ * Lee un archivo de fragmento del overlay api-docs y devuelve sus líneas,
+ * descartando el salto de línea final si lo hubiera.
+ */
+async function readFragment(overlayDir: string, name: string): Promise<string[]> {
+  const content = await fs.readFile(path.join(overlayDir, "_fragments", name), "utf-8");
+  // Quitar el salto de línea final del archivo para no introducir líneas extra
+  const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
+  return trimmed.split("\n");
+}
+
 async function applyApiDocsOverlay(targetBackendDir: string, language: Language): Promise<void> {
   const overlayDir = path.join(templatesDir(), "api-docs", language);
+
+  // 1. Copiar archivos del overlay (docs/, tests/, tsconfig.json si existe).
+  //    _fragments/ se omite automáticamente por la convención de copyDir.
   await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
 
-  // Fusionar package.json deterministamente sin sobrescribir lo existente
+  // 2. Resolver puntos de inserción en app y index.
+  const ext = language === "ts" ? "ts" : "js";
+  const contributor = "api-docs";
+
+  for (const basename of ["app", "index"] as const) {
+    const srcFile = path.join(targetBackendDir, "src", `${basename}.${ext}`);
+    const baseContent = await fs.readFile(srcFile, "utf-8");
+
+    const insertions: InsertionMap = {};
+
+    // Importaciones (tanto app como index tienen el punto imports)
+    const importsFragment = await readFragment(overlayDir, `${basename}.imports`);
+    insertions["imports"] = [{ contributor, lines: importsFragment }];
+
+    // Punto específico de cada archivo
+    if (basename === "app") {
+      const routesFragment = await readFragment(overlayDir, "app.routes");
+      insertions["routes"] = [{ contributor, lines: routesFragment }];
+    } else {
+      const startupFragment = await readFragment(overlayDir, "index.startup");
+      insertions["startup"] = [{ contributor, lines: startupFragment }];
+    }
+
+    const resolved = resolveInsertionPoints(baseContent, insertions);
+    await fs.writeFile(srcFile, resolved, "utf-8");
+  }
+
+  // 3. Fusionar package.json deterministamente con detección de conflicto.
   const pkgPath = path.join(targetBackendDir, "package.json");
   const pkgRaw = await fs.readFile(pkgPath, "utf-8");
   const pkgJson = JSON.parse(pkgRaw) as PackageJson;
@@ -717,7 +800,7 @@ async function applyApiDocsOverlay(targetBackendDir: string, language: Language)
       : {}),
   };
 
-  const merged = mergePackageJson(pkgJson, overlayDeps);
+  const merged = mergePackageJson(pkgJson, overlayDeps, contributor);
   if (!merged.allowScripts) {
     merged.allowScripts = {};
   }
@@ -926,6 +1009,8 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
       }
 
+      await cleanupUnresolvedInsertionPoints(backendDest, language);
+
       return { ok: true };
     } catch (err) {
       return {
@@ -973,6 +1058,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
           await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
         }
       }
+      await cleanupUnresolvedInsertionPoints(outputDir, language);
     }
 
     return { ok: true };
@@ -1009,6 +1095,15 @@ async function copyDir(src: string, dest: string, projectName: string): Promise<
 
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
+    // Directorios con prefijo _ que no corresponden a un renombrado conocido se omiten.
+    // Convención: _fragments/ contiene archivos de fragmento internos, no para copiar.
+    if (
+      entry.name.startsWith("_") &&
+      entry.name !== "_gitignore" &&
+      entry.name !== "_dockerignore"
+    ) {
+      continue;
+    }
     // _gitignore → .gitignore, _dockerignore → .dockerignore
     const destName =
       entry.name === "_gitignore"
@@ -1048,6 +1143,29 @@ async function copyFile(src: string, dest: string, projectName: string): Promise
     await fs.writeFile(dest, interpolate(content, projectName), "utf-8");
   } else {
     await fs.copyFile(src, dest);
+  }
+}
+
+async function cleanupUnresolvedInsertionPoints(
+  backendDir: string,
+  language: Language,
+): Promise<void> {
+  const ext = language === "ts" ? "ts" : "js";
+  for (const basename of ["app", "index"] as const) {
+    const file = path.join(backendDir, "src", `${basename}.${ext}`);
+    let content: string;
+    try {
+      content = await fs.readFile(file, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw err;
+    }
+    const cleaned = cleanupInsertionPoints(content);
+    if (cleaned !== content) {
+      await fs.writeFile(file, cleaned, "utf-8");
+    }
   }
 }
 
