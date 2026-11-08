@@ -11,8 +11,7 @@ ENV NODE_ENV=production
 COPY package.json ./
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node src/ ./src/
-COPY --chown=node:node drizzle* ./drizzle/
-RUN mkdir -p data && chown -R node:node /app
+RUN chown -R node:node /app
 USER node
 EXPOSE 3000
 CMD ["node", "src/index.js"]

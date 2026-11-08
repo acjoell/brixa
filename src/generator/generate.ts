@@ -528,7 +528,9 @@ async function applyDockerOverlay(
   const dockerTemplates = path.join(templatesDir(), "docker");
 
   // 1. Dockerfile
-  const dockerfileSrc = path.join(dockerTemplates, language, "Dockerfile");
+  const hasDb = database === "postgres" || database === "sqlite";
+  const dockerfileName = hasDb ? "Dockerfile.db" : "Dockerfile";
+  const dockerfileSrc = path.join(dockerTemplates, language, dockerfileName);
   await fs.copyFile(dockerfileSrc, path.join(targetBackendDir, "Dockerfile"));
 
   // 2. .dockerignore
@@ -559,7 +561,9 @@ async function applyFullstackDockerOverlay(
   const fullstackTemplates = path.join(dockerTemplates, "fullstack");
 
   // 1. Backend: Dockerfile y .dockerignore (sin compose.yaml)
-  const backendDockerfileSrc = path.join(dockerTemplates, language, "Dockerfile");
+  const hasDb = database === "postgres" || database === "sqlite";
+  const dockerfileName = hasDb ? "Dockerfile.db" : "Dockerfile";
+  const backendDockerfileSrc = path.join(dockerTemplates, language, dockerfileName);
   await fs.copyFile(backendDockerfileSrc, path.join(backendDest, "Dockerfile"));
   const backendDockerignoreSrc = path.join(dockerTemplates, "_dockerignore");
   await fs.copyFile(backendDockerignoreSrc, path.join(backendDest, ".dockerignore"));

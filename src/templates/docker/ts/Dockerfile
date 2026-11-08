@@ -14,8 +14,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 COPY --from=builder --chown=node:node /app/dist ./dist
-COPY --chown=node:node drizzle* ./drizzle/
-RUN mkdir -p data && chown -R node:node /app
+RUN chown -R node:node /app
 USER node
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
