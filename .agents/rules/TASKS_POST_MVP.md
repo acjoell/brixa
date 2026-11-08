@@ -593,6 +593,28 @@ El almacén de contadores **no está decidido**. No se acepta la base de datos d
 
 ---
 
+### Tarea recurrente — Revisión periódica de dependencias e imágenes
+
+**Estado:** RECURRENTE (activa)  
+**Aprobación:** Aprobada (D-066).  
+**Frecuencia:** Mensual y obligatoria previa a cada publicación de versión.
+
+**Objetivo:** Mantener la seguridad, estabilidad y actualidad de las dependencias directas de todas las plantillas y de las imágenes base Docker, detectando a tiempo avisos de vulnerabilidad, roturas de compatibilidad y deprecaciones.
+
+**Checklist mensual y previo a cada publicación:**
+1. **Avisos de seguridad y versiones base de imágenes Docker:**
+   - Comprobar nuevas versiones o parches de seguridad para `node` (actualmente `node:24.22.1-slim`), `nginx` (`nginxinc/nginx-unprivileged:1.30.6-alpine-slim`) y `postgres` (`postgres:17.4-alpine`).
+   - Evaluar vulnerabilidades conocidas en imágenes base (mediante `docker scout` o `trivy` cuando estén disponibles).
+2. **Revisión de versiones directas de plantillas:**
+   - Revisar avisos de obsolescencia o cambios mayores en dependencias clave (`react`, `react-dom`, `vite`, `eslint`, `typescript`, `express`, `drizzle-orm`, `@libsql/client`, `pg`, `i18next`, etc.).
+   - Contrastar con las versiones resueltas por npm y evaluar si procede actualizar las versiones exactas fijadas en las plantillas.
+3. **Auditoría de seguridad (`npm audit`):**
+   - Ejecutar `npm audit --audit-level=moderate` en cada plantilla y en el CLI. Verificar que no aparezcan vulnerabilidades nuevas sin mitigar.
+4. **Verificación completa del arnés (`verify:generated`):**
+   - Ejecutar la batería de verificación sobre las 32 variantes verificadas para comprobar que las dependencias compilan, arrancan y pasan los tests e integración antes de publicar o confirmar la actualización.
+
+---
+
 ## 8. Reglas de validación del CLI (propuesta)
 
 Se rechaza con mensaje claro y no se fuerzan valores en silencio (PROJECT_VISION §6). Las opciones que no aplican a una modalidad hoy se ignoran en silencio [I]: las dependencias nuevas necesitan un patrón distinto.

@@ -606,6 +606,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Motivo:** Arrancar la aplicación no debe modificar la base de datos por sorpresa, y un despliegue no debe instalar `drizzle-kit`.
 
+**Nota:** para el comportamiento de copia de migraciones en Docker y `Dockerfile.db`, ver D-068.
+
 ---
 
 ### D-038 — Cliente de base de datos sin Proxy y errores sin credenciales
@@ -726,6 +728,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Nota (2026-11-07):** la inspección estática del repositorio (HEAD `fc19490…`) indica que los Compose generados usan `postgres:17.4-alpine`, no `postgres:17`, y que el arnés de verificación usa `postgres:17-alpine`. El texto original de la decisión se conserva; la alineación queda pendiente en P-015.
 
+**Nota (2026-11-08):** para la copia de migraciones en Docker con base de datos (`Dockerfile.db`), ver D-068. Se confirma mediante inspección que las plantillas usan `postgres:17.4-alpine` mientras que el arnés (`scripts/verify-generated.js`) usa `postgres:17-alpine`.
+
 **Migraciones:** explícitas, como en D-037. En JavaScript: `docker compose run --rm backend npm run db:migrate`. En TypeScript: `docker compose run --rm backend node dist/db/migrate.js` (ejecuta el JS compilado; `tsx` es una devDependency y no existe en la imagen de producción). `db:generate` se ejecuta en el host antes de construir la imagen para que `drizzle/` exista en ella.
 
 **Secretos:** `compose.yaml` no contiene valores de contraseña; `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica.
@@ -757,6 +761,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 **Decisión:** El CLI pregunta «¿Docker?» (por defecto No) también en aplicación completa. Con Docker genera `compose.yaml` en la raíz con los servicios `backend`, `frontend` y, según la base de datos, `postgres:17` o un volumen para `data/` en SQLite. El backend reutiliza su `Dockerfile` (D-047). El frontend se construye con `node:24.22.1-slim` y se sirve con `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, sin privilegios, con fallback SPA y proxy de `/api/` al backend quitando el prefijo (misma semántica que el rewrite de Vite de D-034). Solo el frontend publica puerto al host (8080); backend y PostgreSQL permanecen internos. Sin Docker, la generación no cambia.
 
 **Nota (2026-11-07):** igual que en D-047, la imagen de PostgreSQL generada es `postgres:17.4-alpine` según la inspección; ver P-015.
+
+**Nota (2026-11-08):** para la copia de migraciones en Docker con base de datos (`Dockerfile.db`), ver D-068. Se confirma que las plantillas usan `postgres:17.4-alpine` en `compose.yaml` mientras que el arnés usa `postgres:17-alpine`.
 
 **Secretos y `.gitignore` raíz:** `POSTGRES_PASSWORD` es obligatoria, sin valor por defecto. Como Compose lee el `.env` de la raíz y los `.gitignore` de `frontend/` y `backend/` no lo cubren, con Docker se genera un `.gitignore` raíz que contiene solo `.env`. Esto matiza D-034 (fullstack sin `.gitignore` raíz): sigue sin existir cuando no se elige Docker. La plantilla se guarda como `_gitignore` y se copia con renombrado explícito, porque `copyDir()` (D-032) solo se aplica a las subcarpetas y npm descarta los `.gitignore` en los paquetes publicados.
 
@@ -817,6 +823,7 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 **No verificado:** clic real en el selector en un navegador (comprobación manual del responsable pendiente); e2e en navegador; SSR de producción.
 
 **Alcance de verificación (reducido):** `verify:generated` (32 variantes; corregido el 2026-11-07, el texto original decía 34) cubre i18n en 2: frontend ts y fullstack js con SQLite. Comprueba `check:i18n`, render en servidor por idioma, detección y persistencia, y cadenas en `dist/`. Quedan fuera las variantes js de frontend, fullstack ts y la de Docker. Los controles negativos (N1–N7) se ejecutaron una vez en T-013c y no son repetibles en el arnés, por lo que este no demuestra por sí mismo que detectaría un fallo de i18n. Esta deuda sigue abierta: la referencia original a T-013e no corresponde a ninguna tarea de `TASKS.md`; falta decidir si se abre esa tarea o si T-018 (`TASKS_POST_MVP.md`) absorbe el trabajo.
+Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos auxiliares). Cifras históricas citadas en documentación previa como 16/16, 28/28 o 32/32 corresponden a pasos del arnés en distintas etapas del desarrollo, siendo 32 las variantes reales verificadas.
 
 ---
 
@@ -825,6 +832,12 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 **Estado:** Confirmada.
 
 **Contexto:** El CLI permite 76 combinaciones de modalidad, lenguaje y capacidades, y 32 están verificadas por `verify:generated`. ARCHITECTURE §13 exige que las no verificadas estén deshabilitadas o identificadas como experimentales.
+
+**Aclaración sobre magnitudes (2026-11-08):** «76 combinaciones» y «76 pares válidos» son magnitudes distintas que coinciden numéricamente:
+- Las **76 combinaciones** del CLI corresponden al espacio de proyectos generables respetando las restricciones del CLI: 4 en frontend (2 lenguajes × 1 bd:none × 1 docker:false × 1 docs:false × 2 i18n), 24 en backend (2 lenguajes × 3 bd × 2 docker × 2 docs × 1 i18n:false) y 48 en fullstack (2 lenguajes × 3 bd × 2 docker × 2 docs × 2 i18n).
+- Los **76 pares válidos** (denominador de cobertura pairwise 2-a-2) surgen de los 81 pares teóricos entre los 6 parámetros menos 5 pares inválidos por restricciones del CLI (frontend con postgres/sqlite/docker/docs, y backend con i18n).
+- De los 76 pares válidos, las 32 variantes verificadas cubren **73 pares (96,05%)**.
+- Los **3 pares sin cubrir** son: `database=postgres & i18n=true`, `docker=true & i18n=true` y `apiDocs=true & i18n=true`. La causa es que en `VERIFIED_VARIANTS` solo 2 variantes activan i18n (`frontend+ts+i18n` y `fullstack+js+sqlite+i18n`), ambas con `docker: false`, `apiDocs: false`, y con bases de datos `none` y `sqlite`. Ninguna variante verificada combina `i18n: true` con `postgres`, `docker` o `apiDocs`.
 
 **Decisión:** El CLI no bloquea las combinaciones no verificadas, pero las identifica como EXPERIMENTALES en el resumen previo a la generación y en el mensaje final. Hay una lista única de variantes verificadas (`src/verified-variants.ts`) y el arnés comprueba que coincide exactamente con sus variantes; si difieren, falla.
 
@@ -1002,17 +1015,63 @@ Comportamiento: idiomas `en` y `es`, respaldo `en`, `supportedLngs` con resoluci
 
 ---
 
+### D-066 — Versiones exactas y cadencia de actualización
+
+**Estado:** Confirmada (2026-11-08).
+
+**Contexto:** En la prueba P1 se constató que el backend fijaba versiones exactas mientras el frontend utilizaba rangos (`^`, `~`). Esto generaba deriva de versiones entre subproyectos de una misma aplicación fullstack (`eslint` 10.14.0 en frontend vs 10.13.0 en backend, `typescript-eslint` 8.72.1 vs 8.72.0, `@types/node` 24 vs 26). Las dependencias transitivas permanecen sin fijar porque las plantillas no incluyen lockfile, y `verify:generated` prueba lo que npm resuelve el día en que se ejecuta.
+
+**Decisión:** Las dependencias directas de TODAS las plantillas se fijan con versión exacta, como ya hace el backend. Las imágenes Docker mantienen etiqueta exacta. Las versiones se actualizan con un proceso periódico explícito (revisión de avisos y versiones, npm audit y `verify:generated` antes de adoptar). No se genera lockfile en el CLI. No se añade Dependabot/Renovate (pendiente de decisión).
+
+**Motivo:** El riesgo en una herramienta de generación de código (scaffolding) está en no actualizar, no en fijar. Fijar versiones directas exactas garantiza reproducibilidad determinista día a día y evita que subidas menores o de parche rompan proyectos generados inesperadamente.
+
+**Consecuencias:** Alguien debe ejecutar la revisión periódica explícita; sin ella las versiones quedan obsoletas con el tiempo. La política de D-049 (no generar lockfile en el CLI) se mantiene. La deriva existente de versiones entre frontend y backend queda registrada como cuestión pendiente de alineación.
+
+**Alternativas descartadas:**
+- Rangos (`^`, `~`) o etiquetas flotantes en imágenes: descartados por romper la reproducibilidad y provocar fallos imprevistos en proyectos generados.
+- Lockfile por variante en el repositorio/plantillas: descartado porque el CLI compone y fusiona dependencias dinámicamente; sincronizar 32+ lockfiles añadiría una alta fragilidad y coste de mantenimiento.
+- `npm install --package-lock-only` en el CLI durante la generación: descartado para no ralentizar la ejecución con llamadas de red ni asumir acceso continuo a Internet.
+
+---
+
+### D-067 — Redacción central de secretos
+
+**Estado:** Confirmada.
+
+**Contexto y Decisión:** Se centraliza la redacción de secretos en un único módulo `src/redact.{ts,js}` dentro de la plantilla base de backend, importado por los migradores y utilizado en el manejador global de errores mediante `redact(inspect(err, { depth: 5 }))`. Cubre credenciales en URLs (sección `userinfo`) y parámetros `authToken=` / `token=`. NO cubre cabeceras `Authorization`, `password=`, tokens de sesión ni errores de arranque fuera de peticiones HTTP. Ampliar este alcance es requisito obligatorio antes de incorporar autenticación.
+
+**Commit:** `1b6f7ad86ddbbc4283713cea2d063157cc5d15de` (`1b6f7ad`). Cierra la deuda de T-012a al importar el test la función real de la plantilla en lugar de una copia local.
+
+---
+
+### D-068 — Dockerfile con base de datos copia solo drizzle/
+
+**Estado:** Confirmada.
+
+**Contexto y Decisión:** Para variantes con base de datos (PostgreSQL o SQLite) y Docker, el archivo `Dockerfile` (copiado desde `docker/{ts,js}/Dockerfile.db`) realiza `COPY drizzle/` de forma estricta, fallando la construcción si el directorio no existe en el host (debe ejecutarse `npm run db:generate` antes de `docker compose build`). Anteriormente se copiaba con comodín `drizzle*`, lo cual capturaba `drizzle.config.*` cuando `drizzle/` no existía, permitiendo que la construcción pasara y `db:migrate` terminara con éxito ficticio sin aplicar migraciones. Para variantes sin base de datos no existe referencia a `drizzle`.
+
+**Commit:** `9783be7909859a9a4797d6361724e8c5647ab8c1` (`9783be7`).
+
+---
+
 ## 5. Cuestiones pendientes
 
-- P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008.
+- P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
 - Subir `actions/checkout` y `actions/setup-node` a versiones que no usen Node 20, con SHA comprobados (D-055).
 - Revisar la omisión del aviso de create-vite en los proyectos generados al sustituir la plantilla (D-054).
 - Revisión legal de la concesión sobre código generado (D-042). No bloquea `0.1.0`.
-- Deuda de T-012a: comprobar que el test de `redact` ejecuta la función real de la plantilla y no una copia. La inspección del 2026-11-07 confirmó cuatro copias de `redact` usadas solo en migradores y ninguna en el manejador global (P-014); falta comprobar el test (T-020).
+- Deuda de T-012a: cerrada por D-067 (commit `1b6f7ad`), el test importa ahora la función real de la plantilla.
 - Reevaluar Drizzle Kit 1.0 estable por los avisos de `@esbuild-kit` (D-039).
 - D-060: respuesta de soporte de npm sobre el nombre `brixa`. La publicación se hará desde el checkout del tag `v0.1.0`. Recordar que el nombre puede rechazarse por similitud aunque `npm view` dé 404.
 - Registrar en T-019 los datos del tag y del Release (objeto del tag, URL, estado de protección de tags).
 - Cifras: el número de variantes verificadas es 32 (inspección 2026-11-07). Cualquier documento que diga 34 está desactualizado.
+- Dependabot / Renovate: evaluar conveniencia y configuración para automatizar alertas sin introducir ruido excesivo (pendiente de decisión, D-066).
+- Alineación de `@types/node`, `eslint` y `typescript-eslint` entre frontend, backend y CLI (actualmente `eslint` 10.14.0 en frontend vs 10.13.0 en backend; `typescript-eslint` 8.72.1 vs 8.72.0; `@types/node` 24 en frontend vs 26 en backend y CLI).
+- Etiqueta de PostgreSQL: alinear la imagen usada por las plantillas (`postgres:17.4-alpine`) frente a la usada por el arnés de verificación (`postgres:17-alpine`, D-047, D-049).
+- Variante nueva para cubrir los 3 pares faltantes de cobertura pairwise: candidata `fullstack+js+postgres+docker+apiDocs+i18n`, que elevaría las variantes verificadas de 32 a 33 cubriendo los 76 pares válidos al 100%.
+- Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
+- Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
+- Node 26: no probado en la ejecución P1 (probado en P1 exclusivamente sobre Node v24.22.1).
 - Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017.
 
 ## 6. Registro de nuevas decisiones
