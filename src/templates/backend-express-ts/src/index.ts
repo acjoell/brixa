@@ -1,4 +1,5 @@
 import { app } from "./app.js";
+import { parseConfig } from "./config.js";
 // @@INSERT:imports@@
 
 try {
@@ -9,23 +10,11 @@ try {
   }
 }
 
-const DEFAULT_PORT = 3000;
-
-function parsePort(val: string | undefined): number {
-  if (!val) {
-    return DEFAULT_PORT;
-  }
-  const port = Number(val);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error(`Puerto inválido: "${val}". Debe ser un número entero entre 0 y 65535.`);
-  }
-  return port;
-}
-
 let port: number;
 try {
   // @@INSERT:startup@@
-  port = parsePort(process.env.PORT);
+  const config = parseConfig(process.env);
+  port = config.port;
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);

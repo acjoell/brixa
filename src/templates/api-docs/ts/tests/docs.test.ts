@@ -5,10 +5,13 @@ import { app } from "../src/app.js";
 import { openapiSpec, setupApiDocs } from "../src/docs/swagger.js";
 
 describe("Documentación de API", () => {
-
   // Nota: app.router.stack (o app._router.stack) es una propiedad interna de Express para inspeccionar capas de enrutamiento.
   it("las rutas registradas en Express coinciden con las documentadas en la especificación", () => {
-    const router = (app as unknown as { router?: { stack: Array<{ route?: { path: string; methods: Record<string, boolean> } }> } }).router;
+    const router = (
+      app as unknown as {
+        router?: { stack: Array<{ route?: { path: string; methods: Record<string, boolean> } }> };
+      }
+    ).router;
     const stack = router?.stack ?? [];
     const registeredRoutes: Array<{ path: string; method: string }> = [];
 
@@ -24,7 +27,10 @@ describe("Documentación de API", () => {
     for (const route of registeredRoutes) {
       const docPath = openapiSpec.paths[route.path] as Record<string, unknown> | undefined;
       expect(docPath, `Ruta "${route.path}" no está documentada en openapi.json`).toBeDefined();
-      expect(docPath?.[route.method], `Método "${route.method.toUpperCase()} ${route.path}" no está documentado en openapi.json`).toBeDefined();
+      expect(
+        docPath?.[route.method],
+        `Método "${route.method.toUpperCase()} ${route.path}" no está documentado en openapi.json`,
+      ).toBeDefined();
     }
   });
 
@@ -82,5 +88,25 @@ describe("Documentación de API", () => {
       }
       await new Promise<void>((resolve) => testServer.close(() => resolve()));
     }
+  });
+
+  it("validateApiDocsEnv acepta undefined, 'true' y 'false', y rechaza valores inválidos sin exponerlos", async () => {
+    const { validateApiDocsEnv } = await import("../src/docs/validate-env.js");
+
+    expect(() => validateApiDocsEnv(undefined)).not.toThrow();
+    expect(() => validateApiDocsEnv("true")).not.toThrow();
+    expect(() => validateApiDocsEnv("false")).not.toThrow();
+
+    const secretVal = "supersecret123";
+    let thrown: Error | undefined;
+    try {
+      validateApiDocsEnv(secretVal);
+    } catch (e) {
+      thrown = e as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown?.message).toContain("ENABLE_API_DOCS");
+    expect(thrown?.message).not.toContain(secretVal);
   });
 });

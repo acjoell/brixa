@@ -22,7 +22,10 @@ describe("Documentación de API", () => {
     for (const route of registeredRoutes) {
       const docPath = openapiSpec.paths[route.path];
       expect(docPath, `Ruta "${route.path}" no está documentada en openapi.json`).toBeDefined();
-      expect(docPath?.[route.method], `Método "${route.method.toUpperCase()} ${route.path}" no está documentado en openapi.json`).toBeDefined();
+      expect(
+        docPath?.[route.method],
+        `Método "${route.method.toUpperCase()} ${route.path}" no está documentado en openapi.json`,
+      ).toBeDefined();
     }
   });
 
@@ -80,5 +83,25 @@ describe("Documentación de API", () => {
       }
       await new Promise((resolve) => testServer.close(() => resolve()));
     }
+  });
+
+  it("validateApiDocsEnv acepta undefined, 'true' y 'false', y rechaza valores inválidos sin exponerlos", async () => {
+    const { validateApiDocsEnv } = await import("../src/docs/validate-env.js");
+
+    expect(() => validateApiDocsEnv(undefined)).not.toThrow();
+    expect(() => validateApiDocsEnv("true")).not.toThrow();
+    expect(() => validateApiDocsEnv("false")).not.toThrow();
+
+    const secretVal = "supersecret123";
+    let thrown;
+    try {
+      validateApiDocsEnv(secretVal);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown?.message).toContain("ENABLE_API_DOCS");
+    expect(thrown?.message).not.toContain(secretVal);
   });
 });
