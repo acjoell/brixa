@@ -379,6 +379,8 @@ Las siguientes decisiones resuelven las cuestiones técnicas que bloqueaban el M
 
 **Alternativas consideradas:** EJS, Handlebars, Mustache (potentes pero añaden dependencia y complejidad para necesidades que en el MVP son simples); `create-vite` interno (demasiado acoplado a un stack específico).
 
+**Nota (2026-11-09):** el mecanismo de copia se amplió con puntos de inserción `@@INSERT:<punto>@@` en `app` e `index` del backend base y con directorios `_fragments/` en los overlays (ver D-069). Los fragmentos son archivos reales del repositorio, no cadenas embebidas en el generador. `copyDir` omite toda entrada que empiece por `_`, salvo `_gitignore` y `_dockerignore`. El principio de «plantillas legibles como archivos reales» se mantiene; los fragmentos son su extensión para contenido que depende del overlay.
+
 ---
 
 ### D-025 — npm como gestor de paquetes
@@ -620,6 +622,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Verificación:** con `DATABASE_URL=postgresql://u:SECR@ETO@127.0.0.1:1/d` (puerto cerrado), ni `db:migrate` ni el test de conexión emiten `SECR` ni `ETO` por stdout o stderr.
 
+**Nota (2026-11-09):** esta decisión no se modifica. La validación de `DATABASE_URL` al importar el cliente sigue vigente. La redacción de credenciales en el manejador global de errores se centralizó en `src/redact.ts` (ver D-067 y D-071); el cliente de base de datos no es el único punto que enmascara URLs. El contrato de errores (D-071) tampoco altera la lectura de `DATABASE_URL`.
+
 ---
 
 ### D-039 — Cadena de suministro de las plantillas con base de datos
@@ -785,6 +789,8 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 **Motivo:** Es la opción más pequeña, estable y auditable, funciona sin red externa y no obliga a las plantillas a usar una librería de esquemas. Se descartaron Scalar (versión 0.x, 10 dependencias directas, JS desde CDN por defecto y 1.941 archivos en producción) y JSDoc (27 dependencias transitivas y parseo en ejecución).
 
 **Consecuencias:** La especificación se mantiene a mano. El test reduce el riesgo de desincronización, pero depende de `app.router.stack`, estructura interna de Express que puede cambiar. Con la documentación activada se expone la estructura de la API: no habilitarla en producción sin una decisión explícita (su protección futura queda para T-014). Verificado en 4 variantes de `verify:generated` (32 en total) solo en Linux x64 con Node 24. En fullstack, la pasada automática no comprueba el 404 por defecto.
+
+**Nota (2026-11-09):** con la composición de fase 1 (D-069, commit `3db1992`), `api-docs` ya no reemplaza `app.{ts,js}` ni `index.{ts,js}`. En su lugar, aporta fragmentos en `_fragments/` que se resuelven en los puntos de inserción de la base (`imports`, `routes`, `startup`). Sigue reemplazando `tsconfig.json` completo en TypeScript (ver P-012).
 
 ---
 
@@ -1054,6 +1060,88 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-069 — Composición de overlays: fase 1 (backend)
+
+**Estado:** Confirmada (2026-11-09).
+
+**Contexto:** Los overlays reemplazaban archivos completos de la plantilla base o los modificaban mediante sustituciones frágiles de texto. Se necesitaba un mecanismo determinista y seguro para que múltiples capacidades puedan contribuir a los mismos archivos de backend sin pisarse (T-017a).
+
+**Decisión:**
+- Marcadores de inserción con nombre en `src/app.{ts,js}` y `src/index.{ts,js}` de las plantillas backend base: `// @@INSERT:imports@@`, `// @@INSERT:routes@@` y `// @@INSERT:startup@@`.
+- Resolución implementada en `src/generator/insertions.ts` (`validateContributions`, `resolveInsertionPoints`, `cleanupInsertionPoints`).
+- Orden determinista entre contribuciones de un mismo punto ordenado por punto de código UTF-16 del nombre del contribuyente (`compareCodePoints`, no `localeCompare`).
+- Validación estricta: contribución duplicada (mismo punto y contribuyente), contribución a un punto inexistente o marcador desconocido/sin resolver en la salida lanzan error inmediato.
+- Marcadores declarados sin contribuyentes se eliminan limpiamente de la salida sin dejar rastro ni líneas en blanco.
+- Fragmentos como archivos reales: `api-docs` aporta fragmentos en `_fragments/` (`app.imports`, `app.routes`, `index.imports`, `index.startup`), excluidos automáticamente de la copia recursiva (`copyDir` omite toda entrada con prefijo `_`, salvo `_gitignore` y `_dockerignore`).
+- Fusión determinista de `package.json` en `src/generator/generate.ts` (`mergeSection`): compara claves comunes mediante igualdad profunda (`deepEqual`). Si coinciden, conserva el valor; si difieren, lanza error indicando la clave en conflicto y el contribuyente.
+- Criterio de verificación: las 32 variantes verificadas generan un árbol idéntico al estado previo, salvo por la introducción de `validate-env` en `api-docs`.
+
+**Límites de la fase 1:**
+- `api-docs` todavía reemplaza `tsconfig.json` completo en TypeScript.
+- `.env.example`, `compose.yaml` y los archivos de frontend (`App`, `main`, `vite.config`) permanecen sin puntos de inserción.
+- El orden por nombre de contribuyente es arbitrario; cuando un overlay dependa semánticamente de otro será necesario declarar un orden de dependencias explícito.
+
+**Commit:** `3db19925c2ffd13da06f0b5b02cc618269877bbc` (`3db1992`).
+
+---
+
+### D-070 — Validación de configuración con Zod 4.6.7 en backend
+
+**Estado:** Confirmada (2026-11-09).
+
+**Contexto:** Se requería dotar a los proyectos backend de validación estricta de variables de entorno y tipos comprobados sin imponer configuraciones estáticas monolíticas ni dependencias de esquemas en handlers sin uso (T-017b).
+
+**Decisión:**
+- Zod 4.6.7 fijado con versión exacta como dependencia obligatoria de producción en todas las plantillas backend (`backend-express-ts` y `backend-express-js`).
+- Cada capacidad valida su propia configuración (descentralizada): el núcleo base valida `PORT` en `src/config.{ts,js}`; `api-docs` valida `ENABLE_API_DOCS` en `src/docs/validate-env.{ts,js}`.
+- Ayudas compartidas en `src/config.{ts,js}`: `portSchema` (entero entre 0 y 65535, por defecto 3000; cadena vacía no se transforma en 0), `strictBooleanSchema` (acepta booleano o `"true"`/`"false"` explícitos, nunca `z.coerce.boolean`), y `formatConfigError`.
+- `parseConfig` es puro y devuelve la configuración tipada; solo `src/index.{ts,js}` captura el error y llama a `process.exit(1)`.
+- Los mensajes de error de configuración nunca imprimen valores recibidos ni variables sensibles.
+- No se genera middleware validador automático ni esquemas vacíos de `body`/`params`/`query`: la validación se realiza en el handler mediante `schema.parse` o la ayuda `parseInput`.
+- Convención de propiedades desconocidas (documentada y probada): `body` y `params` se validan con `z.strictObject` (rechaza desconocidas); `query` se valida descartando propiedades desconocidas (`z.object` normal).
+- La validación de `DATABASE_URL` al importar el cliente de base de datos no cambia y sigue rigiéndose por D-038.
+
+**Commit:** `702f477b2f79cb91b5afa05481e80221678d86aa` (`702f477`).
+
+---
+
+### D-071 — Contrato uniforme de errores HTTP y 404 en JSON
+
+**Estado:** Confirmada (2026-11-09).
+
+**Contexto:** Los proyectos backend carecían de un contrato de errores consistente: las rutas inexistentes devolvían el 404 HTML por defecto de Express y los errores internos podían filtrar trazas o mensajes no deseados al cliente (T-017b).
+
+**Decisión:**
+- Módulo central `src/errors.{ts,js}` en las plantillas backend.
+- Clase `ValidationError` propia: solo almacena `path` y `code` por incidencia a partir de `z.ZodError`; no incluye `cause` ni valores ingresados.
+- `ValidationError` produce exclusivamente respuestas HTTP 400 (`{"error": "Bad Request", "details": [...]}`).
+- Un `ZodError` no capturado que alcance el manejador global responde 500 para evitar fugas no intencionadas.
+- Respuestas 4xx con texto fijo según estado: `400` ("Bad Request"), `401` ("Unauthorized"), `403` ("Forbidden"), `404` ("Not Found") y `413` ("Payload Too Large").
+- Cualquier otro código o error no controlado responde `500` ("Internal Server Error"). Nunca se devuelve `err.message` ni trazas de pila al cliente.
+- Manejador `notFoundHandler` registrado antes de `errorHandler` que responde `404` en formato JSON (`{"error": "Not Found"}`).
+- Si `res.headersSent` es verdadero, se delega al mecanismo predeterminado de Express llamando a `next(err)`.
+- El registro de errores en consola (`console.error`) aplica siempre `redact(inspect(err, { depth: 5 }))`.
+
+**Commit:** `2bd09b9437e0261c5eedc2b257c1a2a046fbd508` (`2bd09b9`).
+
+---
+
+### D-072 — Prettier en plantillas backend y format:check en el arnés
+
+**Estado:** Confirmada (2026-11-09).
+
+**Contexto:** Las plantillas backend incorporaron archivos con líneas superiores a 80 caracteres. Aunque v0.1.0 superaba la verificación porque las plantillas cumplían las reglas de estilo de manera accidental, el arnés de verificación (`scripts/verify-generated.js`) no ejecutaba `format:check` en los proyectos generados y el `.prettierignore` del CLI excluía `src/templates/`. Al ejecutarse comprobaciones de formato en proyectos generados, surgieron fallos de formato.
+
+**Decisión:**
+- Añadir `.prettierrc` (`printWidth: 100`, idéntico en el resto al CLI) y `.prettierignore` (`dist/`, `node_modules/`, `coverage/`, `package-lock.json`, `*.md`) a las plantillas backend (`backend-express-ts` y `backend-express-js`).
+- Declarar `prettier` (versión exacta 3.9.10) en `devDependencies` y el script `"format:check": "prettier --check ."` en `package.json` de las plantillas backend.
+- El arnés de verificación (`scripts/verify-generated.js`) ejecuta `npm run format:check` en todas las variantes con backend (backend independiente y subproyecto backend en fullstack).
+- La plantilla frontend no declara `prettier` ni script `format:check` en esta etapa (cuestión pendiente).
+
+**Commit:** `2bd09b9437e0261c5eedc2b257c1a2a046fbd508` (`2bd09b9`).
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1071,8 +1159,17 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Variante nueva para cubrir los 3 pares faltantes de cobertura pairwise: candidata `fullstack+js+postgres+docker+apiDocs+i18n`, que elevaría las variantes verificadas de 32 a 33 cubriendo los 76 pares válidos al 100%.
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
-- Node 26: no probado en la ejecución P1 (probado en P1 exclusivamente sobre Node v24.22.1).
+- Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
 - Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017.
+- `tsconfig.json` de `api-docs`: el overlay aún reemplaza el archivo completo en TypeScript en lugar de componerlo (pendiente de composición estructural de JSON, T-017a).
+- Composición pendiente: `.env.example`, `compose.yaml` y frontend (`App`, `main`, `vite.config`) carecen de puntos de inserción; hoy siguen dependiendo de añadidos de texto o reemplazos de archivo.
+- Orden explícito entre overlays: la ordenación por punto de código del nombre del contribuyente (`compareCodePoints`) es determinista pero arbitraria si un overlay depende semánticamente de otro.
+- Frontend sin Prettier: las plantillas de frontend no incluyen `.prettierrc`, dependencia de Prettier ni script `format:check`.
+- Alcance de `redact`: cubre URLs con credenciales y tokens en query, pero no cabeceras `Authorization`, `password=`, tokens de sesión ni errores de arranque fuera de peticiones HTTP. Debe ampliarse antes de autenticación.
+- Consumo de `ValidationError` y `parseInput`: están provistos y testeados en la plantilla base, pero actualmente no existen rutas de negocio que los consuman (solo existe `/health`).
+- Middleware validador no generado: se opta por `schema.parse` / `parseInput` explícito dentro del handler en lugar de middleware validador genérico.
+- Pruebas de composición: las pruebas de integración en `generate.test.ts` solo contrastan las 32 variantes verificadas contra la generación esperada; combinaciones no soportadas o colisiones adicionales no forman parte de la matriz base.
+- Versión a publicar tras el desbloqueo de npm: el tag `v0.1.0` contiene el defecto de Docker corregido en `9783be7` (y posteriores); publicar `0.1.1` desde un tag nuevo es la opción coherente con la regla de no mover ni reutilizar tags (decisión del responsable).
 
 ## 6. Registro de nuevas decisiones
 

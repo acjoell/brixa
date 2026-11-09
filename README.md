@@ -22,7 +22,7 @@ Brixa te hace preguntas guiadas y, antes de crear ningún archivo, muestra un re
 | Modalidad | Qué genera |
 |---|---|
 | Solo frontend | React + Vite, ESLint, scripts de desarrollo y compilación. |
-| Solo backend | Express con una ruta `/health`, pruebas con Vitest, ESLint y `.env.example`. |
+| Solo backend | Express con una ruta `/health`, validación de configuración con Zod, contrato uniforme de errores, pruebas con Vitest, ESLint, Prettier y `.env.example`. |
 | Aplicación completa | Carpetas `frontend/` y `backend/`. En desarrollo, Vite reenvía `/api` al backend mediante un proxy. |
 
 Cada proyecto generado incluye su propio `README.md` con requisitos, instalación, variables de entorno y scripts.
@@ -63,7 +63,7 @@ Requiere Node.js 24 o 26 en adelante. Brixa te hace preguntas guiadas y, antes d
 Según la variante, la verificación comprueba:
 
 - Instalación con `npm install` y `npm audit --audit-level=moderate`.
-- Compilación, lint y, en TypeScript, la comprobación de tipos.
+- Compilación, lint, formato (`format:check` en backend) y, en TypeScript, la comprobación de tipos.
 - Pruebas del backend con Vitest.
 - Que el servidor arranca y responde en `/health`. En la aplicación completa se comprueba también `/api/health` a través del proxy de Vite.
 - Con base de datos: generación y aplicación de migraciones con una tabla de prueba que el arnés añade al esquema, y que esa tabla existe.

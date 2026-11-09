@@ -58,15 +58,15 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-07 | PENDIENTE | — |
 | INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
 | T-014-0 | BLOQUEADA | Decisiones de INV-03, INV-04a, INV-04b e INV-05b; P-011 |
-| T-017a | BLOQUEADA | Decisiones P-012 y P-013 (T-019 e INV-05a/05b ya hechas) |
+| T-017a | PARCIAL (Fase 1 backend completada; D-069) | Decisiones P-012 y P-013 (T-019 e INV-05a/05b ya hechas) |
 | T-017a-ui | BLOQUEADA | T-017a, INV-03 (router) |
-| T-017b | BLOQUEADA | T-017a, INV-02; ver cuestión abierta 8 |
+| T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
 | T-018 | BLOQUEADA | T-017b, INV-06 |
-| T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-03, INV-07 |
+| T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-03, INV-07 (composición backend requerida ya disponible vía D-069) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
-| T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018 |
+| T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018 (composición backend requerida ya disponible vía D-069) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
-| T-014c | BLOQUEADA | T-014a, T-014-0, T-018, INV-04a |
+| T-014c | BLOQUEADA | T-014a, T-014-0, T-018, INV-04a (composición backend requerida ya disponible vía D-069) |
 | T-014d | BLOQUEADA | T-014b1, T-014c |
 
 **Orden de ejecución propuesto (actualizado):**
@@ -265,41 +265,40 @@ Notas:
 
 ### T-017a — Composición de overlays: backend
 
-**Estado:** BLOQUEADA (por las decisiones P-012 y P-013; T-019 y las investigaciones INV-05a e INV-05b ya están hechas)
-**Aprobación:** Aprobado (alcance). Mecanismo concreto pendiente de decisión.
-**Dependencias:** P-012, P-013, resultados de T-020.
+**Estado:** PARCIAL (Fase 1 completada en backend para `app`, `index` y `package.json` según D-069, commit `3db1992`; pendiente `tsconfig.json`, `.env.example` y `compose.yaml`)
+**Aprobación:** Aprobado (D-069).
+**Dependencias:** Fase 1 completada. Pendiente de P-012 para `tsconfig` y `compose.yaml`.
 
 **Objetivo:** permitir que varias capacidades modifiquen los mismos archivos sin pisarse, con el mecanismo más simple que funcione. No es un sistema universal.
 
-**Alcance:** estrategia específica por archivo, cada una por confirmar con INV-05a.
+**Alcance y estado por archivo:**
 
-| Archivo | Estrategia propuesta |
-|---|---|
-| `app` e `index` | Puntos de inserción con orden semántico (por ejemplo: importaciones, preparación, rutas, manejo de errores) y regla de orden entre contribuciones del mismo punto |
-| `tsconfig` | Combinación estructurada de JSON con detección de conflictos (comprobar antes si admite comentarios) |
-| `openapi.json` | Combinación de rutas y componentes con detección de colisiones |
-| `compose.yaml` | Composición de servicios (estructurada o textual: por decidir con evidencia) |
-| `.env.example` | Contribuciones ordenadas sin duplicados |
-| `package.json` | La fusión actual por secciones conserva el valor de la base y descarta el del overlay sin avisar [INSP]: pasar a detectar y comunicar el conflicto. Además, las dependencias de API Docs están duplicadas entre archivos de plantilla y el generador, y las de i18n están definidas en el generador [INSP]: una única fuente |
-| `compose.yaml` (estado actual) | Hoy se copia entero y API Docs añade configuración por sustitución de texto [INSP] |
+| Archivo | Estrategia | Estado a 2026-11-09 |
+|---|---|---|
+| `app` e `index` | Puntos de inserción (`imports`, `routes`, `startup`) con orden por punto de código UTF-16 | **COMPLETADO (Fase 1, D-069)** en `src/generator/insertions.ts` y plantillas backend |
+| `package.json` | Fusión determinista con detección de conflicto por igualdad profunda (`mergeSection`) | **COMPLETADO (Fase 1, D-069)** en `src/generator/generate.ts` |
+| `tsconfig` | Combinación estructurada de JSON con detección de conflictos | **PENDIENTE**: `api-docs` sigue reemplazándolo completo |
+| `openapi.json` | Combinación de rutas y componentes con detección de colisiones | PENDIENTE |
+| `compose.yaml` | Composición de servicios (estructurada o textual) | PENDIENTE: hoy se copia entero |
+| `.env.example` | Contribuciones ordenadas sin duplicados | PENDIENTE: hoy usa añadidos de texto |
 
-**Áreas afectadas:** **[L]** plantillas backend (`src/templates/backend-express-ts`, `backend-express-js`) y sus `app`/`index`; overlay `api-docs` (ts y js) con `app`, `index`, `tsconfig.json` y `docs/openapi.json`; overlay `docker` (`compose.*.yaml`); `.env.example` de las plantillas backend; `src/generator/generate.test.ts`. **[I]** `src/generator/generate.ts` (copia, fusión de `package.json`, funciones de añadido de `.env.example` y README), `scripts/verify-generated.js`, `src/verified-variants.ts`.
+**Áreas afectadas:** **[L]** plantillas backend (`src/templates/backend-express-ts`, `backend-express-js`) y sus `app`/`index`; overlay `api-docs` (ts y js) con `_fragments/`, `tsconfig.json` y `docs/openapi.json`; overlay `docker` (`compose.*.yaml`); `.env.example` de las plantillas backend; `src/generator/generate.test.ts`. **[I]** `src/generator/generate.ts`, `src/generator/insertions.ts`, `scripts/verify-generated.js`, `src/verified-variants.ts`.
 
-**Criterios de aceptación:**
-- Orden determinista: la misma entrada produce la misma salida, byte a byte.
+**Criterios de aceptación (Fase 1 verificada):**
+- Orden determinista: la misma entrada produce la misma salida, byte a byte (orden por `compareCodePoints`).
 - Un punto de inserción sin contribuyente se elimina sin dejar rastro.
-- Un marcador sin resolver en la salida hace fallar una prueba.
-- Una contribución duplicada o una colisión de claves produce un error que nombra a los contribuyentes.
+- Un marcador sin resolver o desconocido en la salida hace fallar el generador.
+- Una contribución duplicada o colisión en `package.json` produce un error que nombra a los contribuyentes.
 - El overlay `api-docs` deja de reemplazar `app` e `index`.
-- Las 32 variantes verificadas generan un árbol idéntico al anterior a la tarea y `verify:generated` da el mismo resultado.
+- Las 32 variantes verificadas generan un árbol idéntico al anterior a la tarea (salvo `validate-env`) y `verify:generated` da el mismo resultado.
 
-**Pruebas positivas:** composición de los subconjuntos de overlays existentes (documentación, base de datos, Docker) con lint, tipos y tests en verde.
-**Pruebas negativas:** dos contribuciones con la misma clave; punto de inserción inexistente; JSON inválido en una contribución; contribución que viola el orden declarado; permutar el orden de entrada no cambia el resultado.
-**Verificaciones:** `typecheck`, `lint`, `format:check`, `test`, `build` y `verify:generated` completo.
+**Pruebas positivas:** composición probada en `insertions.test.ts` y `generate.test.ts` con lint, tipos y tests en verde.
+**Pruebas negativas:** contribución a punto desconocido, contribución duplicada, marcador sin resolver, conflicto en `package.json`.
+**Verificaciones:** `typecheck`, `lint`, `format:check`, `test`, `build` y `verify:generated`.
 
-**Estado real [INSP]:** copia recursiva; sin slots; el overlay de API Docs reemplaza `src/app`, `src/index` y `tsconfig.json`. El test de documentación depende de `app.router.stack`, un detalle interno de Express 5.3.0 (T-020, prueba 4); la alternativa es un registro declarativo de rutas.
+**Estado real (2026-11-09):** Fase 1 implementada en commit `3db1992`. `api-docs` aporta fragmentos en `_fragments/` (excluidos de la copia recursiva en `copyDir`). Resto de archivos (`tsconfig.json`, `.env.example`, `compose.yaml`) pendientes de siguientes fases.
 
-**Riesgos y limitaciones:** un orden semántico mal definido es peor que no tenerlo. Las contribuciones dependientes entre sí (documentación protegida por autenticación) necesitan su orden declarado. Sin AST ni motor de plantillas, salvo evidencia contraria.
+**Riesgos y limitaciones:** el orden determinista por nombre de contribuyente es arbitrario; cuando un overlay dependa de otro se requerirá orden explícito.
 
 ---
 
@@ -329,48 +328,34 @@ Notas:
 
 ### T-017b — Seguridad base y Zod
 
-**Estado:** BLOQUEADA (por T-017a e INV-02; ver cuestión abierta 8 sobre el orden)
-**Aprobación:** Aprobado (alcance: Zod obligatorio en todo proyecto con backend; configuración central; validación; contrato de errores; protección general; cabeceras, CORS, `trust proxy` y límites como parte de la seguridad base). La implementación de cada control queda pendiente de evidencia.
-**Dependencias:** T-017a, INV-02.
+**Estado:** PARCIAL (configuración con Zod 4.6.7 y contrato uniforme de errores completados según D-070 y D-071, commits `702f477` y `2bd09b9`; resto BLOQUEADO/PENDIENTE: cabeceras de seguridad, CORS, `trust proxy`, límites de cuerpo y protección de abuso)
+**Aprobación:** Aprobado (alcance). D-070 y D-071 confirmadas.
+**Dependencias:** T-017a (Fase 1 backend completada). Pendiente de evidencia de INV-02 para cabeceras, CORS y rate limiting.
 
 **Objetivo:** que todo backend generado tenga configuración validada, validación reutilizable de entradas, errores uniformes y las protecciones mínimas por defecto.
 
-**Alcance aprobado:**
-- Zod como dependencia obligatoria, usada desde el inicio para validar la configuración central del servidor. No es una dependencia sin uso.
-- Validación de variables de entorno al arrancar, con mensajes comprensibles que no revelan valores.
-- Validación reutilizable de `body`, `params` y `query`, con errores 400 uniformes.
-- Esquemas junto a cada módulo funcional. Sin carpetas ni esquemas vacíos.
-- Tipos inferidos en TypeScript y validación en ejecución en JavaScript.
-- **Contrato de errores:** un error con estado 4xx conserva su código (400, 401, 403, 404, 413), con cuerpo JSON uniforme y mensajes fijos; 404 en JSON para rutas no registradas; 500 genérico sin detalles. Hoy todo error se devuelve como 500 y el 404 devuelve HTML **[I]**; es prerrequisito de autenticación y RBAC.
-- Cabeceras de seguridad, CORS (denegado por defecto), `trust proxy` por topología y límites de cuerpo.
-- Redacción de datos sensibles en registros y errores. Estado real [INSP]: `redact` existe en cuatro copias (overlays de PostgreSQL y SQLite, JS y TS), se usa solo en el `catch` de los migradores, y el manejador global de errores ejecuta `console.error(err)` sin redacción. Se extrae a un único punto y se aplica también al manejador global. La deuda de T-012a (comprobar que el test ejecuta la función real) se resuelve aquí o como tarea propia; T-020 comprueba primero si usa una copia.
-- Zod no está instalado en las plantillas ni en el CLI [INSP] (D-061): esta tarea lo incorpora.
-- Protección general de la API (nivel 1 de abuso).
+**Alcance y estado:**
+- **Zod 4.6.7 y configuración [COMPLETADO - D-070, commit `702f477`]:** Zod fijado en versión exacta como dependencia obligatoria en backend ts y js. Validación descentralizada de configuración al arrancar (`src/config.{ts,js}` y `src/docs/validate-env.{ts,js}`) con `parseConfig` puro. Mensajes de error claros sin imprimir valores sensibles. `portSchema` (entero 0..65535, vacío no es 0), `strictBooleanSchema` (no usa `z.coerce.boolean`).
+- **Validación de entradas y propiedades desconocidas [COMPLETADO - D-070, D-071, commits `702f477`, `2bd09b9`]:** Convención documentada y probada con `parseInput`: `body` y `params` se validan con `z.strictObject` (rechaza desconocidas); `query` descarta propiedades desconocidas (`z.object`). No se genera middleware validador automático ni esquemas vacíos: validación explícita en handler.
+- **Contrato uniforme de errores [COMPLETADO - D-071, commit `2bd09b9`]:** Módulo `src/errors.{ts,js}`. Clase `ValidationError` propia (solo `path` y `code`, sin `cause`) que responde exclusivamente 400. Estados 400, 401, 403, 404 y 413 conservan código con texto fijo; resto 500 genérico sin filtrar `err.message` ni pilas. `notFoundHandler` devuelve 404 en JSON para rutas no registradas. `res.headersSent` delega a `next(err)`.
+- **Redacción centralizada [COMPLETADO - D-067, D-071, commits `1b6f7ad`, `2bd09b9`]:** Módulo central `src/redact.{ts,js}` aplicado en migradores y en el manejador global mediante `console.error(redact(inspect(err, { depth: 5 })))`.
+- **Cabeceras de seguridad (nativas o helmet) [PENDIENTE]:** Pendiente de evidencia y diseño.
+- **CORS [PENDIENTE]:** Denegado por defecto, pendiente de biblioteca o configuración nativa.
+- **`trust proxy` y límites [PENDIENTE]:** Por topología y configuración de Nginx; límites de cuerpo de petición.
+- **Protección general de la API (nivel 1 de abuso) [PENDIENTE]:** Almacén de contadores y límites pendientes de decisión.
 
-**Pendiente de evidencia (INV-02):** versión de Zod (INV-02 estudió 4.6.7 sin fuente registrada); una cadena vacía no debe convertirse en 0 (`z.coerce.number()` con `PORT=""`); configuración de Nginx (`server_tokens`, resolución del upstream al arrancar, herencia de `add_header`) y `trust proxy` por topología, verificadas contra el archivo actual; comportamiento de `req.query` en Express 5 y dónde guardar los datos validados; política de propiedades desconocidas (descartar o rechazar); cómo evitar filtrar datos en errores de Zod; cabeceras nativas frente a biblioteca; biblioteca de CORS; almacén de contadores.
-**Pendiente de decisión:** relación con la decisión que hoy valida `DATABASE_URL` al importar el cliente de base de datos sin que el servidor lo importe (D-038). Propiedades desconocidas (SECURITY §6).
+**Áreas afectadas:** **[L]** `src/templates/backend-express-{ts,js}` (`src/app`, `src/index`, `src/config`, `src/errors`, `src/redact`, `tests/config.test`, `tests/errors.test`, `package.json`, `.prettierrc`, `.prettierignore`, `README.md`), overlay `api-docs`. **[I]** generador y arnés (`scripts/verify-generated.js` con `format:check`).
 
-**Protección contra abuso (tres niveles):**
-1. General de API: en esta tarea.
-2. Específica de autenticación: en T-014a.
-3. Endpoints sensibles: con las capacidades que los crean.
+**Criterios de aceptación comprobados:**
+- Una variable ausente o mal formada impide arrancar con mensaje claro sin valores.
+- Errores 400 uniformes mediante `ValidationError` en `parseInput`.
+- Errores 401, 403, 404, 413 conservan código; ningún error interno devuelve trazas ni mensaje original.
+- 404 JSON para rutas no encontradas.
+- No existen archivos de esquema vacíos ni dependencias sin uso.
 
-El almacén de contadores **no está decidido**. No se acepta la base de datos del proyecto como almacén hasta evaluar concurrencia, atomicidad, contención en SQLite y bloqueo malicioso de cuentas. No se aceptan bloqueos permanentes de cuentas.
+**Pruebas positivas y negativas:** Batería completa de pruebas unitarias en `tests/config.test.{ts,js}` y `tests/errors.test.{ts,js}` en verde.
 
-**Áreas afectadas:** **[L]** `src/templates/backend-express-{ts,js}` (`src/app`, `src/index`, `tests/health.test`, `package.json`, `.env.example`, `README.md`), overlay `api-docs`, `src/templates/docker/fullstack/frontend/nginx.conf`, `compose.*.yaml`. **[I]** generador y arnés. Nuevos módulos: por determinar.
-
-**Criterios de aceptación:**
-- Una variable obligatoria ausente o mal formada impide arrancar, con mensaje claro sin valores.
-- Una entrada inválida produce el mismo formato 400 en `body`, `params` y `query`.
-- Un error con estado 401, 403, 404 o 413 conserva su código; ninguno devuelve pila, valores recibidos ni `err.message`.
-- No existen archivos de esquema vacíos en ninguna variante.
-- La documentación declara con precisión qué cubre la limitación de peticiones (una instancia, varias, detrás de proxy).
-
-**Pruebas positivas:** configuración válida arranca; entradas válidas pasan; los tipos inferidos compilan en TypeScript; paridad ts y js.
-**Pruebas negativas:** variable faltante, vacía o mal formada (`PORT=""` no produce el puerto 0); propiedad desconocida según la política elegida; campos no permitidos; ráfaga que supera el límite; origen no permitido en CORS y preflight; error con cadena de conexión en el mensaje sin que salga por la respuesta ni por el registro.
-**Verificaciones:** batería local, `verify:generated` completo y `npm audit --audit-level=moderate`. Sin variantes nuevas: estas pruebas viven en las plantillas.
-
-**Riesgos y limitaciones:** un límite en memoria no se comparte entre instancias y se reinicia con el proceso; sin `trust proxy` correcto todos los clientes comparten una IP. El cambio altera el comportamiento de los proyectos generados: implica una versión nueva.
+**Riesgos y limitaciones:** `redact` no cubre cabeceras `Authorization`, `password=`, tokens de sesión ni errores de arranque fuera de peticiones HTTP (debe ampliarse antes de autenticación). `ValidationError` y `parseInput` carecen de rutas de negocio que las consuman en la plantilla base (solo existe `/health`). Cabeceras, CORS y rate limiting quedan para la siguiente fase de endurecimiento.
 
 ---
 
@@ -415,7 +400,7 @@ El almacén de contadores **no está decidido**. No se acepta la base de datos d
 
 **Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 e INV-07)
 **Aprobación:** Aprobado (dos opciones en el CLI, núcleo común, no se generan ambas por defecto). Detalles técnicos pendientes de evidencia.
-**Dependencias:** T-014-0, T-017b, T-018, INV-01 e INV-03 (resultados reportados), INV-07.
+**Dependencias:** T-014-0, T-017b, T-018, INV-01 e INV-03 (resultados reportados), INV-07. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
 
 **Objetivo:** cuentas y credenciales funcionales y verificadas, con una modalidad elegida por proyecto.
 
@@ -538,7 +523,7 @@ El almacén de contadores **no está decidido**. No se acepta la base de datos d
 
 **Estado:** BLOQUEADA (por T-014a, T-014-0, T-018 e INV-04a)
 **Aprobación:** Aprobado (alcance). **No depende de RBAC.**
-**Dependencias:** T-014a, T-014-0, T-018, INV-04a.
+**Dependencias:** T-014a, T-014-0, T-018, INV-04a. La composición de backend requerida ya está disponible (D-069).
 
 **Objetivo:** aislamiento por organización en PostgreSQL con RLS. SQLite no tiene multitenancy en esta etapa.
 
