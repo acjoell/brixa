@@ -74,7 +74,18 @@ describe("Documentación de API", () => {
       const resDocsSlash = await fetch(`http://127.0.0.1:${port}/docs/`, { redirect: "manual" });
       expect(resDocsSlash.status).toBe(200);
       expect(resDocsSlash.headers.get("location")).toBeNull();
+      expect(resDocsSlash.headers.get("content-security-policy")).toBe(
+        "default-src 'self';script-src 'self';style-src 'self' 'unsafe-inline';img-src 'self' data:;connect-src 'self';font-src 'self' data:;base-uri 'self';form-action 'self';frame-ancestors 'none'",
+      );
+      expect(resDocsSlash.headers.get("content-security-policy")).not.toContain(
+        "upgrade-insecure-requests",
+      );
+      expect(resDocsSlash.headers.get("strict-transport-security")).toBeNull();
       expect(await resDocsSlash.text()).toContain("swagger-ui");
+
+      const resInitJs = await fetch(`http://127.0.0.1:${port}/docs/swagger-ui-init.js`);
+      expect(resInitJs.status).toBe(200);
+      expect(await resInitJs.text()).toContain('"validatorUrl": null');
     } finally {
       if (prevEnv !== undefined) {
         process.env.ENABLE_API_DOCS = prevEnv;

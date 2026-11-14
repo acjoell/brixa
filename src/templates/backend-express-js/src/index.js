@@ -1,5 +1,6 @@
 import { app } from "./app.js";
 import { parseConfig } from "./config.js";
+import { redact } from "./redact.js";
 // @@INSERT:imports@@
 
 try {
@@ -16,7 +17,7 @@ try {
   const config = parseConfig(process.env);
   port = config.port;
 } catch (err) {
-  console.error(err instanceof Error ? err.message : String(err));
+  console.error(redact(err instanceof Error ? err.message : String(err)));
   process.exit(1);
 }
 
@@ -30,7 +31,10 @@ function handleShutdown(signal) {
   console.log(`\nSeñal ${signal} recibida. Cerrando servidor ordenadamente...`);
   server.close((err) => {
     if (err) {
-      console.error("Error al cerrar el servidor:", err);
+      console.error(
+        "Error al cerrar el servidor:",
+        redact(err instanceof Error ? err.message : String(err)),
+      );
       process.exit(1);
     }
     console.log("Servidor cerrado.");

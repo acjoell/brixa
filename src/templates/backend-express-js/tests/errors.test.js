@@ -23,10 +23,26 @@ describe("Contrato de errores centralizado y validación", () => {
 
     // 2. Servidor auxiliar para probar errores específicos de ruta
     const testApp = express();
-    testApp.use(express.json());
+    testApp.use(express.json({ limit: "100kb" }));
+
+    testApp.post("/echo", (req, res) => {
+      res.status(200).json(req.body);
+    });
 
     testApp.get("/error-generico", () => {
       throw new Error("Fallo interno con postgresql://usuario:clave_secreta@localhost:5432/bd");
+    });
+
+    testApp.get("/error-sensitive-log", () => {
+      const cause = new Error("Causa interna con Authorization: 'Basic cause_secret'");
+      const err = new Error("Fallo con https://usuario:clave_secreta@localhost:5432/bd", { cause });
+      err.headers = {
+        authorization: "Bearer bearer_secret",
+        cookie: "sid=cookie_secret",
+        "set-cookie": "session=set_cookie_secret; Secure",
+      };
+      err.password = "my_plain_pass";
+      throw err;
     });
 
     testApp.get("/error-validation", () => {
@@ -70,6 +86,19 @@ describe("Contrato de errores centralizado y validación", () => {
     });
   });
 
+  it("JSON válido dentro del límite → 200 con el body procesado", async () => {
+    const validPayload = { message: "ok", count: 42 };
+    const res = await fetch(`${testBaseUrl}/echo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validPayload),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual(validPayload);
+  });
+
   it("JSON roto en el body → 400 sin err.message", async () => {
     const res = await fetch(`${mainBaseUrl}/health`, {
       method: "POST",
@@ -100,6 +129,10 @@ describe("Contrato de errores centralizado y validación", () => {
     const res = await fetch(`${mainBaseUrl}/ruta-que-no-existe`);
     expect(res.status).toBe(404);
     expect(res.headers.get("content-type")).toContain("application/json");
+    expect(res.headers.get("content-security-policy")).toBe(
+      "default-src 'none';base-uri 'none';frame-ancestors 'none';form-action 'none'",
+    );
+    expect(res.headers.get("strict-transport-security")).toBeNull();
     const body = await res.json();
     expect(body).toEqual({ error: "Not Found" });
   });
@@ -179,6 +212,38 @@ describe("Contrato de errores centralizado y validación", () => {
       expect(bodyText).not.toContain("clave_secreta");
       expect(capturedLog).not.toContain("clave_secreta");
       expect(capturedLog).toContain("***:***@");
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("redacción: cabeceras, cookies, causas y credenciales sensibles no aparecen en console.error", async () => {
+    let capturedLog = "";
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation((msg) => {
+      capturedLog += String(msg);
+    });
+
+    try {
+      const res = await fetch(`${testBaseUrl}/error-sensitive-log`);
+      const bodyText = await res.text();
+
+      expect(bodyText).not.toContain("clave_secreta");
+      expect(bodyText).not.toContain("cause_secret");
+      expect(bodyText).not.toContain("bearer_secret");
+      expect(bodyText).not.toContain("cookie_secret");
+      expect(bodyText).not.toContain("set_cookie_secret");
+      expect(bodyText).not.toContain("my_plain_pass");
+
+      expect(capturedLog).not.toContain("clave_secreta");
+      expect(capturedLog).not.toContain("cause_secret");
+      expect(capturedLog).not.toContain("bearer_secret");
+      expect(capturedLog).not.toContain("cookie_secret");
+      expect(capturedLog).not.toContain("set_cookie_secret");
+      expect(capturedLog).not.toContain("my_plain_pass");
+
+      expect(capturedLog).toContain("***:***@");
+      expect(capturedLog).toContain("Bearer ***");
+      expect(capturedLog).toContain("cookie: '***'");
     } finally {
       consoleSpy.mockRestore();
     }

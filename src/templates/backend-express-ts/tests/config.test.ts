@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { parseConfig, strictBooleanSchema, formatConfigError } from "../src/config.js";
+import {
+  parseConfig,
+  strictBooleanSchema,
+  formatConfigError,
+  corsAllowedOriginsSchema,
+} from "../src/config.js";
 import { z } from "zod";
 
 describe("Validación de configuración y ayudas compartidas", () => {
@@ -77,5 +82,72 @@ describe("Validación de configuración y ayudas compartidas", () => {
       expect(formatted.message).toContain("REQUIRED_VAR");
       expect(formatted.message).not.toContain("undefined");
     }
+  });
+
+  describe("CORS_ALLOWED_ORIGINS", () => {
+    it("corsAllowedOriginsSchema valida orígenes directamente", () => {
+      expect(corsAllowedOriginsSchema.parse("http://localhost:5173")).toEqual([
+        "http://localhost:5173",
+      ]);
+      expect(corsAllowedOriginsSchema.parse(undefined)).toEqual([]);
+    });
+
+    it("ausente o vacía desactiva CORS (devuelve lista vacía)", () => {
+      expect(parseConfig({}).corsAllowedOrigins).toEqual([]);
+      expect(parseConfig({ CORS_ALLOWED_ORIGINS: "" }).corsAllowedOrigins).toEqual([]);
+      expect(parseConfig({ CORS_ALLOWED_ORIGINS: "   " }).corsAllowedOrigins).toEqual([]);
+    });
+
+    it("un solo origen válido se valida y se conserva", () => {
+      const config = parseConfig({ CORS_ALLOWED_ORIGINS: "http://localhost:5173" });
+      expect(config.corsAllowedOrigins).toEqual(["http://localhost:5173"]);
+    });
+
+    it("múltiples orígenes separados por coma se normalizan eliminando espacios", () => {
+      const config = parseConfig({
+        CORS_ALLOWED_ORIGINS: "http://localhost:5173, https://app.example.com ",
+      });
+      expect(config.corsAllowedOrigins).toEqual([
+        "http://localhost:5173",
+        "https://app.example.com",
+      ]);
+    });
+
+    it("rechaza comodín * y comodines en host sin exponer secretos", () => {
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "*" })).toThrow();
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "http://*" })).toThrow();
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "https://*.example.com" })).toThrow();
+    });
+
+    it("rechaza origen null", () => {
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "null" })).toThrow();
+    });
+
+    it("rechaza orígenes con rutas, barras finales o query params", () => {
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "http://localhost:5173/" })).toThrow();
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "http://localhost:5173/api" })).toThrow();
+      expect(() =>
+        parseConfig({ CORS_ALLOWED_ORIGINS: "http://localhost:5173?debug=true" }),
+      ).toThrow();
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "http://localhost:5173#hash" })).toThrow();
+    });
+
+    it("rechaza protocolos no permitidos", () => {
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "ftp://example.com" })).toThrow();
+      expect(() => parseConfig({ CORS_ALLOWED_ORIGINS: "javascript:void(0)" })).toThrow();
+    });
+
+    it("variable inválida falla sin exponer valores sensibles en el mensaje de error", () => {
+      const secret = "secreto_cors_12345";
+      let error: Error | undefined;
+      try {
+        parseConfig({ CORS_ALLOWED_ORIGINS: secret });
+      } catch (err) {
+        error = err as Error;
+      }
+      expect(error).toBeDefined();
+      expect(error?.message).toContain("CORS_ALLOWED_ORIGINS");
+      expect(error?.message).not.toContain(secret);
+    });
   });
 });

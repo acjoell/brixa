@@ -1,3 +1,4 @@
+import { URL } from "node:url";
 import { z } from "zod";
 
 const DEFAULT_PORT = 3000;
@@ -24,6 +25,47 @@ export const strictBooleanSchema = z.union(
   { message: 'Debe ser "true" o "false".' },
 );
 
+export const corsAllowedOriginsSchema = z.preprocess(
+  (val) => {
+    if (val === undefined || val === null || val === "") {
+      return [];
+    }
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (trimmed === "") {
+        return [];
+      }
+      return trimmed.split(",").map((s) => s.trim());
+    }
+    return val;
+  },
+  z.array(
+    z.string().refine(
+      (origin) => {
+        if (!origin || origin === "null" || origin.includes("*")) {
+          return false;
+        }
+        try {
+          const parsed = new URL(origin);
+          return (
+            (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+            parsed.origin === origin
+          );
+        } catch {
+          return false;
+        }
+      },
+      {
+        message:
+          "Cada origen debe ser una URL HTTP o HTTPS válida sin rutas, barras finales ni comodines.",
+      },
+    ),
+    {
+      message: "Debe ser una lista de orígenes HTTP o HTTPS válidos separados por comas.",
+    },
+  ),
+);
+
 export function formatConfigError(name: string, error: z.ZodError): Error {
   const issue = error.issues[0];
   const message = issue ? issue.message : "Valor inválido.";
@@ -32,18 +74,23 @@ export function formatConfigError(name: string, error: z.ZodError): Error {
 
 export interface AppConfig {
   port: number;
+  corsAllowedOrigins: string[];
 }
 
 const baseConfigSchema = z.object({
   PORT: portSchema,
+  CORS_ALLOWED_ORIGINS: corsAllowedOriginsSchema,
 });
 
 export function parseConfig(env: Record<string, unknown> = process.env): AppConfig {
   const result = baseConfigSchema.safeParse(env);
   if (!result.success) {
-    throw formatConfigError("PORT", result.error);
+    const issue = result.error.issues[0];
+    const fieldName = issue && issue.path && issue.path[0] ? String(issue.path[0]) : "PORT";
+    throw formatConfigError(fieldName, result.error);
   }
   return {
     port: result.data.PORT,
+    corsAllowedOrigins: result.data.CORS_ALLOWED_ORIGINS,
   };
 }

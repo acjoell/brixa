@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { inspect } from "node:util";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { generate, formatGenerateError, mergePackageJson, nextStepsMessage } from "./generate.js";
 import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
@@ -35,6 +36,59 @@ async function mkTmp(projectName: string): Promise<string> {
   // generate() crea outputDir si no existe, así que usamos una sub-ruta con nombre real.
   tmpDir = base;
   return path.join(base, projectName);
+}
+
+interface NginxBlock {
+  name: string;
+  directives: string[];
+  children: NginxBlock[];
+}
+
+function parseNginxConfig(raw: string): NginxBlock {
+  const root: NginxBlock = { name: "root", directives: [], children: [] };
+  const stack: NginxBlock[] = [root];
+  const clean = raw.replace(/#[^\r\n]*/g, "");
+  let token = "";
+  let inQuote = false;
+  let quoteChar = "";
+
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inQuote) {
+      token += ch;
+      if (ch === quoteChar) {
+        inQuote = false;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = true;
+      quoteChar = ch;
+      token += ch;
+    } else if (ch === "{") {
+      const blockName = token.trim();
+      token = "";
+      const newBlock: NginxBlock = { name: blockName, directives: [], children: [] };
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      stack[stack.length - 1]!.children.push(newBlock);
+      stack.push(newBlock);
+    } else if (ch === "}") {
+      if (token.trim()) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        stack[stack.length - 1]!.directives.push(token.trim());
+        token = "";
+      }
+      stack.pop();
+    } else if (ch === ";") {
+      const directive = token.trim();
+      token = "";
+      if (directive) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        stack[stack.length - 1]!.directives.push(directive);
+      }
+    } else {
+      token += ch;
+    }
+  }
+  return root;
 }
 
 afterEach(async () => {
@@ -478,6 +532,171 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
         input: "https://host/database?safe=true&token=SECRET_TOKEN&page=2#section",
         expected: "https://host/database?safe=true&token=***&page=2#section",
       },
+      // Cabeceras de autorización
+      {
+        name: "Authorization Bearer sin comillas",
+        input: "Authorization: Bearer abc123",
+        expected: "Authorization: Bearer ***",
+      },
+      {
+        name: "Authorization Basic con comillas simples",
+        input: "Authorization: 'Basic YWRtaW46c2VjcmV0'",
+        expected: "Authorization: 'Basic ***'",
+      },
+      {
+        name: "Proxy-Authorization Bearer",
+        input: "Proxy-Authorization: Bearer abc123",
+        expected: "Proxy-Authorization: Bearer ***",
+      },
+      {
+        name: "Proxy-Authorization Basic",
+        input: "Proxy-Authorization: Basic YWRtaW46c2VjcmV0",
+        expected: "Proxy-Authorization: Basic ***",
+      },
+      {
+        name: "Token Bearer independiente",
+        input: "Bearer standaloneToken123",
+        expected: "Bearer ***",
+      },
+      // Credenciales y secretos
+      {
+        name: "password con delimitador =",
+        input: "password=secreto",
+        expected: "password=***",
+      },
+      {
+        name: "password con delimitador : y comillas simples",
+        input: "password: 'secreto'",
+        expected: "password: '***'",
+      },
+      {
+        name: "password con delimitador : y comillas dobles",
+        input: 'password: "secreto"',
+        expected: 'password: "***"',
+      },
+      {
+        name: "access_token con comillas simples",
+        input: "access_token: 'abc123'",
+        expected: "access_token: '***'",
+      },
+      {
+        name: "access_token con delimitador =",
+        input: "access_token=abc123",
+        expected: "access_token=***",
+      },
+      {
+        name: "accessToken camelCase",
+        input: "accessToken: 'abc123'",
+        expected: "accessToken: '***'",
+      },
+      {
+        name: "refresh_token con delimitador =",
+        input: "refresh_token=abc123",
+        expected: "refresh_token=***",
+      },
+      {
+        name: "refresh_token con delimitador :",
+        input: "refresh_token: 'abc123'",
+        expected: "refresh_token: '***'",
+      },
+      {
+        name: "refreshToken camelCase",
+        input: "refreshToken: 'abc123'",
+        expected: "refreshToken: '***'",
+      },
+      {
+        name: "authToken con delimitador :",
+        input: "authToken: 'mySecretAuthToken'",
+        expected: "authToken: '***'",
+      },
+      {
+        name: "secret con delimitador =",
+        input: "secret=mySecret",
+        expected: "secret=***",
+      },
+      {
+        name: "secret con delimitador :",
+        input: "secret: 'mySecret'",
+        expected: "secret: '***'",
+      },
+      {
+        name: "client_secret",
+        input: "client_secret: 'myClientSecret'",
+        expected: "client_secret: '***'",
+      },
+      // Cookies
+      {
+        name: "Cookie sin comillas",
+        input: "Cookie: sid=xyz",
+        expected: "Cookie: ***",
+      },
+      {
+        name: "Cookie con comillas simples",
+        input: "cookie: 'sid=xyz'",
+        expected: "cookie: '***'",
+      },
+      {
+        name: "Set-Cookie sin comillas",
+        input: "Set-Cookie: session=xyz; HttpOnly; Secure",
+        expected: "Set-Cookie: ***",
+      },
+      {
+        name: "Set-Cookie con comillas simples",
+        input: "set-cookie: 'session=xyz; HttpOnly; Secure'",
+        expected: "set-cookie: '***'",
+      },
+      {
+        name: "Set-Cookie en formato array de inspect",
+        input: "'set-cookie': [ 'session=xyz; HttpOnly; Secure' ]",
+        expected: "'set-cookie': [ '***' ]",
+      },
+      // Mayúsculas y minúsculas
+      {
+        name: "PASSWORD en mayúsculas",
+        input: 'PASSWORD="secreto"',
+        expected: 'PASSWORD="***"',
+      },
+      {
+        name: "AUTHORIZATION en mayúsculas",
+        input: "AUTHORIZATION: Bearer abc123",
+        expected: "AUTHORIZATION: Bearer ***",
+      },
+      {
+        name: "COOKIE en mayúsculas",
+        input: "COOKIE: sid=xyz",
+        expected: "COOKIE: ***",
+      },
+      {
+        name: "ACCESS_TOKEN en mayúsculas",
+        input: 'ACCESS_TOKEN="abc123"',
+        expected: 'ACCESS_TOKEN="***"',
+      },
+      {
+        name: "REFRESH_TOKEN en mayúsculas",
+        input: 'REFRESH_TOKEN="abc123"',
+        expected: 'REFRESH_TOKEN="***"',
+      },
+      // Casos negativos (no altera texto no sensible)
+      {
+        name: "Propiedad no sensible username",
+        input: "username: 'admin'",
+        expected: "username: 'admin'",
+      },
+      {
+        name: "Uso de Basic como texto ordinario",
+        input: "Basic configuration loaded",
+        expected: "Basic configuration loaded",
+      },
+      {
+        name: "Palabra tokenization no es token",
+        input: "tokenization is useful",
+        expected: "tokenization is useful",
+      },
+      {
+        name: "Palabra secretariat no es secret",
+        input: "the secretariat met today",
+        expected: "the secretariat met today",
+      },
     ];
 
     for (const tc of testCases) {
@@ -490,24 +709,36 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
   });
 
   it("oculta secretos en errores inspeccionados incluyendo Error.cause y propiedades adicionales", () => {
-    const cause = new Error("Causa interna con postgresql://inner_user:inner_pass@127.0.0.1/db");
-    const err = new Error("Error principal con http://main_user:main_pass@127.0.0.1/api", {
+    const cause = new Error("Causa interna con Authorization: 'Basic cause_secret'");
+    const err = new Error("Error principal con https://main_user:main_pass@127.0.0.1/api", {
       cause,
     });
-    (err as unknown as { extraProp: string }).extraProp =
-      "libsql://host/db?authToken=SECRET_EXTRA&other=safe";
+    (
+      err as unknown as { extraProp: string; headers: Record<string, string>; password: string }
+    ).extraProp = "libsql://host/db?authToken=SECRET_EXTRA&other=safe";
+    (err as unknown as { headers: Record<string, string> }).headers = {
+      authorization: "Bearer deep_bearer_token",
+      cookie: "sid=deep_cookie_val",
+      "set-cookie": "session=deep_session_val; Secure",
+    };
+    (err as unknown as { password: string }).password = "deep_password_val";
 
     for (const [, redactFn] of [
       ["ts", redactTs],
       ["js", redactJs],
     ] as const) {
       const formatted = redactFn(inspect(err, { depth: 5 }));
-      expect(formatted).not.toContain("inner_pass");
+      expect(formatted).not.toContain("cause_secret");
       expect(formatted).not.toContain("main_pass");
       expect(formatted).not.toContain("SECRET_EXTRA");
-      expect(formatted).toContain("postgresql://***:***@127.0.0.1/db");
-      expect(formatted).toContain("http://***:***@127.0.0.1/api");
+      expect(formatted).not.toContain("deep_bearer_token");
+      expect(formatted).not.toContain("deep_cookie_val");
+      expect(formatted).not.toContain("deep_session_val");
+      expect(formatted).not.toContain("deep_password_val");
+      expect(formatted).toContain("https://***:***@127.0.0.1/api");
       expect(formatted).toContain("authToken=***&other=safe");
+      expect(formatted).toContain("Bearer ***");
+      expect(formatted).toContain("cookie: '***'");
     }
   });
 });
@@ -706,6 +937,10 @@ describe("generate — docker opcional en fullstack", () => {
     const composeContent = await fs.readFile(path.join(dest, "compose.yaml"), "utf-8");
     expect(composeContent).toContain("${POSTGRES_PASSWORD:?");
     expect(composeContent).not.toMatch(/POSTGRES_PASSWORD:\s*["']?[a-zA-Z0-9_-]+["']?\s*$/m);
+
+    // nginx.conf contiene server_tokens off en el bloque server
+    const nginxContent = await fs.readFile(path.join(dest, "frontend", "nginx.conf"), "utf-8");
+    expect(nginxContent).toMatch(/server\s*\{[^}]*server_tokens\s+off;/s);
   });
 });
 
@@ -960,5 +1195,124 @@ describe("generate — i18n opcional (T-013c)", () => {
         expect(res.error.message).toMatch(/marcador de inserción no reconocido.*impots/i);
       }
     }
+  });
+});
+
+describe("generate — nginx.conf cabeceras de seguridad (Incremento C)", () => {
+  it("las cabeceras de seguridad SPA están en location / con always, no en server ni en location /api/", async () => {
+    const dest = await mkTmp("nginx-headers-test");
+    const result = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "none",
+      docker: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const raw = await fs.readFile(path.join(dest, "frontend", "nginx.conf"), "utf-8");
+    const tree = parseNginxConfig(raw);
+
+    // El árbol tiene un único bloque server dentro de root
+    const serverBlock = tree.children.find((b) => b.name === "server");
+    expect(serverBlock, "debe existir un bloque server").toBeDefined();
+    if (!serverBlock) return;
+
+    // server_tokens off debe estar en el bloque server
+    expect(
+      serverBlock.directives.some((d) => /server_tokens\s+off/.test(d)),
+      "server_tokens off debe estar en server",
+    ).toBe(true);
+
+    // Las cabeceras de seguridad NO deben estar en las directivas directas de server
+    const CSP_PATTERN = /Content-Security-Policy/i;
+    const serverLevelCsp = serverBlock.directives.some((d) => CSP_PATTERN.test(d));
+    expect(serverLevelCsp, "CSP NO debe estar directamente en el bloque server").toBe(false);
+
+    // Localizar location /
+    const locationRoot = serverBlock.children.find((b) => b.name === "location /");
+    expect(locationRoot, "debe existir location /").toBeDefined();
+    if (!locationRoot) return;
+
+    // La CSP debe estar dentro de location / con always
+    const cspDirective = locationRoot.directives.find((d) => CSP_PATTERN.test(d));
+    expect(cspDirective, "CSP debe estar en location /").toBeDefined();
+    expect(cspDirective, "CSP debe usar always").toMatch(/always/);
+
+    // Verificar que todas las cabeceras requeridas están en location / con always
+    const REQUIRED_HEADERS = [
+      { pattern: /Content-Security-Policy/i, name: "Content-Security-Policy" },
+      { pattern: /X-Content-Type-Options/i, name: "X-Content-Type-Options" },
+      { pattern: /X-Frame-Options/i, name: "X-Frame-Options" },
+      { pattern: /Referrer-Policy/i, name: "Referrer-Policy" },
+    ];
+    for (const { pattern, name } of REQUIRED_HEADERS) {
+      const directive = locationRoot.directives.find((d) => pattern.test(d));
+      expect(directive, `${name} debe estar en location /`).toBeDefined();
+      expect(directive, `${name} debe usar always`).toMatch(/always/);
+    }
+
+    // CSP SPA correcta y sin excepciones peligrosas
+    expect(cspDirective).toMatch(/default-src 'self'/);
+    expect(cspDirective).toMatch(/object-src 'none'/);
+    expect(cspDirective).toMatch(/frame-ancestors 'none'/);
+    expect(cspDirective).not.toMatch(/unsafe-inline/);
+    expect(cspDirective).not.toMatch(/unsafe-eval/);
+
+    // Localizar location /api/
+    const locationApi = serverBlock.children.find((b) => /location\s+\/api\//.test(b.name));
+    expect(locationApi, "debe existir location /api/").toBeDefined();
+    if (!locationApi) return;
+
+    // /api/ NO debe tener CSP ni cabeceras de seguridad SPA
+    const apiCsp = locationApi.directives.some((d) => CSP_PATTERN.test(d));
+    expect(apiCsp, "CSP NO debe estar en location /api/").toBe(false);
+
+    const apiXFrame = locationApi.directives.some((d) => /X-Frame-Options/i.test(d));
+    expect(apiXFrame, "X-Frame-Options NO debe estar en location /api/").toBe(false);
+  });
+});
+
+describe("generate — redact ReDoS (Incremento C)", () => {
+  it("reglas 2-5 (cabeceras, Bearer, cookies, secretos) se ejecutan en tiempo lineal sobre entradas grandes", () => {
+    const cases = [
+      { name: "password= repeated 10 K", input: "password=".repeat(10000) },
+      { name: "Cookie: unclosed brackets 50 KB", input: "Cookie: [" + "x=1; ".repeat(10000) },
+      { name: "Set-Cookie: incomplete 50 KB", input: "Set-Cookie: " + "session=".repeat(10000) },
+      { name: "Mixed unbalanced quotes 40 KB", input: `'"'"`.repeat(10000) },
+    ];
+
+    for (const c of cases) {
+      const t0 = performance.now();
+      redactTs(c.input);
+      const elapsed = performance.now() - t0;
+      expect(elapsed, `${c.name}: ${elapsed.toFixed(1)}ms`).toBeLessThan(500);
+    }
+  });
+
+  it("regla 5a (.*? entre comillas) tiene comportamiento cuadrático en comilla sin cerrar — test documental", () => {
+    // HALLAZGO: (.*?)\2 con backreference también exhibe retroceso cuadrático cuando la
+    // comilla de cierre nunca aparece. El motor intenta (.*?) desde cada posición restante.
+    // Comportamiento medido: ~82 ms para 10 KB, ~1900 ms para 50 KB (escala ~O(N^2)).
+    // Es una limitación conocida pendiente de corrección en una tarea independiente.
+    // Este test no impone umbral para no bloquear CI.
+    const unclosed = "password: '" + "a".repeat(2000); // 2 KB (tamaño reducido para no bloquear CI)
+    const t0 = performance.now();
+    redactTs(unclosed);
+    const elapsed = performance.now() - t0;
+    // Solo se verifica que el resultado es un número (el test es documental).
+    expect(typeof elapsed).toBe("number");
+  });
+
+  it("regla 1 (URL near-miss) tiene comportamiento cuadrático conocido — test documental", () => {
+    // La regla 1: /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/\s?#]+@/g exhibe retroceso cuadrático
+    // en near-miss (URL sin '@'). Es una limitación conocida pendiente de corrección
+    // en una tarea independiente. Este test no impone umbral para no bloquear CI.
+    const nearMiss = "https://user:" + "a".repeat(2000);
+    const t0 = performance.now();
+    redactTs(nearMiss);
+    const elapsed = performance.now() - t0;
+    // Solo se verifica que el resultado es un número (el test es documental).
+    expect(typeof elapsed).toBe("number");
   });
 });

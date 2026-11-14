@@ -43,4 +43,16 @@ describe("GET /health", () => {
     const res = await fetch(`${baseUrl}/health`);
     expect(res.headers.get("x-powered-by")).toBeNull();
   });
+
+  it("emite cabeceras de seguridad de Helmet con CSP restrictiva y sin HSTS", async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.headers.get("content-security-policy")).toBe(
+      "default-src 'none';base-uri 'none';frame-ancestors 'none';form-action 'none'",
+    );
+    expect(res.headers.get("content-security-policy")).not.toContain("upgrade-insecure-requests");
+    expect(res.headers.get("strict-transport-security")).toBeNull();
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  });
 });
