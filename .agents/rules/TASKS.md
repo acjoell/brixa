@@ -10,7 +10,7 @@ Este documento organiza el trabajo de desarrollo de Brixa en tareas pequeñas, v
 - `TASKS.md` registra el trabajo concreto.
 - `DECISIONS.md` registra las decisiones adoptadas y pendientes.
 - `AGENTS.md` define las reglas de trabajo para los agentes de IA.
-- `TASKS_POST_MVP.md` continúa este archivo desde 0.1.0: contiene T-014-0, T-014a a T-014d, T-017a, T-017a-ui, T-017b, T-018, T-019, T-020 y T-021, y las investigaciones INV-xx. Los identificadores `T-xxx` no se renumeran. Este archivo conserva el historial hasta T-016 y mantiene T-014 y T-015 como referencia.
+- `TASKS_POST_MVP.md` continúa este archivo desde 0.1.0: contiene T-014-0, T-014a a T-014d, T-017a, T-017a-ui, T-017b, T-018, T-019, T-020, T-021 y T-022, y las investigaciones INV-xx. Los identificadores `T-xxx` no se renumeran. Este archivo conserva el historial hasta T-016 y mantiene T-014 y T-015 como referencia.
 
 ## 2. Estados
 

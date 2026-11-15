@@ -1142,6 +1142,93 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-073 — Ampliación de redact y aplicación en arranque y cierre
+
+**Estado:** Confirmada (2026-11-14).
+
+**Contexto:** `src/redact.{ts,js}` cubría únicamente URLs con credenciales y los parámetros de query `authToken=` / `token=` (D-067). Antes de conectarlo al manejador global de errores era necesario ampliar las reglas para cubrir cabeceras de autorización, cookies y tokens comunes. Las cuatro plantillas de base de datos importaban el módulo central ya existente; no hay copias locales.
+
+**Decisión:**
+- `redact` ampliado con cinco grupos de reglas (en orden de aplicación):
+  1. URLs con credenciales (esquema`://user:pass@`).
+  2. Cabeceras `Authorization` y `Proxy-Authorization` (soporta `Bearer`, `Basic` y valor sin esquema).
+  3. Tokens Bearer independientes (`Bearer <valor>`).
+  4. Cabeceras `Cookie` y `Set-Cookie` (valor único, entrecomillado o array).
+  5. Claves sensibles por nombre: `password`, `access_token` / `accessToken`, `refresh_token` / `refreshToken`, `auth_token` / `authToken`, `token`, y cualquier clave que termine en `_secret` o `secret` — valores entrecomillados (5a) y sin comillas (5b).
+- El módulo `redact` se aplica también en los mensajes de error de arranque (`parseConfig` en `src/index.{ts,js}`) y en el mensaje de cierre (`server.close`).
+- Las cuatro plantillas de base de datos siguen importando el módulo central `src/redact` sin copias locales (ya era así desde D-067).
+- `express.json({ limit: "100kb" })` sustituye a `express.json()` sin límite. Las respuestas 413 y 400 siguen el contrato uniforme de D-071.
+- Nginx: `server_tokens off;` en el bloque `server` de la plantilla fullstack Docker. Verificado con `curl -I` por el propietario: la cabecera `Server` responde `nginx` sin versión en 200 y en 404.
+
+**Motivo:** `redact` era el único punto de acción antes de tener un manejador global completo; ampliar su cobertura reduce el riesgo de exposición en los mensajes de log más críticos (arranque, cierre) sin añadir dependencias.
+
+**Consecuencias:** `redact` cubre las cabeceras y tokens más habituales. No es un filtro universal: nombres de clave como `apiKey`, `privateKey`, `clientSecretKey` o valores PEM multilínea no están cubiertos (pendiente, ver sección 5). Existen riesgos de ReDoS en la regla de URLs (sin límite de longitud de esquema) y en la regla de valores entrecomillados con comilla sin cierre (ver sección 5). `redact` es una defensa adicional, no la única barrera contra la fuga de secretos.
+
+**Alternativas consideradas:** filtrado por clave en un mapa fijo (descartado por rigidez ante nombres no estándar); uso de una biblioteca de redacción de terceros (descartado por no justificar la dependencia en este momento).
+
+**Commit:** `4295376` (2026-11-14).
+
+---
+
+### D-074 — Helmet, CORS y CSP en el backend generado
+
+**Estado:** Confirmada (2026-11-14).
+
+**Contexto:** Los proyectos backend generados no emitían cabeceras de seguridad HTTP ni tenían política de CORS. Se añaden como parte del endurecimiento de T-017b, usando las bibliotecas evaluadas en INV-02.
+
+**Decisión:**
+- **Helmet 8.3.0** instalado con versión exacta como dependencia de producción en `backend-express-ts` y `backend-express-js`. `cors 2.8.6` como dependencia de producción. `@types/cors 2.8.19` en `devDependencies` de la variante TypeScript.
+- **CSP global del backend** (aplica a todas las rutas salvo `/docs`): `useDefaults: false`, `default-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `form-action 'none'`. Sin otras directivas por defecto.
+- **HSTS desactivado** (`hsts: false`) a propósito: Brixa no controla dónde termina TLS; activar HSTS en un servidor que puede estar detrás de un proxy sin TLS introduciría un riesgo en lugar de mitigarlo.
+- **CSP específica de Swagger** (ruta `/docs`): `default-src 'self'`, `script-src 'self'`, `style-src 'self' 'unsafe-inline'` (única excepción, necesaria para Swagger UI), `img-src 'self' data:`, `connect-src 'self'`, `font-src 'self' data:`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`. `validatorUrl: null` en la configuración de Swagger UI para evitar solicitudes externas.
+- **CORS desactivado por defecto.** Si `CORS_ALLOWED_ORIGINS` no está definida o está vacía, el middleware no se registra. La variable se valida con Zod: solo acepta URLs HTTP o HTTPS válidas sin rutas, barras finales ni comodines; rechaza `*` y `null`. Se añade `Vary: Origin` solo cuando el middleware está activo y autoriza un origen. Sin `credentials: true`.
+- Zod ya era dependencia de producción desde D-070 (`702f477`); en este commit se añade `corsAllowedOriginsSchema` al esquema de configuración existente.
+- **X-Frame-Options del backend** es `SAMEORIGIN` (valor por defecto de Helmet), distinto del `DENY` de la SPA. Esta diferencia es conocida y está pendiente de unificar (ver sección 5).
+
+**Motivo:** Helmet con CSP estricta y CORS denegado por defecto son el mínimo razonable antes de añadir autenticación. El valor `'none'` para `default-src` en la API REST no tiene impacto funcional (el backend no sirve recursos cargados por el navegador) y aporta la máxima restricción.
+
+**Consecuencias:** Proyectos generados con backend emiten cabeceras de seguridad desde el primer arranque. El desarrollador debe declarar `CORS_ALLOWED_ORIGINS` explícitamente para habilitar CORS. HSTS no se activa: quien termine TLS en el servidor debe configurarlo en su proxy o añadirlo manualmente. Los tests del generador verifican la presencia y el contexto de las cabeceras.
+
+**Verificaciones realizadas [NO VERIFICADO EN NAVEGADOR / PENDIENTE]:** verify:generated completo (todas las variantes): realizado por el propietario, en verde. CSP de Helmet en `/api/health` con el stack Docker actual (`curl`): realizado por el propietario — CSP estricta (`default-src 'none'`), una sola cabecera. Navegador real sin violaciones CSP en `/` (selector de idioma) y en `/api/docs/` con `ENABLE_API_DOCS=true`: realizado por el propietario — sin violaciones CSP; Swagger y Try it out funcionan. Estos resultados son reportados por el propietario, no reproducidos por el agente.
+
+**Alternativas consideradas:** cabeceras nativas de Express sin Helmet (descartado por mayor coste de mantenimiento); HSTS activo (descartado por riesgo en entornos sin TLS en la terminación del servidor).
+
+**Commit:** `4295376` (2026-11-14).
+
+---
+
+### D-075 — Cabeceras de seguridad de la SPA mediante Nginx
+
+**Estado:** Confirmada (2026-11-14).
+
+**Contexto:** La plantilla fullstack Docker sirve la SPA con `nginxinc/nginx-unprivileged`. El frontend no emitía cabeceras de seguridad. Para evitar duplicar cabeceras (Nginx + Helmet), las cabeceras se definen solo donde corresponde: en Nginx para la SPA y en Helmet para la API.
+
+**Decisión:**
+- `server_tokens off;` en el bloque `server` (también cubierto en D-073).
+- Las cabeceras de seguridad se definen **exclusivamente dentro de `location /`**, con la directiva `always`:
+  - `Content-Security-Policy`: `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self';`
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY`
+  - `Referrer-Policy: no-referrer`
+- `location /api/` no lleva `add_header` para no duplicar las cabeceras de Helmet/Swagger, que el backend ya emite correctamente.
+- **CSP de la SPA sin `unsafe-inline` ni `unsafe-eval`**: Vite extrae el CSS en archivos separados en producción. El `style={{}}` del componente `LanguageSelector` aplica estilos mediante la API DOM y no requiere `unsafe-inline` en `style-src`.
+- **Descartadas y por qué:** HSTS (mismo motivo que D-074: Brixa no controla la terminación TLS), `Permissions-Policy` (sin uso de APIs sensibles en la plantilla base; añadirla sin valor concreto introduce mantenimiento sin beneficio claro), `COOP`/`CORP` (no se sirven recursos de orígenes cruzados en la plantilla base; se reevaluarán con autenticación).
+- Los tests del generador usan un analizador de bloques Nginx (`src/generator/generate.test.ts`) para verificar que cada `add_header` aparece en el contexto correcto.
+
+**Motivo:** Definir las cabeceras solo en `location /` evita duplicarlas en `/api/` (donde Helmet ya las emite) y mantiene un único punto de verdad por capa. `X-Frame-Options: DENY` es más restrictivo que el `SAMEORIGIN` del backend: se acepta como diferencia conocida pendiente de unificar (ver sección 5).
+
+**Consecuencias y limitaciones:**
+- Las cabeceras de la SPA **solo están presentes con Docker**: el servidor de desarrollo de Vite no las emite, y la variante frontend sin Docker tampoco dispone de Nginx.
+- Quien despliegue la SPA en un hosting diferente de este Nginx debe configurar las cabeceras en su propia infraestructura.
+- Las respuestas 502 generadas por Nginx cuando el backend cae no incluyen las cabeceras de seguridad del `location /`.
+- El arnés de `verify:generated` no comprueba las cabeceras de seguridad HTTP en las respuestas reales: una regresión en este área solo la detectarían los tests unitarios del generador. Mejora pendiente (ver sección 5).
+
+**Alternativas consideradas:** emitir las cabeceras también desde el backend en `/api/` y depender de Nginx para suprimirlas (descartado por mayor complejidad y riesgo de duplicación).
+
+**Commit:** `4295376` (2026-11-14).
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1165,10 +1252,15 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Composición pendiente: `.env.example`, `compose.yaml` y frontend (`App`, `main`, `vite.config`) carecen de puntos de inserción; hoy siguen dependiendo de añadidos de texto o reemplazos de archivo.
 - Orden explícito entre overlays: la ordenación por punto de código del nombre del contribuyente (`compareCodePoints`) es determinista pero arbitraria si un overlay depende semánticamente de otro.
 - Frontend sin Prettier: las plantillas de frontend no incluyen `.prettierrc`, dependencia de Prettier ni script `format:check`.
-- Alcance de `redact`: cubre URLs con credenciales y tokens en query, pero no cabeceras `Authorization`, `password=`, tokens de sesión ni errores de arranque fuera de peticiones HTTP. Debe ampliarse antes de autenticación.
+- Alcance de `redact` (D-073): cubre URLs con credenciales, cabeceras `Authorization` / `Proxy-Authorization`, tokens Bearer, cookies, `password`, `access_token`, `refresh_token`, `auth_token`, `token` y claves que terminen en `_secret`. No cubre: `apiKey`, `privateKey`, `clientSecretKey`, valores PEM multilínea. Decidir con errores reales antes de ampliar las regex indiscriminadamente.
+- ReDoS en `redact` (D-073): la regla de URLs (esquema sin límite de longitud) tiene comportamiento cuadrático medido (10 KB ≈ 74 ms, 50 KB ≈ 1.830 ms, 100 KB ≈ 7.319 ms); la regla de valores entrecomillados con comilla sin cierre tarda ≈ 2 s con 50 KB. **Prioritario:** corregir con aserciones de tiempo en los tests ANTES de conectar `redact` al manejador global de errores en contextos con entradas no controladas. Hoy solo se usa en arranque, cierre y migradores.
+- X-Frame-Options: el backend emite `SAMEORIGIN` (valor por defecto de Helmet, D-074) mientras que la SPA emite `DENY` (D-075). Diferencia conocida pendiente de unificar.
+- Cabeceras de la SPA solo con Docker (D-075): el servidor de desarrollo de Vite no las emite; quien despliegue sin el Nginx generado debe configurarlas en su hosting. Las respuestas 502 de Nginx (backend caído) no incluyen las cabeceras de `location /`.
+- El arnés de `verify:generated` no comprueba cabeceras de seguridad HTTP en las respuestas reales (D-075): una regresión solo la detectarían los tests unitarios. Mejora opcional.
+- Arnés `verify:generated`: usa puertos fijos (8080, 3000) y falla si están ocupados o si se borran `/tmp` o los contenedores durante la pasada. Mejora menor: comprobar puertos libres al inicio con un mensaje claro. No usar Docker ni limpiar `/tmp` mientras corre.
+- Capas Docker (`RUN mkdir -p data && chown -R node:node /app`): pueden tardar entre 26 s y 152 s. Posible mejora con `COPY --chown`. Sin acción ahora.
+- HSTS no activado (D-074, D-075): quien termine TLS en el servidor debe configurarlo en su proxy o servidor web.
 - Consumo de `ValidationError` y `parseInput`: están provistos y testeados en la plantilla base, pero actualmente no existen rutas de negocio que los consuman (solo existe `/health`).
-- Middleware validador no generado: se opta por `schema.parse` / `parseInput` explícito dentro del handler en lugar de middleware validador genérico.
-- Pruebas de composición: las pruebas de integración en `generate.test.ts` solo contrastan las 32 variantes verificadas contra la generación esperada; combinaciones no soportadas o colisiones adicionales no forman parte de la matriz base.
 - Versión a publicar tras el desbloqueo de npm: el tag `v0.1.0` contiene el defecto de Docker corregido en `9783be7` (y posteriores); publicar `0.1.1` desde un tag nuevo es la opción coherente con la regla de no mover ni reutilizar tags (decisión del responsable).
 
 ## 6. Registro de nuevas decisiones

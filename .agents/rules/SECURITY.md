@@ -220,3 +220,44 @@ Antes de habilitar cada capacidad, deben definirse:
 - Los riesgos y limitaciones conocidos.
 
 La arquitectura inicial debe mantenerse sencilla. No se deben añadir capas o abstracciones de seguridad sin una necesidad concreta, pero tampoco se deben diseñar las capacidades futuras de forma que resulte innecesariamente difícil implementarlas de manera segura.
+
+## 13. Endurecimiento base implementado (commit 4295376, 2026-11-14)
+
+Este apartado describe las garantías reales del endurecimiento de seguridad de la plantilla backend y de la SPA a fecha de las decisiones D-073, D-074 y D-075. Distingue explícitamente lo implementado, lo verificado y lo pendiente.
+
+### Redacción de secretos (`src/redact.{ts,js}`)
+
+**Implementado [CÓDIGO]:** `redact` cubre URLs con credenciales, cabeceras `Authorization` y `Proxy-Authorization` (Bearer, Basic y valor sin esquema), tokens Bearer independientes, cabeceras `Cookie`/`Set-Cookie`, y claves sensibles por nombre (`password`, `access_token`, `refresh_token`, `auth_token`, `token`, claves que terminen en `_secret`). Se aplica en arranque (`src/index`), cierre (`server.close`) y en el manejador global de errores (`console.error(redact(inspect(err, { depth: 5 })))`). Las cuatro plantillas de base de datos importan el módulo central; no hay copias.
+
+**Límites conocidos:** no cubre `apiKey`, `privateKey`, `clientSecretKey` ni valores PEM multilínea. `redact` es una defensa adicional, no la única barrera. Existen riesgos de ReDoS medidos (ver DECISIONS.md §5, pendiente T-022): hoy solo se usa en contextos con entradas de longitud razonable.
+
+### Límite de cuerpo de petición
+
+**Implementado [CÓDIGO]:** `express.json({ limit: "100kb" })`. Respuestas 413 con el contrato uniforme de D-071.
+
+### Cabeceras HTTP del backend (Helmet 8.3.0)
+
+**Implementado [CÓDIGO]:** CSP global `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`. CSP específica de Swagger en `/docs` con `style-src 'self' 'unsafe-inline'` como única excepción. `x-powered-by` desactivado.
+
+**No activado a propósito:** HSTS (`hsts: false`). Brixa no sabe dónde termina TLS; quien termine TLS en el servidor debe configurar HSTS en su proxy o servidor web.
+
+**Verificado por el propietario [NO REPRODUCIDO POR EL AGENTE]:** CSP en `/api/health` con Docker: CSP estricta (`default-src 'none'`), una sola cabecera. Navegador sin violaciones CSP en `/` y en `/api/docs/` con `ENABLE_API_DOCS=true`.
+
+### CORS (`cors 2.8.6`)
+
+**Implementado [CÓDIGO]:** desactivado por defecto. `CORS_ALLOWED_ORIGINS` validada con Zod: solo acepta URLs HTTP o HTTPS válidas sin rutas, barras finales ni comodines; rechaza `*` y `null`. `Vary: Origin` solo cuando el middleware está activo. Sin `credentials: true`.
+
+### Cabeceras de la SPA (Nginx, solo con Docker)
+
+**Implementado [CÓDIGO]:** `server_tokens off` en bloque `server`. En `location /` con `always`: `Content-Security-Policy` (sin `unsafe-inline` ni `unsafe-eval`), `X-Content-Type-Options nosniff`, `X-Frame-Options DENY`, `Referrer-Policy no-referrer`. `location /api/` sin `add_header`.
+
+**Limitaciones:** estas cabeceras solo están presentes con Docker. El servidor de desarrollo de Vite no las emite. Quien despliegue la SPA sin el Nginx generado debe configurarlas. Las respuestas 502 de Nginx (backend caído) no incluyen las cabeceras de `location /`.
+
+**Diferencia conocida:** `X-Frame-Options` es `DENY` en la SPA y `SAMEORIGIN` en el backend (Helmet por defecto). Pendiente de unificar.
+
+### Lo que no existe todavía
+
+- `trust proxy`: no configurado.
+- Rate limiting / protección de abuso: no implementado.
+- HSTS: no activado.
+- Autenticación, RBAC, multitenancy: fuera del alcance de 0.1.x.

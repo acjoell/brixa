@@ -83,6 +83,9 @@ El CLI permite cualquier combinación de las capacidades soportadas, pero marca 
 - Con base de datos, `npm install` muestra avisos de paquetes obsoletos (`@esbuild-kit`) que vienen de `drizzle-kit`. No afectan al resultado de `npm audit`.
 - Con PostgreSQL y Docker, `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica.
 - La internacionalización admite inglés y español, sin carga diferida de idiomas ni namespaces. El título de la página (`<title>`) no se traduce y el backend no está traducido.
+- **CORS desactivado por defecto:** en el backend generado, las peticiones entre orígenes están bloqueadas a menos que se defina la variable `CORS_ALLOWED_ORIGINS`.
+- **Cabeceras de seguridad de la SPA solo con Docker:** las cabeceras HTTP de la interfaz (CSP, X-Frame-Options DENY, etc.) las emite Nginx en el contenedor frontend; el servidor de desarrollo de Vite no las incluye y los proyectos de solo frontend no generan configuración de Nginx.
+- **HSTS no activo:** ni el backend ni Nginx configuran HSTS (`Strict-Transport-Security`), ya que Brixa no gestiona la terminación TLS. Quien despliegue en producción debe habilitarlo en su infraestructura o proxy TLS.
 - Fuera del alcance actual: modo avanzado, frameworks distintos de React y Express (por ejemplo Next.js) y otras bases de datos.
 
 ## Desarrollo

@@ -220,9 +220,37 @@ Notas:
 **Aprobación:** Aprobado (alcance: la actualización de documentos antes de pasar tareas a Antigravity).
 **Dependencias:** T-019.
 
-**Hecho en esta actualización:** `TASKS.md` (T-013, T-014, T-015, referencias); este archivo; `DECISIONS.md` (D-060 a D-065, P-008 a P-017, correcciones de D-047, D-049, D-052 y D-059, sección 5; 34 → 32 variantes).
-**Pendiente:** `SECURITY.md` (quitar la referencia a `carWashId`; reflejar los límites reales de RLS, de las colas locales y del rate limiting en memoria; distinguir PostgreSQL de SQLite; indicar que hoy no existe redacción central), `ARCHITECTURE.md` (composición actual frente a la objetivo; contexto explícito del actor si se aprueba), `CODE_STANDARDS.md` (dependencias declaradas directamente; duplicación aceptada solo con motivo), `ROADMAP.md` (endurecimiento y composición antes de autenticación), `README.md` (`npx brixa` aún no funciona; coherencia de cifras), `PROJECT_VISION.md` (§10 con pendientes ya resueltas), `AGENTS.md` y `CLAUDE.md` (quitar «el proyecto comienza desde cero» y el nombre Foundry).
+**Hecho en esta actualización:** `TASKS.md` (T-013, T-014, T-015, referencias); este archivo; `DECISIONS.md` (D-060 a D-065, P-008 a P-017, correcciones de D-047, D-049, D-052 y D-059, sección 5; 34 → 32 variantes). **Hecho en 2026-11-14 (commit documental pendiente):** `DECISIONS.md` (D-073, D-074, D-075; sección 5 actualizada); `TASKS_POST_MVP.md` (T-017b, T-022); `SECURITY.md` (garantías reales del endurecimiento base); `README.md` raíz (limitaciones de seguridad: CORS, HSTS, cabeceras SPA); `README.md` de plantilla backend (variables nuevas y comportamiento de Helmet).
+**Pendiente:** `ARCHITECTURE.md` (composición actual frente a la objetivo; contexto explícito del actor si se aprueba), `CODE_STANDARDS.md` (dependencias declaradas directamente; duplicación aceptada solo con motivo), `ROADMAP.md` (endurecimiento y composición antes de autenticación), `PROJECT_VISION.md` (§10 con pendientes ya resueltas), `AGENTS.md` y `CLAUDE.md` (quitar «el proyecto comienza desde cero» y el nombre Foundry).
 **Criterios de aceptación:** ningún documento contradice a `DECISIONS.md` en cifras, nombre, versiones o estado de la publicación.
+
+---
+
+### T-022 — Corrección del ReDoS en redact
+
+**Estado:** PENDIENTE
+**Aprobación:** Pendiente de decisión (prioridad alta antes de conectar `redact` a entradas no controladas).
+**Dependencias:** ninguna de código; debe hacerse antes de cualquier tarea que exponga `redact` a cadenas de entrada arbitraria de red.
+
+**Objetivo:** eliminar el comportamiento cuadrático de las dos reglas problemáticas de `redact` antes de ampliar su uso a contextos con entradas no controladas (logs de peticiones, middleware de errores con cabeceras externas, etc.).
+
+**Contexto:** mediciones de Antigravity (no reproducidas) detectaron:
+- Regla de URLs: sin límite de longitud de esquema → 10 KB ≈ 74 ms, 50 KB ≈ 1.830 ms, 100 KB ≈ 7.319 ms (cuadrático).
+- Regla de valores entrecomillados con comilla sin cierre: ≈ 2 s con 50 KB.
+Hoy `redact` solo se usa en arranque, cierre y migradores (entradas razonablemente cortas). El riesgo es bajo en el uso actual, pero bloqueante para cualquier ampliación.
+
+**Alcance:**
+- Añadir aserciones de tiempo en los tests existentes de `redact` antes de modificar las regex.
+- Corregir la regla de URLs añadiendo un límite de longitud de esquema o usando una alternativa sin backtracking.
+- Corregir la regla de valores entrecomillados para evitar el retroceso catastrófico con comilla sin cierre.
+- Verificar que los casos de redacción existentes siguen pasando.
+
+**Criterios de aceptación:**
+- Las aserciones de tiempo pasan con cadenas de 100 KB en un tiempo fijo razonable (por ejemplo < 10 ms).
+- Todos los tests de redacción existentes siguen en verde.
+- `redact` puede conectarse al manejador global de errores en contextos con entradas de red sin riesgo de DoS.
+
+**Áreas afectadas:** `src/templates/backend-express-{ts,js}/src/redact.{ts,js}` y sus tests.
 
 ---
 
@@ -328,9 +356,9 @@ Notas:
 
 ### T-017b — Seguridad base y Zod
 
-**Estado:** PARCIAL (configuración con Zod 4.6.7 y contrato uniforme de errores completados según D-070 y D-071, commits `702f477` y `2bd09b9`; resto BLOQUEADO/PENDIENTE: cabeceras de seguridad, CORS, `trust proxy`, límites de cuerpo y protección de abuso)
-**Aprobación:** Aprobado (alcance). D-070 y D-071 confirmadas.
-**Dependencias:** T-017a (Fase 1 backend completada). Pendiente de evidencia de INV-02 para cabeceras, CORS y rate limiting.
+**Estado:** PARCIAL (configuración con Zod 4.6.7, contrato de errores, redacción, cabeceras (Helmet/Nginx), CORS y límite de cuerpo completados; pendiente: `trust proxy`, protección de abuso/rate limiting)
+**Aprobación:** Aprobado (alcance). D-070, D-071, D-073, D-074 y D-075 confirmadas.
+**Dependencias:** T-017a (Fase 1 backend completada).
 
 **Objetivo:** que todo backend generado tenga configuración validada, validación reutilizable de entradas, errores uniformes y las protecciones mínimas por defecto.
 
@@ -338,13 +366,13 @@ Notas:
 - **Zod 4.6.7 y configuración [COMPLETADO - D-070, commit `702f477`]:** Zod fijado en versión exacta como dependencia obligatoria en backend ts y js. Validación descentralizada de configuración al arrancar (`src/config.{ts,js}` y `src/docs/validate-env.{ts,js}`) con `parseConfig` puro. Mensajes de error claros sin imprimir valores sensibles. `portSchema` (entero 0..65535, vacío no es 0), `strictBooleanSchema` (no usa `z.coerce.boolean`).
 - **Validación de entradas y propiedades desconocidas [COMPLETADO - D-070, D-071, commits `702f477`, `2bd09b9`]:** Convención documentada y probada con `parseInput`: `body` y `params` se validan con `z.strictObject` (rechaza desconocidas); `query` descarta propiedades desconocidas (`z.object`). No se genera middleware validador automático ni esquemas vacíos: validación explícita en handler.
 - **Contrato uniforme de errores [COMPLETADO - D-071, commit `2bd09b9`]:** Módulo `src/errors.{ts,js}`. Clase `ValidationError` propia (solo `path` y `code`, sin `cause`) que responde exclusivamente 400. Estados 400, 401, 403, 404 y 413 conservan código con texto fijo; resto 500 genérico sin filtrar `err.message` ni pilas. `notFoundHandler` devuelve 404 en JSON para rutas no registradas. `res.headersSent` delega a `next(err)`.
-- **Redacción centralizada [COMPLETADO - D-067, D-071, commits `1b6f7ad`, `2bd09b9`]:** Módulo central `src/redact.{ts,js}` aplicado en migradores y en el manejador global mediante `console.error(redact(inspect(err, { depth: 5 })))`.
-- **Cabeceras de seguridad (nativas o helmet) [PENDIENTE]:** Pendiente de evidencia y diseño.
-- **CORS [PENDIENTE]:** Denegado por defecto, pendiente de biblioteca o configuración nativa.
-- **`trust proxy` y límites [PENDIENTE]:** Por topología y configuración de Nginx; límites de cuerpo de petición.
+- **Redacción centralizada [COMPLETADO - D-067, D-071, D-073, commits `1b6f7ad`, `2bd09b9`, `4295376`]:** Módulo central `src/redact.{ts,js}` aplicado en migradores y en el manejador global (`console.error(redact(inspect(err, { depth: 5 })))`). Ampliado para cubrir `Authorization`, `Proxy-Authorization`, Bearer, `Cookie`/`Set-Cookie`, `password`, tokens y secretos comunes. Aplicado también en arranque y cierre (`src/index.{ts,js}`). Límite de cuerpo `express.json({ limit: "100kb" })`. Riesgo de ReDoS pendiente (ver DECISIONS.md §5).
+- **Cabeceras de seguridad (Helmet) [COMPLETADO - D-074, commit `4295376`]:** Helmet 8.3.0 con CSP estricta (`default-src 'none'`) en todas las rutas del backend; CSP específica con `style-src 'unsafe-inline'` solo en `/docs` (Swagger UI). HSTS desactivado a propósito. `cors 2.8.6` con validación Zod de `CORS_ALLOWED_ORIGINS`; desactivado por defecto; sin `*` ni `null`. `x-powered-by` desactivado.
+- **Cabeceras de seguridad (Nginx/SPA) [COMPLETADO - D-075, commit `4295376`]:** `server_tokens off`, CSP sin `unsafe-inline`/`unsafe-eval`, `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer` en `location /`. Solo con Docker. `location /api/` sin `add_header`.
+- **`trust proxy` y límites [PENDIENTE]:** Por topología y configuración de Nginx; comportamiento aún no documentado ni configurado.
 - **Protección general de la API (nivel 1 de abuso) [PENDIENTE]:** Almacén de contadores y límites pendientes de decisión.
 
-**Áreas afectadas:** **[L]** `src/templates/backend-express-{ts,js}` (`src/app`, `src/index`, `src/config`, `src/errors`, `src/redact`, `tests/config.test`, `tests/errors.test`, `package.json`, `.prettierrc`, `.prettierignore`, `README.md`), overlay `api-docs`. **[I]** generador y arnés (`scripts/verify-generated.js` con `format:check`).
+**Áreas afectadas:** **[L]** `src/templates/backend-express-{ts,js}` (`src/app`, `src/index`, `src/config`, `src/errors`, `src/redact`, `tests/config.test`, `tests/cors.test`, `tests/errors.test`, `tests/health.test`, `package.json`), overlay `api-docs` (`swagger.{ts,js}`, `docs.test.{ts,js}`), `src/templates/docker/fullstack/frontend/nginx.conf`, `src/generator/generate.test.ts`.
 
 **Criterios de aceptación comprobados:**
 - Una variable ausente o mal formada impide arrancar con mensaje claro sin valores.
@@ -352,12 +380,16 @@ Notas:
 - Errores 401, 403, 404, 413 conservan código; ningún error interno devuelve trazas ni mensaje original.
 - 404 JSON para rutas no encontradas.
 - No existen archivos de esquema vacíos ni dependencias sin uso.
+- CSP estricta en `/api/health`; CSP específica en `/docs`. Una sola cabecera por ruta (sin duplicación).
+- CORS rechaza `*` y `null`; CORS inactivo por defecto.
+- `express.json` rechaza cuerpos superiores a 100 KB con 413 en contrato uniforme.
 
-**Pruebas positivas y negativas:** Batería completa de pruebas unitarias en `tests/config.test.{ts,js}` y `tests/errors.test.{ts,js}` en verde.
+**Pruebas positivas y negativas:** Batería completa de pruebas unitarias en `tests/config.test.{ts,js}`, `tests/errors.test.{ts,js}`, `tests/cors.test.{ts,js}` y `tests/health.test.{ts,js}` en verde. Tests del generador (`generate.test.ts`) verifican contexto de cabeceras en Nginx.
 
-**Riesgos y limitaciones:** `redact` no cubre cabeceras `Authorization`, `password=`, tokens de sesión ni errores de arranque fuera de peticiones HTTP (debe ampliarse antes de autenticación). `ValidationError` y `parseInput` carecen de rutas de negocio que las consuman en la plantilla base (solo existe `/health`). Cabeceras, CORS y rate limiting quedan para la siguiente fase de endurecimiento.
+**Riesgos y limitaciones:** ReDoS en `redact` (medido; ver DECISIONS.md §5). `ValidationError` y `parseInput` carecen de rutas de negocio que las consuman (solo existe `/health`). Cabeceras de la SPA solo disponibles con Docker. `trust proxy` y rate limiting quedan para la siguiente fase.
 
 ---
+
 
 ### T-018 — Infraestructura de verificación avanzada
 

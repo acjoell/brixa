@@ -26,6 +26,14 @@ cp .env.example .env
 ```
 
 - `PORT`: Puerto TCP en el que escucha el servidor HTTP (por defecto: `3000`).
+- `CORS_ALLOWED_ORIGINS`: Lista de orígenes permitidos separados por comas para CORS (opcional; desactivado por defecto si no se define). Solo admite URLs HTTP o HTTPS válidas; rechaza comodines (`*`) y `null`.
+
+## Seguridad y cabeceras HTTP
+
+- **Cabeceras de seguridad**: Helmet emite cabeceras de protección HTTP con una CSP estricta por defecto (`default-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `form-action 'none'`). Si se activa la documentación de API (`ENABLE_API_DOCS=true`), la ruta `/docs` utiliza una CSP adaptada para Swagger UI con `style-src 'self' 'unsafe-inline'`.
+- **HSTS no activo**: HSTS está desactivado a propósito (`hsts: false`) porque Brixa no controla dónde se termina TLS. Quien termine TLS en el servidor debe configurarlo en su proxy inverso o infraestructura de alojamiento.
+- **CORS desactivado por defecto**: Se deniegan las peticiones entre orígenes a menos que se configure `CORS_ALLOWED_ORIGINS`.
+- **Límite de cuerpo JSON**: `express.json` aplica un límite de `100kb`. Cuerpos mayores se rechazan con `413 Payload Too Large`.
 
 ## Validación y manejo de errores
 
