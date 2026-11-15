@@ -228,29 +228,35 @@ Notas:
 
 ### T-022 — Corrección del ReDoS en redact
 
-**Estado:** PENDIENTE
-**Aprobación:** Pendiente de decisión (prioridad alta antes de conectar `redact` a entradas no controladas).
-**Dependencias:** ninguna de código; debe hacerse antes de cualquier tarea que exponga `redact` a cadenas de entrada arbitraria de red.
+**Estado:** COMPLETADA (2026-11-15)
+**Prioridad:** P1
+**Dependencias:** ninguna de código.
 
-**Objetivo:** eliminar el comportamiento cuadrático de las dos reglas problemáticas de `redact` antes de ampliar su uso a contextos con entradas no controladas (logs de peticiones, middleware de errores con cabeceras externas, etc.).
+**Objetivo:** eliminar el comportamiento cuadrático de dos reglas de `redact` antes de exponerla a entradas no controladas.
 
-**Contexto:** mediciones de Antigravity (no reproducidas) detectaron:
-- Regla de URLs: sin límite de longitud de esquema → 10 KB ≈ 74 ms, 50 KB ≈ 1.830 ms, 100 KB ≈ 7.319 ms (cuadrático).
-- Regla de valores entrecomillados con comilla sin cierre: ≈ 2 s con 50 KB.
-Hoy `redact` solo se usa en arranque, cierre y migradores (entradas razonablemente cortas). El riesgo es bajo en el uso actual, pero bloqueante para cualquier ampliación.
+**Contexto:** el hallazgo se reprodujo desde HTTP. Un `POST` con JSON malformado (dentro del límite de 100 KB) hace que `body-parser` añada el cuerpo crudo a `err.body`; el manejador global de errores lo pasa por `inspect()` y luego por `redact`. Mediciones de Antigravity antes de la corrección: regla de URLs, 10 KB ≈ 74 ms y 100 KB ≈ 7,4 s (cuadrático); regla de valores entrecomillados con comilla sin cierre, ≈ 1,9 s con 50 KB, atribuido en buena parte a la regla de URLs que se ejecutaba antes.
 
-**Alcance:**
-- Añadir aserciones de tiempo en los tests existentes de `redact` antes de modificar las regex.
-- Corregir la regla de URLs añadiendo un límite de longitud de esquema o usando una alternativa sin backtracking.
-- Corregir la regla de valores entrecomillados para evitar el retroceso catastrófico con comilla sin cierre.
-- Verificar que los casos de redacción existentes siguen pasando.
+**Cambios realizados:**
+- Regla de URLs: prefiltro `includes("://")` y esquema acotado a `{0,63}`. Es un límite interno defensivo para acotar el retroceso, no un requisito de RFC 3986 ni de RFC 1035.
+- Regla de valores entrecomillados: clases de caracteres negadas, con soporte de escapes (`\\.`), para comillas simples, dobles y backticks.
+- Revisión posterior (GPT y pruebas con `inspect()` real): se encontraron dos huecos reales de filtración. Un valor con `'` y `"` se muestra entre backticks, y uno con los tres tipos aparece con `\'` escapada. Ambos quedaron corregidos y con prueba.
+- Paridad TS/JS mantenida.
 
-**Criterios de aceptación:**
-- Las aserciones de tiempo pasan con cadenas de 100 KB en un tiempo fijo razonable (por ejemplo < 10 ms).
-- Todos los tests de redacción existentes siguen en verde.
-- `redact` puede conectarse al manejador global de errores en contextos con entradas de red sin riesgo de DoS.
+**Verificación:**
+- `typecheck`, `lint`, `format:check` y `test` en Brixa: 132 pruebas en verde.
+- `lint` y `test` (46 pruebas) en `backend+ts` y `backend+js` temporales.
+- Pruebas adversariales con `node:worker_threads` y timeout, incluida la integración HTTP (JSON malformado de 50 KB → 400 sin detalles internos).
+- Pruebas con `inspect()` real y con `inspect.defaultOptions.maxStringLength = Infinity`: ningún fragmento del secreto aparece en la salida.
+- `npm run verify:generated` completo: en verde (ejecutado por el responsable).
 
-**Áreas afectadas:** `src/templates/backend-express-{ts,js}/src/redact.{ts,js}` y sus tests.
+**Limitaciones conocidas:**
+- Los valores entrecomillados con saltos de línea literales sin escapar no se enmascaran (en `inspect()` y JSON los saltos van escapados).
+- La seguridad no depende de la truncación de `inspect()` (`maxStringLength`), pero el cuerpo que llega a `redact` sigue acotado por el límite de 100 KB de `express.json`.
+- Esquemas de más de 64 caracteres se enmascaran solo por sus últimos 64.
+- El criterio original «< 10 ms con 100 KB» no se adoptó. La regla de URLs con esquema sin credenciales mide ≈ 28 ms con 100 KB (antes ≈ 7,4 s) y crece de forma lineal. Las pruebas comprueban linealidad y un tope amplio por timeout, no un umbral de 10 ms.
+- Las mediciones de tiempo son de Antigravity, no reproducidas de forma independiente.
+
+**Áreas afectadas:** `src/templates/backend-express-{ts,js}/src/redact.{ts,js}`, sus tests y `src/generator/generate.test.ts`.
 
 ---
 

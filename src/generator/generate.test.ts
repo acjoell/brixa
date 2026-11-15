@@ -13,7 +13,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { inspect } from "node:util";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import { generate, formatGenerateError, mergePackageJson, nextStepsMessage } from "./generate.js";
 import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
 // @ts-expect-error La plantilla JavaScript no incluye archivo de declaraciones .d.ts
@@ -1273,7 +1274,54 @@ describe("generate — nginx.conf cabeceras de seguridad (Incremento C)", () => 
   });
 });
 
-describe("generate — redact ReDoS (Incremento C)", () => {
+describe("generate — redact ReDoS (Incremento C y T-022)", () => {
+  function runRedactInWorker(
+    variant: "ts" | "js",
+    input: string,
+    timeoutMs = 4000,
+  ): Promise<{ result: string; elapsed: number }> {
+    return new Promise((resolve, reject) => {
+      const fileRel =
+        variant === "ts"
+          ? "../templates/backend-express-ts/src/redact.ts"
+          : "../templates/backend-express-js/src/redact.js";
+      const fileAbs = path.resolve(path.dirname(fileURLToPath(import.meta.url)), fileRel);
+      const workerCode = `
+        const { parentPort, workerData } = require("node:worker_threads");
+        import(workerData.url).then(({ redact }) => {
+          const t0 = performance.now();
+          const result = redact(workerData.input);
+          const elapsed = performance.now() - t0;
+          parentPort.postMessage({ result, elapsed });
+        }).catch(err => {
+          parentPort.postMessage({ error: err.message });
+        });
+      `;
+      const worker = new Worker(workerCode, {
+        eval: true,
+        workerData: { url: pathToFileURL(fileAbs).href, input },
+      });
+      const timer = setTimeout(() => {
+        worker.terminate().then(() => {
+          reject(new Error(`Timeout (${timeoutMs}ms) en Worker ejecutando redact (${variant})`));
+        });
+      }, timeoutMs);
+
+      worker.on("message", (msg) => {
+        clearTimeout(timer);
+        if (msg.error) {
+          reject(new Error(msg.error));
+        } else {
+          resolve(msg);
+        }
+      });
+      worker.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
   it("reglas 2-5 (cabeceras, Bearer, cookies, secretos) se ejecutan en tiempo lineal sobre entradas grandes", () => {
     const cases = [
       { name: "password= repeated 10 K", input: "password=".repeat(10000) },
@@ -1283,36 +1331,257 @@ describe("generate — redact ReDoS (Incremento C)", () => {
     ];
 
     for (const c of cases) {
-      const t0 = performance.now();
-      redactTs(c.input);
-      const elapsed = performance.now() - t0;
-      expect(elapsed, `${c.name}: ${elapsed.toFixed(1)}ms`).toBeLessThan(500);
+      for (const redactFn of [redactTs, redactJs]) {
+        const t0 = performance.now();
+        redactFn(c.input);
+        const elapsed = performance.now() - t0;
+        expect(elapsed, `${c.name}: ${elapsed.toFixed(1)}ms`).toBeLessThan(500);
+      }
     }
   });
 
-  it("regla 5a (.*? entre comillas) tiene comportamiento cuadrático en comilla sin cerrar — test documental", () => {
-    // HALLAZGO: (.*?)\2 con backreference también exhibe retroceso cuadrático cuando la
-    // comilla de cierre nunca aparece. El motor intenta (.*?) desde cada posición restante.
-    // Comportamiento medido: ~82 ms para 10 KB, ~1900 ms para 50 KB (escala ~O(N^2)).
-    // Es una limitación conocida pendiente de corrección en una tarea independiente.
-    // Este test no impone umbral para no bloquear CI.
-    const unclosed = "password: '" + "a".repeat(2000); // 2 KB (tamaño reducido para no bloquear CI)
-    const t0 = performance.now();
-    redactTs(unclosed);
-    const elapsed = performance.now() - t0;
-    // Solo se verifica que el resultado es un número (el test es documental).
-    expect(typeof elapsed).toBe("number");
+  it("regla 1: entradas near-miss (10 KB, 50 KB, 100 KB) se ejecutan en tiempo lineal y seguro en Worker", async () => {
+    const sizes = [10000, 50000, 100000];
+    for (const variant of ["ts", "js"] as const) {
+      const timesWithoutScheme: number[] = [];
+      const timesWithScheme: number[] = [];
+
+      for (const size of sizes) {
+        // Near-miss sin esquema :// (puras letras alfanuméricas)
+        const pureAlphanumeric = "a".repeat(size);
+        const resPure = await runRedactInWorker(variant, pureAlphanumeric, 3000);
+        expect(resPure.result).toBe(pureAlphanumeric);
+        expect(resPure.elapsed, `Pure near-miss ${variant} ${size}`).toBeLessThan(500);
+        timesWithoutScheme.push(resPure.elapsed);
+
+        // Near-miss con esquema válido pero sin '@'
+        const nearMissScheme = "https://user:" + "a".repeat(size);
+        const resScheme = await runRedactInWorker(variant, nearMissScheme, 3000);
+        expect(resScheme.result).toBe(nearMissScheme);
+        expect(resScheme.elapsed, `Scheme near-miss ${variant} ${size}`).toBeLessThan(500);
+        timesWithScheme.push(resScheme.elapsed);
+      }
+
+      // Verificación de linealidad: 100 KB debe ser razonablemente lineal (< 500ms)
+      // En vez del comportamiento previo (7384 ms para 100 KB, cuadrático).
+      expect(timesWithScheme[2]).toBeLessThan(500);
+      expect(timesWithoutScheme[2]).toBeLessThan(500);
+    }
   });
 
-  it("regla 1 (URL near-miss) tiene comportamiento cuadrático conocido — test documental", () => {
-    // La regla 1: /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/\s?#]+@/g exhibe retroceso cuadrático
-    // en near-miss (URL sin '@'). Es una limitación conocida pendiente de corrección
-    // en una tarea independiente. Este test no impone umbral para no bloquear CI.
-    const nearMiss = "https://user:" + "a".repeat(2000);
-    const t0 = performance.now();
-    redactTs(nearMiss);
-    const elapsed = performance.now() - t0;
-    // Solo se verifica que el resultado es un número (el test es documental).
-    expect(typeof elapsed).toBe("number");
+  it("regla 1: casos positivos, esquemas largos y terminaciones de coincidencia parcial", () => {
+    const cases = [
+      // Positivos
+      {
+        name: "https con credenciales",
+        input: "https://user:password@host/path",
+        expected: "https://***:***@host/path",
+      },
+      {
+        name: "postgresql con credenciales",
+        input: "postgresql://user:secret@localhost:5432/database",
+        expected: "postgresql://***:***@localhost:5432/database",
+      },
+      {
+        name: "libsql con credenciales",
+        input: "libsql://user:secret@host/database",
+        expected: "libsql://***:***@host/database",
+      },
+      // Negativos
+      {
+        name: "https sin ://",
+        input: "https example.com",
+        expected: "https example.com",
+      },
+      {
+        name: "cadena://sin-credenciales",
+        input: "cadena://sin-credenciales",
+        expected: "cadena://sin-credenciales",
+      },
+      {
+        name: "texto extenso sin esquema",
+        input: "texto alfanumerico extenso sin esquema ni nada mas",
+        expected: "texto alfanumerico extenso sin esquema ni nada mas",
+      },
+      // Esquemas largos
+      {
+        name: "esquema largo de 45 caracteres",
+        input: "custom-schema-with-long-identifier-prefix-123://u:p@host/path",
+        expected: "custom-schema-with-long-identifier-prefix-123://***:***@host/path",
+      },
+      {
+        name: "esquema muy largo (80 caracteres)",
+        input: "a".repeat(80) + "://u:p@host/path",
+        expected: "a".repeat(17) + "a".repeat(63) + "://***:***@host/path",
+      },
+      // Terminaciones de coincidencia parcial
+      {
+        name: "https://user:password sin arroba",
+        input: "https://user:password",
+        expected: "https://user:password",
+      },
+      {
+        name: "https://user@",
+        input: "https://user@",
+        expected: "https://***:***@",
+      },
+      {
+        name: "http://user:pass/path sin arroba",
+        input: "http://user:pass/path",
+        expected: "http://user:pass/path",
+      },
+      {
+        name: "http:/path esquema mal formado",
+        input: "http:/path",
+        expected: "http:/path",
+      },
+      {
+        name: "http:example.com sin doble barra",
+        input: "http:example.com",
+        expected: "http:example.com",
+      },
+    ];
+
+    for (const c of cases) {
+      for (const redactFn of [redactTs, redactJs]) {
+        expect(redactFn(c.input), c.name).toBe(c.expected);
+      }
+    }
+  });
+
+  it("regla 5a: comillas y backticks sin cerrar (50 KB y 100 KB) se ejecutan en tiempo acotado en Worker sin retroceso cuadrático", async () => {
+    for (const variant of ["ts", "js"] as const) {
+      const unclosedSingle = "password: '" + "a".repeat(50000);
+      const resSingle = await runRedactInWorker(variant, unclosedSingle, 3000);
+      expect(resSingle.result).toBe(unclosedSingle);
+      expect(resSingle.elapsed, `Unclosed single quote ${variant}`).toBeLessThan(500);
+
+      const unclosedDouble = 'password: "' + "a".repeat(50000);
+      const resDouble = await runRedactInWorker(variant, unclosedDouble, 3000);
+      expect(resDouble.result).toBe(unclosedDouble);
+      expect(resDouble.elapsed, `Unclosed double quote ${variant}`).toBeLessThan(500);
+
+      const unclosedBacktick = "password: `" + "a".repeat(100000);
+      const resBacktick = await runRedactInWorker(variant, unclosedBacktick, 3000);
+      expect(resBacktick.result).toBe(unclosedBacktick);
+      expect(resBacktick.elapsed, `Unclosed backtick 100 KB ${variant}`).toBeLessThan(500);
+
+      const unclosedEscapes = "password: '" + "\\a".repeat(50000);
+      const resEscapes = await runRedactInWorker(variant, unclosedEscapes, 3000);
+      expect(resEscapes.result).toBe(unclosedEscapes);
+      expect(resEscapes.elapsed, `Unclosed escapes 100 KB ${variant}`).toBeLessThan(500);
+    }
+  });
+
+  it("regla 5a: inspect() real (TS y JS) con comillas simples, dobles, backticks, barras invertidas y maxStringLength = Infinity", () => {
+    const testCases = [
+      { name: "solo '", value: "foo'bar" },
+      { name: 'solo "', value: 'foo"bar' },
+      { name: "ambos ' y \"", value: "foo'bar\"baz" },
+      { name: "los tres tipos más backticks", value: "foo'bar\"baz`qux" },
+      { name: "barras invertidas consecutivas (\\\\)", value: "foo\\\\bar" },
+      { name: "barras invertidas con comilla (\\\\')", value: "foo\\'bar" },
+    ];
+
+    const prevMax = inspect.defaultOptions.maxStringLength;
+
+    try {
+      for (const maxLen of [prevMax, Infinity]) {
+        inspect.defaultOptions.maxStringLength = maxLen;
+
+        for (const tc of testCases) {
+          const obj = { password: tc.value };
+          const inspected = inspect(obj, { depth: 5 });
+
+          for (const redactFn of [redactTs, redactJs]) {
+            const redacted = redactFn(inspected);
+
+            // Ningún fragmento del secreto debe aparecer en la salida
+            expect(
+              redacted,
+              `Leak detectado en ${tc.name} (maxStringLength=${maxLen}): ${redacted}`,
+            ).not.toContain(tc.value);
+            expect(redacted).not.toContain("foo");
+            expect(redacted).not.toContain("bar");
+            expect(redacted).not.toContain("baz");
+            expect(redacted).not.toContain("qux");
+            expect(redacted).toMatch(/password:\s*(`\*\*\*`|'\*\*\*'|"\*\*\*")/);
+          }
+        }
+      }
+    } finally {
+      inspect.defaultOptions.maxStringLength = prevMax;
+    }
+  });
+
+  it("regla 5a: cobertura completa de secretos entrecomillados y casos de borde", () => {
+    const cases = [
+      {
+        name: "password comillas simples",
+        input: "password: 'secreto'",
+        expected: "password: '***'",
+      },
+      {
+        name: "password comillas dobles",
+        input: 'password: "secreto"',
+        expected: 'password: "***"',
+      },
+      {
+        name: "access_token delimitador =",
+        input: "access_token='abc123'",
+        expected: "access_token='***'",
+      },
+      {
+        name: "refresh_token delimitador =",
+        input: 'refresh_token="xyz789"',
+        expected: 'refresh_token="***"',
+      },
+      {
+        name: "cadena vacía comilla simple",
+        input: "password: ''",
+        expected: "password: '***'",
+      },
+      {
+        name: "cadena vacía comilla doble",
+        input: 'password: ""',
+        expected: 'password: "***"',
+      },
+      {
+        name: "valor con espacios",
+        input: "password: 'clave con espacios'",
+        expected: "password: '***'",
+      },
+      {
+        name: "valor entre comillas simples con comillas dobles en el interior",
+        input: "password: 'clave con \"comillas dobles\" adentro'",
+        expected: "password: '***'",
+      },
+      {
+        name: "valor entre comillas dobles con comillas simples en el interior",
+        input: "password: \"clave con 'comillas simples' adentro\"",
+        expected: 'password: "***"',
+      },
+      {
+        name: "mezcla de comillas simples y dobles en una misma cadena",
+        input: "password: 'uno', token: \"dos\"",
+        expected: "password: '***', token: \"***\"",
+      },
+      {
+        name: "múltiples propiedades sensibles extensas",
+        input: "password: 'abc', access_token: 'def', refresh_token: 'ghi', secret: 'jkl'",
+        expected: "password: '***', access_token: '***', refresh_token: '***', secret: '***'",
+      },
+      {
+        name: "valores normales entrecomillados preservados",
+        input: "username: 'admin', role: \"manager\"",
+        expected: "username: 'admin', role: \"manager\"",
+      },
+    ];
+
+    for (const c of cases) {
+      for (const redactFn of [redactTs, redactJs]) {
+        expect(redactFn(c.input), c.name).toBe(c.expected);
+      }
+    }
   });
 });

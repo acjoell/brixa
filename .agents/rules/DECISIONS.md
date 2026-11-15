@@ -1229,6 +1229,24 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-076 — Mitigación del ReDoS en redact y límites de la redacción
+
+**Estado:** Confirmada.
+
+**Contexto:** T-022. `redact` recibe en el manejador global de errores texto derivado de entradas de red (`err.body` de JSON malformado, vía `inspect()`).
+
+**Decisión:** La regla de URLs usa prefiltro `includes("://")` y esquema `{0,63}`; la de valores entrecomillados usa clases negadas con escapes y cubre `'`, `"` y backticks. Las pruebas de redacción pasan por `inspect()` real y con `maxStringLength` ilimitado.
+
+**Motivo:** `util.inspect` elige backticks cuando el valor contiene ambos tipos de comillas, y la regla anterior no los cubría (fuga real). Además, el retroceso cuadrático bloqueaba el event loop ≈ 74 ms por petición malformada con solo 10 KB.
+
+**Consecuencias / limitaciones:**
+- `{0,63}` es una decisión interna defensiva, no un requisito de RFC 3986 ni de RFC 1035.
+- Valores entrecomillados con saltos de línea literales sin escapar no se enmascaran.
+- `inspect()` no es la barrera de seguridad: la redacción debe funcionar aunque cambie `inspect.defaultOptions`.
+- `redact` vive en un único archivo por lenguaje (redact.ts y redact.js); una corrección debe aplicarse en ambos.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.

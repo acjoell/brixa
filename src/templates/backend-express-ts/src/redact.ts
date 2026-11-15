@@ -9,7 +9,10 @@ export function redact(text: string): string {
   let result = text;
 
   // 1. URLs con credenciales
-  result = result.replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/\s?#]+@/g, "$1***:***@");
+  // El límite {0,63} es un límite interno defensivo para acotar el retroceso, no una exigencia de RFC 3986 ni RFC 1035.
+  if (result.includes("://")) {
+    result = result.replace(/([a-zA-Z][a-zA-Z0-9+.-]{0,63}:\/\/)[^/\s?#]+@/g, "$1***:***@");
+  }
 
   // 2. Cabeceras de autorización (Authorization, Proxy-Authorization)
   result = result.replace(
@@ -37,14 +40,18 @@ export function redact(text: string): string {
   );
 
   // 5. Credenciales y secretos (password, tokens, secret)
-  // 5a. Valores entrecomillados
+  // 5a. Valores entrecomillados (comillas simples, dobles o backticks de inspect())
   result = result.replace(
-    /((?:(?:\b|['"])(?:password|access_?token|refresh_?token|auth_?token|token|(?:[a-z0-9_-]*_)?secret)(?:['"]?))\s*[:=]\s*)(['"])(.*?)\2/gi,
-    "$1$2***$2",
+    /((?:(?:\b|['"`])(?:password|access_?token|refresh_?token|auth_?token|token|(?:[a-z0-9_-]*_)?secret)(?:['"`]?))\s*[:=]\s*)(?:'((?:[^'\\\r\n]|\\.)*)'|"((?:[^"\\\r\n]|\\.)*)"|`((?:[^`\\\r\n]|\\.)*)`)/gi,
+    (_match, prefix, sVal, dVal) => {
+      if (sVal !== undefined) return `${prefix}'***'`;
+      if (dVal !== undefined) return `${prefix}"***"`;
+      return `${prefix}\`***\``;
+    },
   );
   // 5b. Valores sin entrecomillar
   result = result.replace(
-    /((?:(?:\b|['"])(?:password|access_?token|refresh_?token|auth_?token|token|(?:[a-z0-9_-]*_)?secret)(?:['"]?))\s*[:=]\s*)(?!['"])([^&\s'",`};\]\r\n]+)/gi,
+    /((?:(?:\b|['"`])(?:password|access_?token|refresh_?token|auth_?token|token|(?:[a-z0-9_-]*_)?secret)(?:['"`]?))\s*[:=]\s*)(?!['"`])([^&\s'",`};\]\r\n]+)/gi,
     "$1***",
   );
 

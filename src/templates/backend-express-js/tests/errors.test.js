@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { performance } from "node:perf_hooks";
 import express from "express";
 import { z } from "zod";
 import { app } from "../src/app.js";
@@ -110,6 +111,28 @@ describe("Contrato de errores centralizado y validación", () => {
     const body = await res.json();
     expect(body).toEqual({ error: "Bad Request" });
     expect(body.message).toBeUndefined();
+  });
+
+  it("JSON malformado con carga near-miss extensa (50 KB) → 400 rápido sin degradación ReDoS", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const nearMissPayload = "{\ninvalid: " + "a".repeat(50 * 1024);
+      const t0 = performance.now();
+      const res = await fetch(`${mainBaseUrl}/health`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: nearMissPayload,
+      });
+      const elapsed = performance.now() - t0;
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({ error: "Bad Request" });
+      expect(body.message).toBeUndefined();
+      expect(elapsed).toBeLessThan(1000);
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 
   it("body demasiado grande → 413 con texto fijo", async () => {
