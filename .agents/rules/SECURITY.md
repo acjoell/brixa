@@ -37,7 +37,7 @@ Se deben definir explícitamente:
 
 Las credenciales no deben almacenarse en texto plano.
 
-Las contraseñas deben protegerse mediante un algoritmo de hash diseñado para contraseñas, con parámetros apropiados y una biblioteca mantenida.
+Las contraseñas deben protegerse mediante un algoritmo de hash diseñado para contraseñas, con parámetros apropiados y una biblioteca mantenida (D-091 a D-093: Argon2id mediante `@node-rs/argon2` versión `2.2.2`, `m=19456 KiB`, `t=2`, `p=1`, formato PHC estándar en Base64 sin padding, APIs asíncronas, validación defensiva previa de parámetros, verificación simulada contra enumeración por tiempo y limitador de concurrencia acotado).
 
 Los tokens y las sesiones deben protegerse de acuerdo con el mecanismo elegido. Si se utilizan cookies, deben configurarse las opciones de seguridad pertinentes, como `HttpOnly`, `Secure` y `SameSite`, según el entorno y el flujo de autenticación.
 

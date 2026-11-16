@@ -55,14 +55,14 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-020 | PENDIENTE | T-019 |
 | T-021 | EN PROGRESO | T-019 (parcialmente T-020 para cifras) |
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
-| INV-07 | PENDIENTE | — |
+| INV-07 | COMPLETADA | — |
 | INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
-| T-014-0 | BLOQUEADA | Decisiones técnicas pendientes de INV-04a, INV-05b / INV-08, P-009 / INV-07 y modelo de amenazas completo (P-010 y P-011 consolidadas en D-080 a D-090) |
+| T-014-0 | BLOQUEADA | Decisiones técnicas pendientes de INV-04a, INV-05b / INV-08 y modelo de amenazas completo (P-009 resuelta en D-091 a D-093 tras INV-07; P-010 y P-011 consolidadas en D-080 a D-090) |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
 | T-018 | BLOQUEADA | T-017b, INV-06 |
-| T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-07 (composición backend requerida ya disponible vía D-069; P-010 y P-011 consolidadas en D-080 a D-090) |
+| T-014a | BLOQUEADA | T-014-0, T-017b, T-018 (composición backend requerida ya disponible vía D-069; P-009, P-010 y P-011 consolidadas en D-080 a D-093) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018 (composición backend requerida ya disponible vía D-069) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
@@ -71,7 +71,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 **Orden de ejecución propuesto (actualizado):**
 
-T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 con la evidencia de T-020, INV-07 e INV-08 → T-017a → T-017a-ui → T-017b → T-018 → T-014-0 (puede adelantarse: es diseño sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
+T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 con la evidencia de T-020 e INV-08 (INV-07 completada y P-009 resuelta en D-091 a D-093) → T-017a → T-017a-ui → T-017b → T-018 → T-014-0 (puede adelantarse: es diseño sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
 
 - T-014c y T-014b1 no dependen entre sí. El orden lineal es de conveniencia, no una restricción técnica.
 - La decisión de estrategia JavaScript/TypeScript (INV-05b) debe tomarse **antes** de T-017a: si JavaScript se deriva de TypeScript, la composición se implementa una sola vez.
@@ -106,12 +106,13 @@ Cada ficha indica qué pregunta resuelve, qué condiciona, qué evidencia debe e
 | INV-05b | Piloto (INV-08). `ts-blank-space` 0.6 exige TypeScript 5.1–5.7 y el CLI usa 6.0.3. El postprocesado de imports por expresiones regulares es frágil; evaluar AST. Prueba hecha con Drizzle 0.45.1 (la plantilla usa 0.45.4) |
 | INV-04a | Soporte de políticas RLS y roles en Drizzle 0.45.x y Drizzle Kit 0.31.x sin comprobar. Probado con `postgres:17.4-alpine`, que coincide con la imagen que generan las plantillas |
 | INV-04b | Corregir al adoptarlo: no usar `is_active` universal; «membresía» pasa a «concesión de acceso» (D-063); las políticas RLS necesitan `NULLIF(...)::uuid` (INV-04a). Falta el diagrama de flujo del informe |
-| INV-01 | INV-07. `engines.node` admite 24.0–24.6, donde la API no existe. PHC con Base64URL sin corregir. Benchmarks en un único host Linux x64 |
+| INV-01 | Cerrada mediante INV-07 y decisiones D-091 a D-093 (Argon2id con `@node-rs/argon2` 2.2.2, formato PHC estándar con Base64 sin padding, rehash y controles defensivos). Benchmarks originales considerados definitivos para v1 |
+| INV-07 | Completada. Resuelta P-009 en D-091 a D-093: adoptado `@node-rs/argon2` versión 2.2.2 manteniendo `engines.node: "^24.0.0 || >=26.0.0"` sin alternativas en `node:crypto`, formato PHC canónico con Base64 sin padding (no Base64URL), rehash tras login y controles de seguridad (asincronía estricta, validación defensiva previa de parámetros, dummy hash y limitador de concurrencia). Quedan como pendientes técnicos de diseño/implementación los límites numéricos defensivos exactos, capacidad del limitador y pruebas en Docker / sin dependencias opcionales |
 | INV-03 | Solo se dispone del complemento INV-03b (Chromium 156, Firefox 157; Safari no verificado). React Router no está instalado en Brixa [INSP]: sus conclusiones de accesibilidad aplican al router que se elija |
 | INV-02 | Versión de Zod sin fuente registrada. La fuga de credenciales de `@libsql/client` depende de qué URLs acepta el cliente de la plantilla (T-020, prueba 3). Las versiones de `pg` y `@libsql/client` de las plantillas coinciden con las usadas en el anexo |
 | INV-06 | Decisión de D-062 (caché compartida, instalaciones independientes, symlinks aplazados). La reutilización por symlink y el motor de mutaciones están sin verificar en Windows y macOS |
 
-Orden recomendado para las investigaciones restantes: INV-07 e INV-08. Las demás ya están ejecutadas.
+Orden recomendado para las investigaciones restantes: INV-08 (INV-07 completada). Las demás ya están ejecutadas.
 
 ---
 
@@ -262,9 +263,9 @@ Notas:
 
 ### T-014-0 — Diseño del modelo de identidad, organización y contexto
 
-**Estado:** BLOQUEADA (faltan decisiones técnicas: P-009 / INV-07 sobre hash de contraseñas, soporte RLS en Drizzle fijado / INV-04a, estrategia JS/TS / INV-08, especificación de parámetros temporales de sesión, y el modelo de amenazas completo. P-010 y P-011 consolidadas en D-080 a D-090)
+**Estado:** BLOQUEADA (faltan decisiones técnicas: soporte RLS en Drizzle fijado / INV-04a, estrategia JS/TS / INV-08, especificación de parámetros temporales de sesión, y el modelo de amenazas completo. P-009, P-010 y P-011 consolidadas en D-080 a D-093)
 **Aprobación:** Aprobado (alcance como tarea de diseño previa a las capacidades). Su contenido depende de evidencia restante.
-**Dependencias:** INV-04a, INV-05b / INV-08, INV-07 (resultados reportados/pendientes) y modelo de amenazas. P-010 y P-011 resueltas (D-080 a D-090).
+**Dependencias:** INV-04a, INV-05b / INV-08 y modelo de amenazas. P-009, P-010 y P-011 resueltas (D-080 a D-093).
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
@@ -280,9 +281,10 @@ Notas:
 - **Ciclo de vida de sesiones (D-088):** expiración deslizante por inactividad y límite absoluto; revocación efectiva inmediata; actualización de actividad segura frente a concurrencia; rotación controlada del identificador en eventos de seguridad relevantes; sin esquema access+refresh rotativo en v1. Parámetros temporales concretos pendientes de especificación detallada.
 - **Transporte y CSRF (D-089):** fullstack exclusivamente cookies en v1; backend independiente con cookies o Bearer seleccionables (sin mezcla simultánea de transportes); cookies HttpOnly, Secure, SameSite=Lax, Path=/, sin Domain, con nombre específico por proyecto; protección CSRF obligatoria en operaciones autenticadas por cookies con comprobación de origen y mecanismos adicionales; Bearer mediante cabecera Authorization; sin soporte automático general de cookies cross-site en v1 (precisión formal del alcance de D-064).
 - **Frontend y navegación protegida (D-090):** React Router en modo declarativo cuando fullstack incluya Auth (sin router obligatorio para proyectos que no lo necesiten); estado de sesión centralizado con 4 estados (verificación, autenticado, no autenticado, error de comunicación); recuperación de sesión mediante consulta al backend sin almacenar credenciales en JavaScript; rutas protegidas para experiencia de usuario/navegación con autorización efectiva siempre en Express; integración compositiva con i18n, RBAC y futuros módulos; accesibilidad explícita obligatoria (título de página, gestión de foco y anuncios de navegación); y pruebas reales de navegación, redirecciones, recargas y accesibilidad.
+- **Hash de contraseñas con Argon2id (D-091, D-092, D-093):** adopción de Argon2id mediante `@node-rs/argon2` versión exacta `2.2.2` en backends con Auth; `engines.node: "^24.0.0 || >=26.0.0"` inalterado sin alternativas en `node:crypto`, bcrypt ni scrypt y con paridad funcional JS/TS (D-091); parámetros explícitos `m=19456 KiB, t=2, p=1, outputLen=32` y salt aleatorio de 16 bytes establecidos explícitamente; formato PHC canónico en Base64 convencional sin padding (no Base64URL) con soporte de rehash tras login válido (D-092); y controles de seguridad operativa obligatorios: asincronía estricta en HTTP, validación defensiva previa de parámetros PHC para evitar DoS por memoria/CPU, verificación simulada (dummy) contra enumeración por tiempo, limitador de concurrencia acotado independiente del rate limiting, y política de entrada de 128 caracteres / 512 bytes UTF-8 (D-093).
 - **Criterio de extensibilidad modular (aprobado):** Las capacidades Auth, RBAC y multitenancy deben permitir incorporar módulos de negocio, permisos nuevos y validaciones adicionales sin modificar sus mecanismos internos. No implica implementar un motor ABAC/ReBAC ni actualizaciones automáticas de overlays después de generar un proyecto.
 - **Propuesta de backlog (sin implementación aprobada):** generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
-- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); algoritmo y parámetros de hash de contraseñas (P-009 / INV-07); soporte de RLS en Drizzle fijado (INV-04a); estrategia JavaScript/TypeScript (INV-05b / INV-08); duraciones predeterminadas de expiración, periodicidad de rotación y frecuencia de actualización de actividad (D-088); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
+- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); límites numéricos defensivos exactos para parámetros PHC y compatibilidad con rehash, capacidad y saturación del limitador de concurrencia y pruebas en Docker / sin dependencias opcionales (pendientes técnicos de D-092 y D-093); soporte de RLS en Drizzle fijado (INV-04a); estrategia JavaScript/TypeScript (INV-05b / INV-08); duraciones predeterminadas de expiración, periodicidad de rotación y frecuencia de actualización de actividad (D-088); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
 
 **Áreas afectadas:** ninguna de código. Producto: documento de diseño y propuestas de decisión.
 
@@ -436,9 +438,9 @@ Notas:
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 e INV-07)
-**Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089). Detalles de hash y parámetros de sesión pendientes.
-**Dependencias:** T-014-0, T-017b, T-018, INV-01 e INV-07. Decisiones de diseño consolidadas en D-080 a D-090. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
+**Estado:** BLOQUEADA (por T-014-0, T-017b y T-018)
+**Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión pendientes.
+**Dependencias:** T-014-0, T-017b y T-018. Decisiones de diseño consolidadas en D-080 a D-093. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
 
 **Objetivo:** cuentas y credenciales funcionales y verificadas, con una modalidad elegida por proyecto.
 
@@ -447,7 +449,7 @@ Notas:
 **Alcance común:**
 - Núcleo de identidad y gestión de cuentas compartido; sin duplicar tablas de usuarios ni la lógica de cuentas.
 - Sesiones opacas generadas con 32 bytes criptográficamente aleatorios y hashes SHA-256 en base de datos como único modelo de v1, sin JWT (D-087). Validación y revocación en servidor; token sin identidad, roles ni organización; núcleo común para cookies y Bearer.
-- Hash de contraseñas: **no decidido** (INV-01, INV-07; P-009). `crypto.argon2` existe desde Node 24.7.0 y `engines.node` admite `^24.0.0`; con `@types/node` 26.x el type-check no detectaría el uso en una versión anterior. Si se elige la API nativa, el proyecto generado necesita su propio `engines` y tipos alineados. No llamar «PHC» a un formato con Base64URL sin aclararlo.
+- Hash de contraseñas: **resuelto por D-091 a D-093 (P-009)** tras INV-01 e INV-07. Argon2id mediante `@node-rs/argon2` versión exacta `2.2.2` en backends generados con Auth; `engines.node: "^24.0.0 || >=26.0.0"` inalterado sin alternativas en `node:crypto`, bcrypt ni scrypt y con paridad JS/TS (D-091); parámetros explícitos `m=19456 KiB, t=2, p=1, outputLen=32`, salt aleatorio de 16 bytes, formato PHC canónico en Base64 convencional sin padding (no Base64URL) y rehash tras login válido (D-092); y controles de seguridad obligatorios: asincronía estricta en HTTP, validación defensiva previa de parámetros PHC para evitar DoS por memoria/CPU, verificación simulada (dummy) contra enumeración por tiempo, limitador de concurrencia acotado independiente del rate limiting, y política de entrada de 128 caracteres / 512 bytes UTF-8 (D-093). Quedan como pendientes técnicos de concreción en diseño/implementación los límites numéricos defensivos exactos y pruebas en Docker / sin dependencias opcionales.
 - Ciclo de vida de sesión con expiración deslizante por inactividad y límite absoluto; revocación efectiva inmediata; actualización de actividad segura frente a concurrencia; rotación controlada en eventos sensibles; sin esquema access+refresh rotativo en v1 (D-088).
 - Cookies de sesión con configuración estricta: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, sin `Domain`, y nombre de cookie específico por proyecto para evitar colisiones en `localhost` (D-089).
 - Protección CSRF obligatoria en operaciones mutables autenticadas por cookies mediante comprobaciones de origen y mecanismos adicionales (D-089).
@@ -695,7 +697,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 11. **Reproducibilidad de las plantillas** (P-008) tras las versiones resueltas de T-020.
 12. **Protección de tags `v*`** en el repositorio (cambio de configuración no autorizado en T-019).
 
-Dependen de evidencia (no se deciden antes): hash de contraseñas (INV-07 / P-009), parámetros temporales de inactividad/límite absoluto y rotación de identificadores de sesión (D-088), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), soporte de políticas RLS en Drizzle y evaluación de rendimiento de RLS en PostgreSQL (INV-04a / T-014c), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy (credenciales opacas, transporte exclusivo de cookies en fullstack, CSRF y React Router resueltos por D-087 a D-090).
+Dependen de evidencia (no se deciden antes): parámetros temporales de inactividad/límite absoluto y rotación de identificadores de sesión (D-088), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), soporte de políticas RLS en Drizzle y evaluación de rendimiento de RLS en PostgreSQL (INV-04a / T-014c), límites defensivos exactos y capacidad del limitador para Argon2id (pendientes técnicos de D-092 y D-093), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy (credenciales opacas, transporte exclusivo de cookies en fullstack, CSRF y React Router resueltos por D-087 a D-090; hash de contraseñas resuelto por D-091 a D-093 tras INV-07).
 
 ## 12. Regla de actualización
 
@@ -713,7 +715,7 @@ Al completar una tarea: actualizar su estado y su aprobación, registrar las ver
 | TP-06 (Zod) | T-017b | D-061 |
 | TP-07 (Nginx y `trust proxy`) | T-017b | Verificar contra el archivo actual |
 | TP-08 (reproducibilidad) | P-008 | Decisión; se informa con T-020 |
-| TP-09 (Argon2 y PHC) | INV-07 | |
+| TP-09 (Argon2 y PHC) | INV-07 | COMPLETADA (resuelta P-009 en D-091 a D-093) |
 | TP-10 (piloto TS→JS) | INV-08 | |
 | TP-11 (composición) | T-017a y T-017a-ui | |
 | TP-12 (OpenAPI y Express 5.3.0) | T-020, prueba 4 | Diseño posterior dentro de T-017a |

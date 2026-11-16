@@ -277,9 +277,9 @@ La inspección del 2026-11-07 indica que las plantillas no tienen lockfile y que
 
 ### P-009 — Hash de contraseñas y rango de Node
 
-**Estado:** Pendiente de evidencia (INV-01, INV-07).
+**Estado:** Resuelta (D-091 a D-093).
 
-`crypto.argon2` existe desde Node 24.7.0 (reportado) y `engines.node` admite `^24.0.0`. Con `@types/node` 26.x en el backend TypeScript, el código compilaría aunque el runtime fuera una versión anterior (inferencia). La estabilidad de la API por versión no está verificada en documentación oficial. El anexo de INV-01 usa Base64URL en el formato del hash: no debe llamarse PHC sin aclarar que es una variante. Candidatos: Argon2id `m=19456, t=2, p=1` con `crypto.argon2` y `engines` propio del proyecto generado, o una librería externa. Ninguna está aprobada.
+Resuelta mediante la consolidación de decisiones arquitectónicas tras las investigaciones INV-01 e INV-07: adopción de Argon2id como único algoritmo de hashing para contraseñas en Auth v1 mediante la librería externa `@node-rs/argon2` versión exacta `2.2.2`, incorporada únicamente a los backends generados con Auth y manteniendo `engines.node: "^24.0.0 || >=26.0.0"` sin implementaciones alternativas en `node:crypto`, bcrypt ni scrypt y con paridad funcional entre JS y TS (D-091); parámetros explícitos `m=19456 KiB, t=2, p=1, outputLen=32`, salt criptográficamente aleatorio de 16 bytes, almacenamiento en formato PHC canónico en Base64 convencional sin padding (no Base64URL) y soporte de rehash tras autenticación válida (D-092); y seguridad operativa obligatoria: asincronía estricta en peticiones HTTP, validación defensiva previa de parámetros PHC para evitar DoS por memoria/CPU, verificación ficticia (dummy) contra enumeración por tiempo, limitador de concurrencia acotado independiente del rate limiting, y política de entrada de 128 caracteres / 512 bytes UTF-8 (D-093). Quedan como pendientes técnicos de diseño e implementación los límites defensivos exactos y compatibilidad con rehash, capacidad y saturación del limitador de concurrencia, manejo de errores y mitigación de enumeración, pruebas en contenedores con memoria restringida y verificación de binarios nativos sin dependencias opcionales.
 
 ### P-010 — Sesiones, transporte, CSRF y router
 
@@ -1011,7 +1011,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Nota de precisión de alcance sobre transporte (D-089):** El alcance relativo a los transportes de autenticación fue precisado expresamente por D-089: en fullstack (React + Express) se generan exclusivamente cookies en v1 (Bearer no se ofrece en fullstack); en backend independiente se selecciona entre cookies o Bearer, sin admitir mezcla simultánea en un mismo proyecto ni soporte automático general de cookies cross-site en v1.
 
-**Pendiente de evidencia o decisión:** hash de contraseñas (P-009 / INV-07), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL (INV-04a / T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017).
+**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL (INV-04a / T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093).
 
 ---
 
@@ -1487,6 +1487,71 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-091 — Algoritmo de hash de contraseñas: Argon2id mediante @node-rs/argon2 2.2.2 y mantenimiento del rango de Node.js
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-009.1 tras INV-01 e INV-07).
+
+**Contexto:** Se requería definir el algoritmo e implementación para el hash de contraseñas en Auth v1, evaluando la disponibilidad de `crypto.argon2` en Node.js, la compatibilidad con el rango declarado en `engines.node` (`^24.0.0 || >=26.0.0`), las discrepancias de tipos en TypeScript y la necesidad de dependencias externas.
+
+**Decisión:**
+- Se adopta **Argon2id como único algoritmo de hashing para contraseñas en Auth v1**.
+- Se utiliza la biblioteca externa **`@node-rs/argon2` versión exacta `2.2.2`**.
+- La dependencia se incorpora **únicamente a los backends generados que incluyan autenticación** (Auth).
+- Se mantiene inalterado el rango de Node.js en los proyectos generados: **`engines.node: "^24.0.0 || >=26.0.0"`**, sin elevar el mínimo de Node.js a 24.7.0.
+- No se generará ninguna implementación alternativa mediante `node:crypto`, bcrypt o scrypt.
+- Mismo comportamiento funcional idéntico para las variantes en JavaScript y TypeScript.
+
+**Motivo:** La investigación INV-07 verificó en fuentes oficiales y en ejecución que `crypto.argon2` no existe en Node 24.0.0–24.6.x (incorporado en v24.7.0), y que con `@types/node` 26.x el compilador TypeScript no detectaría la incompatibilidad en tiempo de compilación, provocando fallos en ejecución para usuarios en versiones de Node inferiores a 24.7.0. `@node-rs/argon2` ofrece bindings nativos Rust (NAPI-RS) con binarios precompilados multiplataforma, no contiene scripts de instalación en npm (`postinstall: false`, compatible con la política de seguridad y `allowScripts` de Brixa), proporciona formato PHC canónico sin código artesanal y preserva el rango amplio de compatibilidad de Node.js.
+
+---
+
+### D-092 — Parámetros de Argon2id, formato PHC canónico y estrategia de rehash
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-009.2 tras INV-01 e INV-07).
+
+**Contexto:** Se requería establecer los parámetros de coste computacional y de memoria de Argon2id, el formato de serialización para almacenamiento en base de datos y la capacidad de evolución ante futuros incrementos de coste.
+
+**Decisión:**
+- Parámetros criptográficos fijados:
+  - **Memory cost ($m$):** `19456 KiB` (19 MiB).
+  - **Time cost ($t$):** `2` pasadas.
+  - **Parallelism ($p$):** `1` hilo.
+  - **Output length:** `32 bytes`.
+  - **Salt:** `16 bytes` criptográficamente aleatorios por credencial.
+- Todos los parámetros se establecen de manera **explícita en el código generado**, sin depender de los valores por defecto de la biblioteca.
+- Almacenamiento en **formato PHC estándar** canónico (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`), codificado en **Base64 convencional sin padding** (`[A-Za-z0-9+/]`). Queda expresamente descartado el uso de Base64URL (`-` y `_`), corrigiendo la variante reportada en el anexo de INV-01.
+- Soporte de **rehash transparente**: el sistema debe identificar hashes almacenados con parámetros o versiones antiguas y actualizar su coste rehasheando la contraseña en la base de datos inmediatamente después de una autenticación válida.
+
+**Motivo:** Los parámetros adoptan las recomendaciones de seguridad actuales y el equilibrio medido en INV-01 (~60 ms de CPU y 19 MiB por hash en entornos contenidos). El formato PHC canónico con Base64 sin padding garantiza interoperabilidad total entre herramientas y librerías estándar. El rehash permite evolucionar la seguridad en el tiempo sin requerir restablecimientos forzados de contraseñas.
+
+---
+
+### D-093 — Seguridad operativa del módulo de hash: asincronía, validación defensiva, limitación de concurrencia y mitigación de enumeración
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-009.3 tras INV-01 e INV-07).
+
+**Contexto:** Se requería definir los controles de seguridad operativa para prevenir ataques de denegación de servicio (DoS) por consumo de CPU o memoria, bloqueos del bucle de eventos y ataques de canal lateral / enumeración por temporización.
+
+**Decisión:**
+- **Asincronía estricta:** utilizar exclusivamente las APIs asíncronas (`argon2.hash`, `argon2.verify`) para operaciones de hashing y verificación en peticiones HTTP, garantizando la delegación a hilos de fondo sin bloquear jamás el Event Loop de Express.
+- **Validación defensiva previa de parámetros PHC:** antes de invocar la verificación sobre un hash existente, se deben parsear y validar defensivamente sus parámetros (`m`, `t`, `p`, longitud de salt y hash). Si los parámetros superan los límites defensivos permitidos, la verificación se aborta inmediatamente sin ejecutar Argon2id, evitando ataques DoS de agotamiento de memoria o CPU mediante hashes adulterados (evidencia INV-07).
+- Los límites defensivos deben ser **explícitos y compatibles con una futura actualización de parámetros**, no valores máximos universales inmutables.
+- **Mitigación de enumeración por temporización (hash ficticio / dummy):** cuando una cuenta solicitada en el login no exista, el backend debe ejecutar una verificación ficticia con un hash Argon2id dummy previamente preparado en memoria, haciendo que el tiempo de respuesta sea indistinguible respecto a una cuenta existente.
+- **Limitador de concurrencia:** restringir las operaciones Argon2id concurrentes en el proceso Node.js mediante una cola acotada con manejo seguro de saturación (rechazo controlado cuando la cola esté llena), protegiendo al contenedor frente a OOM kills bajo ráfagas de peticiones.
+- **Independencia de rate limiting:** el limitador de concurrencia protege la memoria local del proceso y no sustituye al rate limiting de autenticación, que debe operar de forma independiente en capas previas.
+- **Política inicial de entrada:** contraseñas entrantes limitadas a un máximo de **128 caracteres** y **512 bytes UTF-8**, rechazando excesos con error de validación sin truncamiento silencioso.
+- **Pendientes técnicos por concretar en diseño e implementación (T-014-0 / T-014a):**
+  - Límites defensivos exactos para parámetros PHC y su compatibilidad con la política de rehash.
+  - Capacidad de la cola y política de saturación del limitador de concurrencia.
+  - Manejo unificado de errores y mitigación de enumeración.
+  - Comportamiento en contenedores con memoria restringida.
+  - Compatibilidad de binarios nativos y manejo de instalaciones sin dependencias opcionales.
+  - Batería de pruebas: hashing, verificación, Unicode, manipulación PHC y rehash.
+
+**Motivo:** La evaluación empírica de INV-01 e INV-07 demostró que hashes no validados con $m$ excesivo saturan instantáneamente la memoria del proceso, y que la concurrencia descontrolada agota los límites del contenedor. Los controles establecidos mitigan DoS por memoria, DoS por CPU, enumeración por timing y desbordamiento de entrada.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1505,7 +1570,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-010, resuelta en D-087 a D-090, y P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a hash de contraseñas (P-009 / INV-07), estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), invitaciones y reglas de delegación.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; y P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), invitaciones y reglas de delegación.
 - Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
