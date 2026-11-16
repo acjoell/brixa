@@ -1247,6 +1247,50 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-077 — Eliminación de sobrescritura de tsconfig.json e inserción en Docker Compose
+
+**Estado:** Confirmada (2026-11-15).
+
+**Contexto:** La auditoría de overlays identificó que el overlay `api-docs` reemplazaba completamente `backend/tsconfig.json` únicamente para declarar `"resolveJsonModule": true`. Asimismo, la inyección de `ENABLE_API_DOCS` en Docker Compose dependía de una sustitución frágil con expresión regular en `appendComposeApiDocsEnv`, y `applyApiDocsOverlay` mutaba imperativamente `allowScripts["@scarf/scarf"]`.
+
+**Decisión:**
+- Añadir `"resolveJsonModule": true` a la plantilla base `src/templates/backend-express-ts/tsconfig.json` y eliminar definitivamente el archivo `src/templates/api-docs/ts/tsconfig.json`, sin requerir un motor de combinación estructural de JSON para un solo campo.
+- Sustituir la sustitución regex en Compose por el marcador `# @@INSERT:api-docs-env@@` en las plantillas `compose.*.yaml`, resuelto mediante inserción explícita y limpieza vía `cleanupComposeInsertionPoints`.
+- Integrar la clave `allowScripts` dentro del esquema de fusión determinista `PackageJsonOverlay` y `mergeSection` en `mergePackageJson`.
+
+**Consecuencias:** Desaparece la sobrescritura silenciosa de `tsconfig.json` en backend; la inyección de entorno en Compose falla ruidosamente si falta el marcador en lugar de fallar en silencio o mutar bloques inesperados.
+
+---
+
+### D-078 — Fusión determinista e idempotente de .env.example
+
+**Estado:** Confirmada (2026-11-15).
+
+**Contexto:** Los overlays (`postgres`, `sqlite`, `docker-postgres`, `api-docs`) agregaban variables a `.env.example` mediante concatenaciones textuales simples, lo que impedía detectar variables duplicadas o inconsistencias de configuración entre capacidades.
+
+**Decisión:**
+- Implementar `parseEnvAssignments` y `mergeEnvExample` en `src/generator/generate.ts`.
+- Las asignaciones activas se identifican por nombre de variable mediante `/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/`, ignorando líneas vacías y comentarios (`#`).
+- Si todas las variables de un bloque ya existen con idéntico valor, la operación es idempotente y no añade duplicados.
+- Si una variable ya existe con un valor diferente, lanza un error explícito identificando al contribuyente en conflicto.
+- Se preservan intactos el formato, los comentarios de documentación y los saltos de línea de los bloques existentes y añadidos.
+
+---
+
+### D-079 — Composición no destructiva de frontend (main, App y vite.config)
+
+**Estado:** Confirmada (2026-11-15).
+
+**Contexto:** La auditoría de composición reveló que el overlay `i18n` reemplazaba completamente `src/main.{jsx,tsx}` para añadir un import de inicialización y mantenía una copia de `src/App.{jsx,tsx}` que duplicaba aproximadamente el 90 % del componente base para inyectar `LanguageSelector` y llamadas a `t()`. Además, la modalidad `fullstack` reemplazaba completamente `vite.config.{js,ts}` para configurar el proxy.
+
+**Decisión:**
+- `main.{jsx,tsx}`: se añadió el marcador `// @@INSERT:imports@@` a las plantillas base. El overlay `i18n` inyecta `import './i18n.${ext}'` mediante `resolveInsertionPoints`.
+- `App.{jsx,tsx}`: se extrajo el contenido variable y el selector a un hook `useAppContent.{jsx,tsx}`. La plantilla base provee textos en inglés por defecto y `LanguageSelector: () => null`. El overlay `i18n` provee la implementación reactiva con `useTranslation`, `Trans` y `LanguageSelector`. `App.{jsx,tsx}` es único y común para todas las combinaciones, eliminando la duplicación en `i18n`.
+- `vite.config.{js,ts}`: se declararon los marcadores `// @@INSERT:imports@@` y `// @@INSERT:config@@`. `applyFullstackViteProxy` inyecta el proxy únicamente en modalidad `fullstack`, eliminando los archivos duplicados de `src/templates/fullstack/`.
+- Limpieza determinista: se implementó `cleanupUnresolvedFrontendInsertionPoints` con `KNOWN_FRONTEND_INSERTION_POINTS = new Set(["imports", "config"])` para remover limpiamente los marcadores no utilizados en frontend independiente o sin i18n.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1266,12 +1310,12 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
 - Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017.
-- `tsconfig.json` de `api-docs`: el overlay aún reemplaza el archivo completo en TypeScript en lugar de componerlo (pendiente de composición estructural de JSON, T-017a).
-- Composición pendiente: `.env.example`, `compose.yaml` y frontend (`App`, `main`, `vite.config`) carecen de puntos de inserción; hoy siguen dependiendo de añadidos de texto o reemplazos de archivo.
+- `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
+- Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
 - Orden explícito entre overlays: la ordenación por punto de código del nombre del contribuyente (`compareCodePoints`) es determinista pero arbitraria si un overlay depende semánticamente de otro.
 - Frontend sin Prettier: las plantillas de frontend no incluyen `.prettierrc`, dependencia de Prettier ni script `format:check`.
 - Alcance de `redact` (D-073): cubre URLs con credenciales, cabeceras `Authorization` / `Proxy-Authorization`, tokens Bearer, cookies, `password`, `access_token`, `refresh_token`, `auth_token`, `token` y claves que terminen en `_secret`. No cubre: `apiKey`, `privateKey`, `clientSecretKey`, valores PEM multilínea. Decidir con errores reales antes de ampliar las regex indiscriminadamente.
-- ReDoS en `redact` (D-073): la regla de URLs (esquema sin límite de longitud) tiene comportamiento cuadrático medido (10 KB ≈ 74 ms, 50 KB ≈ 1.830 ms, 100 KB ≈ 7.319 ms); la regla de valores entrecomillados con comilla sin cierre tarda ≈ 2 s con 50 KB. **Prioritario:** corregir con aserciones de tiempo en los tests ANTES de conectar `redact` al manejador global de errores en contextos con entradas no controladas. Hoy solo se usa en arranque, cierre y migradores.
+- ReDoS en `redact`: resuelto por D-076 y verificado en T-022 (prefiltro `includes("://")`, esquemas `{0,63}`, clases negadas con escapes en comillas y backticks, aserciones en Worker y pruebas HTTP con JSON malformado).
 - X-Frame-Options: el backend emite `SAMEORIGIN` (valor por defecto de Helmet, D-074) mientras que la SPA emite `DENY` (D-075). Diferencia conocida pendiente de unificar.
 - Cabeceras de la SPA solo con Docker (D-075): el servidor de desarrollo de Vite no las emite; quien despliegue sin el Nginx generado debe configurarlas en su hosting. Las respuestas 502 de Nginx (backend caído) no incluyen las cabeceras de `location /`.
 - El arnés de `verify:generated` no comprueba cabeceras de seguridad HTTP en las respuestas reales (D-075): una regresión solo la detectarían los tests unitarios. Mejora opcional.

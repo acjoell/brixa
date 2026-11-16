@@ -58,8 +58,8 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-07 | PENDIENTE | — |
 | INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
 | T-014-0 | BLOQUEADA | Decisiones de INV-03, INV-04a, INV-04b e INV-05b; P-011 |
-| T-017a | PARCIAL (Fase 1 backend completada; D-069) | Decisiones P-012 y P-013 (T-019 e INV-05a/05b ya hechas) |
-| T-017a-ui | BLOQUEADA | T-017a, INV-03 (router) |
+| T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
+| T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
 | T-018 | BLOQUEADA | T-017b, INV-06 |
 | T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-03, INV-07 (composición backend requerida ya disponible vía D-069) |
@@ -299,64 +299,62 @@ Notas:
 
 ### T-017a — Composición de overlays: backend
 
-**Estado:** PARCIAL (Fase 1 completada en backend para `app`, `index` y `package.json` según D-069, commit `3db1992`; pendiente `tsconfig.json`, `.env.example` y `compose.yaml`)
-**Aprobación:** Aprobado (D-069).
-**Dependencias:** Fase 1 completada. Pendiente de P-012 para `tsconfig` y `compose.yaml`.
+**Estado:** COMPLETADA (2026-11-15)
+**Aprobación:** Aprobado (D-069, D-077, D-078).
+**Dependencias:** Fase 1 completada (D-069). Fase 2 completada (D-077, D-078).
 
 **Objetivo:** permitir que varias capacidades modifiquen los mismos archivos sin pisarse, con el mecanismo más simple que funcione. No es un sistema universal.
 
 **Alcance y estado por archivo:**
 
-| Archivo | Estrategia | Estado a 2026-11-09 |
+| Archivo | Estrategia | Estado a 2026-11-15 |
 |---|---|---|
 | `app` e `index` | Puntos de inserción (`imports`, `routes`, `startup`) con orden por punto de código UTF-16 | **COMPLETADO (Fase 1, D-069)** en `src/generator/insertions.ts` y plantillas backend |
-| `package.json` | Fusión determinista con detección de conflicto por igualdad profunda (`mergeSection`) | **COMPLETADO (Fase 1, D-069)** en `src/generator/generate.ts` |
-| `tsconfig` | Combinación estructurada de JSON con detección de conflictos | **PENDIENTE**: `api-docs` sigue reemplazándolo completo |
-| `openapi.json` | Combinación de rutas y componentes con detección de colisiones | PENDIENTE |
-| `compose.yaml` | Composición de servicios (estructurada o textual) | PENDIENTE: hoy se copia entero |
-| `.env.example` | Contribuciones ordenadas sin duplicados | PENDIENTE: hoy usa añadidos de texto |
+| `package.json` | Fusión determinista con detección de conflicto por igualdad profunda (`mergeSection`) | **COMPLETADO (Fase 1, D-069, D-077)** en `src/generator/generate.ts` |
+| `tsconfig` | Declaración de `resolveJsonModule: true` en plantilla base y eliminación del archivo en overlay | **COMPLETADO (D-077)** en `src/templates/backend-express-ts/tsconfig.json` |
+| `openapi.json` | Combinación de rutas y componentes con detección de colisiones | PENDIENTE (actualmente solo aportado por `api-docs`; diferido a T-014a/b cuando múltiples capacidades aporten rutas) |
+| `compose.yaml` | Inserción explícita de variables de entorno mediante `# @@INSERT:api-docs-env@@` y limpieza | **COMPLETADO (D-077)** en `src/templates/docker/` y `generate.ts` |
+| `.env.example` | Fusión determinista e idempotente por nombre de variable con detección de colisiones | **COMPLETADO (D-078)** (`parseEnvAssignments` y `mergeEnvExample`) |
 
-**Áreas afectadas:** **[L]** plantillas backend (`src/templates/backend-express-ts`, `backend-express-js`) y sus `app`/`index`; overlay `api-docs` (ts y js) con `_fragments/`, `tsconfig.json` y `docs/openapi.json`; overlay `docker` (`compose.*.yaml`); `.env.example` de las plantillas backend; `src/generator/generate.test.ts`. **[I]** `src/generator/generate.ts`, `src/generator/insertions.ts`, `scripts/verify-generated.js`, `src/verified-variants.ts`.
+**Áreas afectadas:** **[L]** plantillas backend (`src/templates/backend-express-ts`, `backend-express-js`) y sus `app`/`index`; overlay `api-docs` (ts y js) con `_fragments/` y `docs/openapi.json`; overlay `docker` (`compose.*.yaml`); `.env.example` de las plantillas backend; `src/generator/generate.test.ts`. **[I]** `src/generator/generate.ts`, `src/generator/insertions.ts`, `scripts/verify-generated.js`, `src/verified-variants.ts`.
 
-**Criterios de aceptación (Fase 1 verificada):**
+**Criterios de aceptación satisfechos:**
 - Orden determinista: la misma entrada produce la misma salida, byte a byte (orden por `compareCodePoints`).
 - Un punto de inserción sin contribuyente se elimina sin dejar rastro.
 - Un marcador sin resolver o desconocido en la salida hace fallar el generador.
-- Una contribución duplicada o colisión en `package.json` produce un error que nombra a los contribuyentes.
-- El overlay `api-docs` deja de reemplazar `app` e `index`.
-- Las 32 variantes verificadas generan un árbol idéntico al anterior a la tarea (salvo `validate-env`) y `verify:generated` da el mismo resultado.
+- Una contribución duplicada o colisión en `package.json` o `.env.example` produce un error que nombra a los contribuyentes.
+- El overlay `api-docs` deja de reemplazar `app`, `index` y `tsconfig.json`.
+- Fusión idempotente de `.env.example` que preserva comentarios y formato.
+- Inserción en Compose falla con ruido si falta el marcador.
+- Verificación: 140 pruebas en verde (`npm test`), `typecheck`, `lint`, `format:check`, `build` y `verify:generated` completo superados.
 
-**Pruebas positivas:** composición probada en `insertions.test.ts` y `generate.test.ts` con lint, tipos y tests en verde.
-**Pruebas negativas:** contribución a punto desconocido, contribución duplicada, marcador sin resolver, conflicto en `package.json`.
-**Verificaciones:** `typecheck`, `lint`, `format:check`, `test`, `build` y `verify:generated`.
-
-**Estado real (2026-11-09):** Fase 1 implementada en commit `3db1992`. `api-docs` aporta fragmentos en `_fragments/` (excluidos de la copia recursiva en `copyDir`). Resto de archivos (`tsconfig.json`, `.env.example`, `compose.yaml`) pendientes de siguientes fases.
-
-**Riesgos y limitaciones:** el orden determinista por nombre de contribuyente es arbitrario; cuando un overlay dependa de otro se requerirá orden explícito.
+**Riesgos y limitaciones:** el orden determinista por nombre de contribuyente es arbitrario; cuando un overlay dependa de otro se requerirá orden explícito. La combinación estructural de múltiples documentos OpenAPI queda pendiente para cuando Auth o RBAC añadan rutas documentadas.
 
 ---
 
 ### T-017a-ui — Composición de overlays: frontend
 
-**Estado:** BLOQUEADA (por T-017a y por la decisión del router, P-010)
-**Aprobación:** Aprobado (alcance).
-**Dependencias:** T-017a, INV-03 (decisión del router).
+**Estado:** COMPLETADA (2026-11-15)
+**Aprobación:** Aprobado (D-079).
+**Dependencias:** T-017a.
 
-**Objetivo:** que las vistas de autenticación y el panel convivan con i18n y con el proxy de la aplicación completa.
+**Objetivo:** que las capacidades opcionales convivan con i18n y con el proxy de la aplicación completa sin reemplazar archivos de plantilla base ni duplicar componentes.
 
 **Alcance:**
-- Composición de `App` y `main` para proveedores y, si INV-03 lo recomienda, router (React Router no está instalado en Brixa [INSP]). El overlay de i18n los reemplaza hoy [INSP].
-- Sin i18n no se añaden archivos de traducción: la propuesta de INV-05a de generar siempre `en.json` contradice D-052 («sin cambiar la generación de quien no la selecciona») y no se adopta salvo decisión expresa.
-- Combinación de archivos de traducción por clave, sin sobrescritura silenciosa.
-- Composición del overlay de `vite.config` de la aplicación completa.
+- Composición de `main.{jsx,tsx}`: punto de inserción `// @@INSERT:imports@@` en la plantilla base; el overlay `i18n` inyecta la inicialización de i18n sin sustituir el archivo completo.
+- Composición de `App.{jsx,tsx}`: extracción del contenido dependiente de idioma y del selector al hook `useAppContent.{jsx,tsx}`. La base proporciona valores por defecto y selector nulo; `i18n` proporciona la integración reactiva con `useTranslation` y `Trans`. `App` permanece como fuente única de verdad sin duplicaciones.
+- Composición de `vite.config.{js,ts}`: declaración de marcadores `imports` y `config`. En modalidad fullstack se compone el proxy mediante `applyFullstackViteProxy`; en frontend independiente los marcadores se limpian mediante `cleanupUnresolvedFrontendInsertionPoints`.
+- Auditoría de overlays: completada, sin sobrescrituras silenciosas de archivos compartidos.
 
-**Áreas afectadas:** **[L]** `src/templates/frontend-react-ts` y `frontend-react-js` (`App`, `main`), `src/templates/i18n/{ts,js}` (`App`, `main`, `locales/en.json`, `locales/es.json`), `src/templates/fullstack/vite.config.{ts,js}`.
+**Áreas afectadas:** **[L]** `src/templates/frontend-react-ts` y `frontend-react-js` (`App`, `main`, `useAppContent`, `vite.config`), `src/templates/i18n/{ts,js}` (`useAppContent`, eliminados `App` y `main`), `src/templates/fullstack/` (eliminados `vite.config.{js,ts}`). **[I]** `src/generator/generate.ts`, `src/generator/insertions.ts`, `src/generator/generate.test.ts`.
 
-**Criterios de aceptación:** los de T-017a aplicados al frontend. Las variantes con i18n verificadas hoy siguen pasando `check:i18n`, el renderizado por idioma y la persistencia.
-**Pruebas negativas:** clave de traducción duplicada con valores distintos; idioma con claves faltantes tras la composición; marcador sin resolver.
-**Pruebas positivas / verificaciones:** igual que T-017a, más las variantes con i18n.
+**Criterios de aceptación satisfechos:**
+- Ausencia de marcadores sin resolver en `main` y `vite.config` en variantes con y sin i18n / fullstack.
+- Variantes con i18n pasan `check:i18n`, renderizado SSR bilingüe (inglés/español con `scripts/verify-i18n-v2.js`) y `verify:generated`.
+- Pruebas unitarias de composición frontend añadidas a `generate.test.ts`.
+- Pruebas negativas: marcadores no declarados en frontend lanzan error explícito.
 
-**Riesgos:** T-014a-ui queda bloqueada si esta tarea no está completa.
+**Nota sobre Router:** la selección y configuración de un router para vistas de autenticación se abordará en `T-014a-ui` cuando se requieran rutas de interfaz adicionales.
 
 ---
 

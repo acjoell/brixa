@@ -25,6 +25,11 @@ export const KNOWN_INSERTION_POINTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Lista de puntos de inserción declarados en las plantillas de frontend.
+ */
+export const KNOWN_FRONTEND_INSERTION_POINTS: ReadonlySet<string> = new Set(["imports", "config"]);
+
+/**
  * Comparación determinista por punto de código (independiente de locale/ICU).
  */
 export function compareCodePoints(a: string, b: string): number {

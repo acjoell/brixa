@@ -11,7 +11,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type UserOptions, type Modality, type Database, type Language } from "../types.js";
 import { isVerified, variantLabel } from "../verified-variants.js";
-import { resolveInsertionPoints, cleanupInsertionPoints, type InsertionMap } from "./insertions.js";
+import {
+  resolveInsertionPoints,
+  cleanupInsertionPoints,
+  KNOWN_FRONTEND_INSERTION_POINTS,
+  type InsertionMap,
+} from "./insertions.js";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -191,15 +196,85 @@ export function mergePackageJson(
 // Modificadores de archivos para persistencia PostgreSQL
 // ---------------------------------------------------------------------------
 
+/**
+ * Parsea las asignaciones activas de un archivo .env / .env.example.
+ * Ignora líneas vacías y comentarios (líneas que empiezan con #).
+ */
+export function parseEnvAssignments(content: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (match && match[1] !== undefined && match[2] !== undefined) {
+      map.set(match[1], match[2]);
+    }
+  }
+  return map;
+}
+
+/**
+ * Fusiona de forma idempotente un bloque de variables de entorno en el contenido existente.
+ *
+ * - Si todas las variables del bloque ya existen con el mismo valor, no modifica el contenido.
+ * - Si alguna variable ya existe con un valor diferente, lanza un Error explícito que nombra al contribuyente.
+ * - Si contiene variables nuevas sin colisión, añade el bloque preservando comentarios y formato.
+ */
+export function mergeEnvExample(
+  existingContent: string,
+  newBlock: string,
+  contributorLabel: string,
+): string {
+  const existingVars = parseEnvAssignments(existingContent);
+  const newVars = parseEnvAssignments(newBlock);
+
+  if (newVars.size === 0) {
+    return existingContent;
+  }
+
+  let allExistSame = true;
+  for (const [key, value] of newVars.entries()) {
+    if (existingVars.has(key)) {
+      const existingVal = existingVars.get(key) ?? "";
+      if (existingVal !== value) {
+        throw new Error(
+          `Conflicto en .env.example al aplicar '${contributorLabel}': la variable '${key}' ya existe con un valor diferente (actual: '${existingVal}', nuevo: '${value}').`,
+        );
+      }
+    } else {
+      allExistSame = false;
+    }
+  }
+
+  if (allExistSame) {
+    return existingContent;
+  }
+
+  const separator = existingContent.length > 0 && !existingContent.endsWith("\n") ? "\n" : "";
+  const blockWithNewline = newBlock.endsWith("\n") ? newBlock : `${newBlock}\n`;
+  return `${existingContent}${separator}${blockWithNewline}`;
+}
+
+async function appendEnvBlock(
+  envPath: string,
+  block: string,
+  contributorLabel: string,
+): Promise<void> {
+  let existing: string;
+  try {
+    existing = await fs.readFile(envPath, "utf-8");
+  } catch {
+    existing = "";
+  }
+  const merged = mergeEnvExample(existing, block, contributorLabel);
+  await fs.writeFile(envPath, merged, "utf-8");
+}
+
 async function appendEnvExample(envPath: string): Promise<void> {
   const line = "DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD\n";
-  try {
-    const existing = await fs.readFile(envPath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
-  } catch {
-    await fs.writeFile(envPath, line, "utf-8");
-  }
+  await appendEnvBlock(envPath, line, "PostgreSQL");
 }
 
 async function appendBackendReadmeDatabase(readmePath: string): Promise<void> {
@@ -300,13 +375,7 @@ async function applyPostgresOverlay(targetBackendDir: string, language: Language
 
 async function appendEnvExampleSqlite(envPath: string): Promise<void> {
   const line = "DATABASE_URL=file:./data/app.db\n";
-  try {
-    const existing = await fs.readFile(envPath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
-  } catch {
-    await fs.writeFile(envPath, line, "utf-8");
-  }
+  await appendEnvBlock(envPath, line, "SQLite");
 }
 
 async function appendGitignoreSqlite(gitignorePath: string): Promise<void> {
@@ -424,20 +493,13 @@ async function applySqliteOverlay(targetBackendDir: string, language: Language):
 // ---------------------------------------------------------------------------
 
 async function appendEnvExampleDockerPostgres(envPath: string): Promise<void> {
-  const content = `
-# Configuración para Docker Compose
+  const content = `# Configuración para Docker Compose
 # POSTGRES_PASSWORD es obligatoria para docker compose y debe ser alfanumérica.
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=ejemplo123
 POSTGRES_DB=app
 `;
-  try {
-    const existing = await fs.readFile(envPath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(envPath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(envPath, content.trimStart(), "utf-8");
-  }
+  await appendEnvBlock(envPath, content, "Docker PostgreSQL");
 }
 
 async function appendBackendReadmeDocker(
@@ -651,13 +713,7 @@ async function applyFullstackDockerOverlay(
 async function appendEnvExampleApiDocs(envPath: string): Promise<void> {
   const line =
     "# Documentación de API (OpenAPI/Swagger UI). No habilitar en producción sin una decisión explícita.\nENABLE_API_DOCS=false\n";
-  try {
-    const existing = await fs.readFile(envPath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(envPath, `${existing}${separator}${line}`, "utf-8");
-  } catch {
-    await fs.writeFile(envPath, line, "utf-8");
-  }
+  await appendEnvBlock(envPath, line, "API Docs");
 }
 
 async function appendBackendReadmeApiDocs(readmePath: string): Promise<void> {
@@ -717,17 +773,32 @@ La especificación OpenAPI reside en \`backend/src/docs/openapi.json\` y se mant
   }
 }
 
-async function appendComposeApiDocsEnv(composePath: string): Promise<void> {
+export const COMPOSE_API_DOCS_MARKER = "# @@INSERT:api-docs-env@@";
+
+export async function appendComposeApiDocsEnv(composePath: string): Promise<void> {
+  const content = await fs.readFile(composePath, "utf-8");
+  if (content.includes("ENABLE_API_DOCS")) {
+    return;
+  }
+  if (!content.includes(COMPOSE_API_DOCS_MARKER)) {
+    throw new Error(
+      `No se encontró el punto de inserción "${COMPOSE_API_DOCS_MARKER}" en ${composePath}.`,
+    );
+  }
+  const updated = content.replace(
+    COMPOSE_API_DOCS_MARKER,
+    'ENABLE_API_DOCS: "${ENABLE_API_DOCS:-false}"',
+  );
+  await fs.writeFile(composePath, updated, "utf-8");
+}
+
+export async function cleanupComposeInsertionPoints(composePath: string): Promise<void> {
   try {
     const content = await fs.readFile(composePath, "utf-8");
-    if (content.includes("ENABLE_API_DOCS")) {
-      return;
+    const cleaned = content.replace(/^[ \t]*# @@INSERT:[A-Za-z0-9_-]+@@\r?\n?/gm, "");
+    if (cleaned !== content) {
+      await fs.writeFile(composePath, cleaned, "utf-8");
     }
-    const updated = content.replace(
-      /(services:\s*\n\s*backend:\s*\n(?:.*\n)*?\s*environment:\s*\n)/,
-      `$1      ENABLE_API_DOCS: "\${ENABLE_API_DOCS:-false}"\n`,
-    );
-    await fs.writeFile(composePath, updated, "utf-8");
   } catch {
     // Si no existe compose.yaml, no hacer nada
   }
@@ -747,7 +818,7 @@ async function readFragment(overlayDir: string, name: string): Promise<string[]>
 async function applyApiDocsOverlay(targetBackendDir: string, language: Language): Promise<void> {
   const overlayDir = path.join(templatesDir(), "api-docs", language);
 
-  // 1. Copiar archivos del overlay (docs/, tests/, tsconfig.json si existe).
+  // 1. Copiar archivos del overlay (docs/, tests/).
   //    _fragments/ se omite automáticamente por la convención de copyDir.
   await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
 
@@ -801,11 +872,6 @@ async function applyApiDocsOverlay(targetBackendDir: string, language: Language)
   };
 
   const merged = mergePackageJson(pkgJson, overlayDeps, contributor);
-  if (!merged.allowScripts) {
-    merged.allowScripts = {};
-  }
-  merged.allowScripts["@scarf/scarf"] = false;
-
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 
   await appendEnvExampleApiDocs(path.join(targetBackendDir, ".env.example"));
@@ -822,7 +888,22 @@ async function applyI18nOverlay(targetFrontendDir: string, language: Language): 
   // 1. Copiar archivos del overlay sobre la plantilla base
   await copyDir(overlayDir, targetFrontendDir, path.basename(targetFrontendDir));
 
-  // 2. Fusionar package.json: añadir dependencias i18n y script check:i18n
+  // 2. Inyectar import de inicialización en main
+  const mainExt = language === "ts" ? "tsx" : "jsx";
+  const mainPath = path.join(targetFrontendDir, "src", `main.${mainExt}`);
+  const mainContent = await fs.readFile(mainPath, "utf-8");
+  const i18nExt = language === "ts" ? "ts" : "js";
+  const resolvedMain = resolveInsertionPoints(mainContent, {
+    imports: [
+      {
+        contributor: "i18n",
+        lines: [`import './i18n.${i18nExt}'`],
+      },
+    ],
+  });
+  await fs.writeFile(mainPath, resolvedMain, "utf-8");
+
+  // 3. Fusionar package.json: añadir dependencias i18n y script check:i18n
   const pkgPath = path.join(targetFrontendDir, "package.json");
   const pkgRaw = await fs.readFile(pkgPath, "utf-8");
   const pkgJson = JSON.parse(pkgRaw) as PackageJson;
@@ -958,7 +1039,6 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       const projectName = path.basename(outputDir);
       const frontendTpl = language === "ts" ? "frontend-react-ts" : "frontend-react-js";
       const backendTpl = language === "ts" ? "backend-express-ts" : "backend-express-js";
-      const overlayFile = language === "ts" ? "vite.config.ts" : "vite.config.js";
 
       await fs.mkdir(outputDir, { recursive: true });
 
@@ -976,8 +1056,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         `${projectName}-backend`,
       );
 
-      const overlaySrc = path.join(templatesDir(), "fullstack", overlayFile);
-      await fs.copyFile(overlaySrc, path.join(frontendDest, overlayFile));
+      await applyFullstackViteProxy(frontendDest, language);
 
       const readmeContent = generateFullstackReadme(projectName, language);
       await fs.writeFile(path.join(outputDir, "README.md"), readmeContent, "utf-8");
@@ -1000,6 +1079,8 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         if (options.apiDocs) {
           await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
           await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
+        } else {
+          await cleanupComposeInsertionPoints(path.join(outputDir, "compose.yaml"));
         }
       }
 
@@ -1009,6 +1090,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
       }
 
+      await cleanupUnresolvedFrontendInsertionPoints(frontendDest, language);
       await cleanupUnresolvedInsertionPoints(backendDest, language);
 
       return { ok: true };
@@ -1037,9 +1119,12 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
   try {
     await copyTemplate(templateSrc, outputDir);
 
-    if (modality === "frontend" && options.i18n) {
-      await applyI18nOverlay(outputDir, language);
-      await appendFrontendReadmeI18n(path.join(outputDir, "README.md"));
+    if (modality === "frontend") {
+      if (options.i18n) {
+        await applyI18nOverlay(outputDir, language);
+        await appendFrontendReadmeI18n(path.join(outputDir, "README.md"));
+      }
+      await cleanupUnresolvedFrontendInsertionPoints(outputDir, language);
     }
 
     if (modality === "backend") {
@@ -1056,6 +1141,8 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         if (options.apiDocs) {
           await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
           await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
+        } else {
+          await cleanupComposeInsertionPoints(path.join(outputDir, "compose.yaml"));
         }
       }
       await cleanupUnresolvedInsertionPoints(outputDir, language);
@@ -1163,6 +1250,70 @@ async function cleanupUnresolvedInsertionPoints(
       throw err;
     }
     const cleaned = cleanupInsertionPoints(content);
+    if (cleaned !== content) {
+      await fs.writeFile(file, cleaned, "utf-8");
+    }
+  }
+}
+
+export async function applyFullstackViteProxy(
+  frontendDest: string,
+  language: Language,
+): Promise<void> {
+  const viteFile = language === "ts" ? "vite.config.ts" : "vite.config.js";
+  const vitePath = path.join(frontendDest, viteFile);
+  const content = await fs.readFile(vitePath, "utf-8");
+
+  const insertions: InsertionMap = {
+    imports: [
+      {
+        contributor: "fullstack-proxy",
+        lines: ["import process from 'node:process'"],
+      },
+    ],
+    config: [
+      {
+        contributor: "fullstack-proxy",
+        lines: [
+          "server: {",
+          "  proxy: {",
+          "    '/api': {",
+          "      target: process.env.BACKEND_URL || 'http://localhost:3000',",
+          "      changeOrigin: true,",
+          "      rewrite: (path) => path.replace(/^\\/api(?=\\/|$)/, ''),",
+          "    },",
+          "  },",
+          "},",
+        ],
+      },
+    ],
+  };
+
+  const resolved = resolveInsertionPoints(content, insertions);
+  await fs.writeFile(vitePath, resolved, "utf-8");
+}
+
+export async function cleanupUnresolvedFrontendInsertionPoints(
+  frontendDir: string,
+  language: Language,
+): Promise<void> {
+  const mainExt = language === "ts" ? "tsx" : "jsx";
+  const viteExt = language === "ts" ? "ts" : "js";
+  const files = [
+    path.join(frontendDir, "src", `main.${mainExt}`),
+    path.join(frontendDir, `vite.config.${viteExt}`),
+  ];
+  for (const file of files) {
+    let content: string;
+    try {
+      content = await fs.readFile(file, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw err;
+    }
+    const cleaned = cleanupInsertionPoints(content, KNOWN_FRONTEND_INSERTION_POINTS);
     if (cleaned !== content) {
       await fs.writeFile(file, cleaned, "utf-8");
     }

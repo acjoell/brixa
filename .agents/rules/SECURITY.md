@@ -229,7 +229,7 @@ Este apartado describe las garantías reales del endurecimiento de seguridad de 
 
 **Implementado [CÓDIGO]:** `redact` cubre URLs con credenciales, cabeceras `Authorization` y `Proxy-Authorization` (Bearer, Basic y valor sin esquema), tokens Bearer independientes, cabeceras `Cookie`/`Set-Cookie`, y claves sensibles por nombre (`password`, `access_token`, `refresh_token`, `auth_token`, `token`, claves que terminen en `_secret`). Se aplica en arranque (`src/index`), cierre (`server.close`) y en el manejador global de errores (`console.error(redact(inspect(err, { depth: 5 })))`). Las cuatro plantillas de base de datos importan el módulo central; no hay copias.
 
-**Límites conocidos:** no cubre `apiKey`, `privateKey`, `clientSecretKey` ni valores PEM multilínea. `redact` es una defensa adicional, no la única barrera. Existen riesgos de ReDoS medidos (ver DECISIONS.md §5, pendiente T-022): hoy solo se usa en contextos con entradas de longitud razonable.
+**Límites conocidos:** no cubre `apiKey`, `privateKey`, `clientSecretKey` ni valores PEM multilínea. `redact` es una defensa adicional, no la única barrera. Los riesgos de ReDoS medidos en D-073 quedaron mitigados en T-022 (D-076): prefiltro `includes("://")`, esquemas `{0,63}`, clases negadas con escapes en comillas y backticks, con pruebas adversariales en Worker y pruebas de integración HTTP con JSON malformado.
 
 ### Límite de cuerpo de petición
 

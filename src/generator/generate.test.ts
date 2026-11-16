@@ -15,7 +15,15 @@ import { inspect } from "node:util";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
-import { generate, formatGenerateError, mergePackageJson, nextStepsMessage } from "./generate.js";
+import {
+  generate,
+  formatGenerateError,
+  mergePackageJson,
+  nextStepsMessage,
+  appendComposeApiDocsEnv,
+  parseEnvAssignments,
+  mergeEnvExample,
+} from "./generate.js";
 import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
 // @ts-expect-error La plantilla JavaScript no incluye archivo de declaraciones .d.ts
 import { redact as redactJs } from "../templates/backend-express-js/src/redact.js";
@@ -178,6 +186,11 @@ describe("generate — backend + ts", () => {
       const full = path.join(dest, rel);
       await expect(fs.access(full), `falta: ${rel}`).resolves.toBeUndefined();
     }
+
+    const tsconfig = JSON.parse(await fs.readFile(path.join(dest, "tsconfig.json"), "utf-8")) as {
+      compilerOptions?: { resolveJsonModule?: boolean };
+    };
+    expect(tsconfig.compilerOptions?.resolveJsonModule).toBe(true);
   });
 
   it("sustituye el nombre del proyecto en package.json", async () => {
@@ -968,6 +981,11 @@ describe("generate — apiDocs opcional", () => {
 
     const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
     expect(envContent).not.toContain("ENABLE_API_DOCS");
+
+    const tsconfig = JSON.parse(await fs.readFile(path.join(dest, "tsconfig.json"), "utf-8")) as {
+      compilerOptions?: { resolveJsonModule?: boolean };
+    };
+    expect(tsconfig.compilerOptions?.resolveJsonModule).toBe(true);
   });
 
   it("(b) con documentación se generan la especificación, la dependencia swagger-ui-express con versión exacta, @scarf/scarf false en allowScripts y ENABLE_API_DOCS=false en .env.example", async () => {
@@ -996,6 +1014,26 @@ describe("generate — apiDocs opcional", () => {
 
     const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
     expect(envContent).toContain("ENABLE_API_DOCS=false");
+
+    const tsconfig = JSON.parse(await fs.readFile(path.join(dest, "tsconfig.json"), "utf-8")) as {
+      compilerOptions?: { resolveJsonModule?: boolean };
+    };
+    expect(tsconfig.compilerOptions?.resolveJsonModule).toBe(true);
+  });
+
+  it("(c) Docker + apiDocs: falla con ruido si compose.yaml no contiene el punto de inserción", async () => {
+    const dest = await mkTmp("compose-missing-marker");
+    await fs.mkdir(dest, { recursive: true });
+    const composePath = path.join(dest, "compose.yaml");
+    await fs.writeFile(
+      composePath,
+      "services:\n  backend:\n    build: .\n    environment:\n      PORT: 3000\n",
+      "utf-8",
+    );
+
+    await expect(appendComposeApiDocsEnv(composePath)).rejects.toThrow(
+      /No se encontró el punto de inserción/,
+    );
   });
 });
 
@@ -1583,5 +1621,184 @@ describe("generate — redact ReDoS (Incremento C y T-022)", () => {
         expect(redactFn(c.input), c.name).toBe(c.expected);
       }
     }
+  });
+});
+
+describe("mergeEnvExample e idempotencia de .env.example", () => {
+  it("parseEnvAssignments ignora comentarios y líneas vacías", () => {
+    const raw = `
+PORT=3000
+# Comentario
+# CORS_ALLOWED_ORIGINS=http://localhost:5173
+
+DATABASE_URL=postgresql://user:pass@localhost:5432/db
+`;
+    const map = parseEnvAssignments(raw);
+    expect(map.get("PORT")).toBe("3000");
+    expect(map.get("DATABASE_URL")).toBe("postgresql://user:pass@localhost:5432/db");
+    expect(map.has("CORS_ALLOWED_ORIGINS")).toBe(false);
+    expect(map.size).toBe(2);
+  });
+
+  it("mergeEnvExample añade nuevo bloque respetando saltos de línea", () => {
+    const base = "PORT=3000\n";
+    const block = "# DB\nDATABASE_URL=file:./data/app.db\n";
+    const result = mergeEnvExample(base, block, "SQLite");
+    expect(result).toBe("PORT=3000\n# DB\nDATABASE_URL=file:./data/app.db\n");
+  });
+
+  it("mergeEnvExample es idempotente si las variables ya existen con el mismo valor", () => {
+    const base = "PORT=3000\nDATABASE_URL=file:./data/app.db\n";
+    const block = "DATABASE_URL=file:./data/app.db\n";
+    const result = mergeEnvExample(base, block, "SQLite");
+    expect(result).toBe(base);
+  });
+
+  it("mergeEnvExample falla con error explícito que nombra al contribuyente ante un conflicto", () => {
+    const base = "PORT=3000\nDATABASE_URL=postgresql://localhost:5432/db\n";
+    const block = "DATABASE_URL=file:./data/app.db\n";
+    expect(() => mergeEnvExample(base, block, "SQLite")).toThrowError(
+      /Conflicto en \.env\.example al aplicar 'SQLite': la variable 'DATABASE_URL' ya existe con un valor diferente/,
+    );
+  });
+});
+
+describe("composición limpia de frontend (main, App, vite.config)", () => {
+  it("frontend ts sin i18n elimina marcadores en main y vite.config, manteniendo App con texto base", async () => {
+    const dest = await mkTmp("frontend-clean-no-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const mainContent = await fs.readFile(path.join(dest, "src", "main.tsx"), "utf-8");
+    expect(mainContent).not.toContain("@@INSERT:");
+    expect(mainContent).not.toContain("i18n");
+
+    const viteContent = await fs.readFile(path.join(dest, "vite.config.ts"), "utf-8");
+    expect(viteContent).not.toContain("@@INSERT:");
+    expect(viteContent).not.toContain("proxy");
+
+    const appContent = await fs.readFile(path.join(dest, "src", "App.tsx"), "utf-8");
+    expect(appContent).not.toContain("@@INSERT:");
+    expect(appContent).toContain("useAppContent");
+
+    const useAppContent = await fs.readFile(path.join(dest, "src", "useAppContent.tsx"), "utf-8");
+    expect(useAppContent).toContain("LanguageSelector: () => null");
+    expect(useAppContent).toContain("Get started");
+  });
+
+  it("frontend ts con i18n inyecta import en main y no deja marcadores", async () => {
+    const dest = await mkTmp("frontend-clean-with-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const mainContent = await fs.readFile(path.join(dest, "src", "main.tsx"), "utf-8");
+    expect(mainContent).not.toContain("@@INSERT:");
+    expect(mainContent).toContain("import './i18n.ts'");
+
+    const useAppContent = await fs.readFile(path.join(dest, "src", "useAppContent.tsx"), "utf-8");
+    expect(useAppContent).toContain("useTranslation");
+    expect(useAppContent).toContain("LanguageSelector");
+  });
+
+  it("fullstack ts compone vite.config mediante inserción y no deja marcadores", async () => {
+    const dest = await mkTmp("fullstack-clean-vite");
+    const result = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "none",
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const viteContent = await fs.readFile(path.join(dest, "frontend", "vite.config.ts"), "utf-8");
+    expect(viteContent).not.toContain("@@INSERT:");
+    expect(viteContent).toContain("import process from 'node:process'");
+    expect(viteContent).toContain("proxy: {");
+
+    const mainContent = await fs.readFile(path.join(dest, "frontend", "src", "main.tsx"), "utf-8");
+    expect(mainContent).not.toContain("@@INSERT:");
+  });
+});
+
+describe("appContent.types.ts — archivo de tipos compartido (TS)", () => {
+  it("frontend ts sin i18n incluye appContent.types.ts con MessageKey definido una sola vez", async () => {
+    const dest = await mkTmp("types-frontend-no-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const typesPath = path.join(dest, "src", "appContent.types.ts");
+    const typesContent = await fs.readFile(typesPath, "utf-8");
+    expect(typesContent).toContain("MessageKey");
+    expect(typesContent).toContain("AppContent");
+
+    // MessageKey definido exactamente una vez en todo el proyecto
+    const hookContent = await fs.readFile(path.join(dest, "src", "useAppContent.tsx"), "utf-8");
+    const occurrencesInHook = (hookContent.match(/export type MessageKey/g) ?? []).length;
+    expect(occurrencesInHook).toBe(0); // hook no redefine, solo importa
+    const occurrencesInTypes = (typesContent.match(/export type MessageKey/g) ?? []).length;
+    expect(occurrencesInTypes).toBe(1);
+  });
+
+  it("frontend ts con i18n incluye appContent.types.ts y useAppContent i18n importa desde él", async () => {
+    const dest = await mkTmp("types-frontend-i18n");
+    const result = await generate({
+      modality: "frontend",
+      language: "ts",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const typesPath = path.join(dest, "src", "appContent.types.ts");
+    const typesContent = await fs.readFile(typesPath, "utf-8");
+    expect(typesContent).toContain("MessageKey");
+
+    const hookContent = await fs.readFile(path.join(dest, "src", "useAppContent.tsx"), "utf-8");
+    // i18n hook importa del archivo de tipos, no redefine MessageKey localmente
+    expect(hookContent).toContain("from './appContent.types'");
+    const localDefs = (hookContent.match(/export type MessageKey/g) ?? []).length;
+    expect(localDefs).toBe(0);
+
+    // sin marcadores en main
+    const mainContent = await fs.readFile(path.join(dest, "src", "main.tsx"), "utf-8");
+    expect(mainContent).not.toContain("@@INSERT:");
+  });
+
+  it("fullstack ts con i18n incluye appContent.types.ts en el directorio frontend", async () => {
+    const dest = await mkTmp("types-fullstack-i18n");
+    const result = await generate({
+      modality: "fullstack",
+      language: "ts",
+      database: "sqlite",
+      i18n: true,
+      outputDir: dest,
+    });
+    expect(result.ok).toBe(true);
+
+    const typesPath = path.join(dest, "frontend", "src", "appContent.types.ts");
+    const typesContent = await fs.readFile(typesPath, "utf-8");
+    expect(typesContent).toContain("MessageKey");
+    expect(typesContent).toContain("AppContent");
+
+    const hookContent = await fs.readFile(
+      path.join(dest, "frontend", "src", "useAppContent.tsx"),
+      "utf-8",
+    );
+    expect(hookContent).toContain("from './appContent.types'");
+    const localDefs = (hookContent.match(/export type MessageKey/g) ?? []).length;
+    expect(localDefs).toBe(0);
   });
 });

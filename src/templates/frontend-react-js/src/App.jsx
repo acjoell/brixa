@@ -3,22 +3,25 @@ import heroImg from './assets/hero.png'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
 import './App.css'
+import { useAppContent } from './useAppContent.jsx'
 
 function App() {
   const [count, setCount] = useState(0)
+  const { LanguageSelector, t, EditInstruction } = useAppContent()
 
   return (
     <>
       <section id="center">
+        <LanguageSelector />
         <div className="hero">
           <img src={heroImg} className="base" width="170" height="179" alt="" />
           <img src={reactLogo} className="framework" alt="React logo" />
           <img src={viteLogo} className="vite" alt="Vite logo" />
         </div>
         <div>
-          <h1>Get started</h1>
+          <h1>{t('home.title')}</h1>
           <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
+            <EditInstruction />
           </p>
         </div>
         <button
@@ -26,7 +29,7 @@ function App() {
           className="counter"
           onClick={() => setCount((count) => count + 1)}
         >
-          Count is {count}
+          {t('home.counter', { val: count })}
         </button>
       </section>
 
@@ -37,19 +40,19 @@ function App() {
           <svg className="icon" role="presentation" aria-hidden="true">
             <use href="/icons.svg#documentation-icon"></use>
           </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
+          <h2>{t('docs.title')}</h2>
+          <p>{t('docs.subtitle')}</p>
           <ul>
             <li>
               <a href="https://vite.dev/" target="_blank">
                 <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
+                {t('docs.exploreVite')}
               </a>
             </li>
             <li>
               <a href="https://react.dev/" target="_blank">
                 <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
+                {t('docs.learnMore')}
               </a>
             </li>
           </ul>
@@ -58,8 +61,8 @@ function App() {
           <svg className="icon" role="presentation" aria-hidden="true">
             <use href="/icons.svg#social-icon"></use>
           </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
+          <h2>{t('social.title')}</h2>
+          <p>{t('social.subtitle')}</p>
           <ul>
             <li>
               <a href="https://github.com/vitejs/vite" target="_blank">
