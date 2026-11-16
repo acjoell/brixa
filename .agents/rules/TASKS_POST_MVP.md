@@ -57,12 +57,12 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | PENDIENTE | — |
 | INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
-| T-014-0 | BLOQUEADA | Decisiones técnicas pendientes de INV-03, INV-04a, INV-05b / INV-08, P-009 / INV-07 y modelo de amenazas completo (P-011 e INV-04b consolidadas en D-080 a D-086) |
+| T-014-0 | BLOQUEADA | Decisiones técnicas pendientes de INV-04a, INV-05b / INV-08, P-009 / INV-07 y modelo de amenazas completo (P-010 y P-011 consolidadas en D-080 a D-090) |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
 | T-018 | BLOQUEADA | T-017b, INV-06 |
-| T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-03, INV-07 (composición backend requerida ya disponible vía D-069) |
+| T-014a | BLOQUEADA | T-014-0, T-017b, T-018, INV-01, INV-07 (composición backend requerida ya disponible vía D-069; P-010 y P-011 consolidadas en D-080 a D-090) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018 (composición backend requerida ya disponible vía D-069) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
@@ -135,7 +135,7 @@ Las mutaciones no son una dependencia del proyecto generado. Los nombres de los 
 
 ### 6.3 Matriz provisional de `verify:security`
 
-Calculada con una comprobación por pares: con estas 7 variantes quedan cubiertos los **82 pares válidos** entre las siete dimensiones (modalidad, lenguaje, base de datos, transporte, RBAC, multitenancy, Docker), con dos restricciones: multitenancy exige PostgreSQL y fullstack con Bearer queda excluido hasta ver INV-03.
+Calculada con una comprobación por pares: con estas 7 variantes quedan cubiertos los **82 pares válidos** entre las siete dimensiones (modalidad, lenguaje, base de datos, transporte, RBAC, multitenancy, Docker), con dos restricciones: multitenancy exige PostgreSQL y fullstack con Bearer queda excluido (confirmado por D-089: fullstack utiliza exclusivamente cookies en v1).
 
 | # | Modalidad | Lenguaje | Base de datos | Transporte | RBAC | Multitenancy | Docker |
 |---|---|---|---|---|---|---|---|
@@ -153,7 +153,7 @@ Notas:
 - **Variantes muy cargadas** (SV-1) dificultan aislar un fallo. Por eso las pruebas por capacidad viven en el proyecto generado y no solo en estas variantes.
 - **Activación gradual.** Cada variante entra en `verify:security` cuando existe la última capacidad que incluye. Hasta entonces se ejecuta su proyección sin las capacidades aún inexistentes.
 - **Ámbito.** SV-3, SV-4 y SV-7 (SQLite sin Docker) son candidatas a `portable` (Ubuntu, Windows, macOS). Las que usan PostgreSQL o Docker, a `full` (Linux). SV-4 usa Docker: pasa a `full`.
-- **Si INV-03 admite Bearer en fullstack**, se añade una variante fullstack con Bearer y se recalcula la cobertura.
+- **Fullstack exclusivamente cookies (D-089):** Bearer queda formalmente excluido en fullstack para v1; no se añade variante fullstack con Bearer.
 - **Vistas y panel.** No hay pruebas en navegador real hoy. Hasta que existan, no pueden declararse verificados, solo comprobados manualmente (ver T-014a-ui).
 
 ---
@@ -262,9 +262,9 @@ Notas:
 
 ### T-014-0 — Diseño del modelo de identidad, organización y contexto
 
-**Estado:** BLOQUEADA (faltan decisiones técnicas: INV-03, P-009 / INV-07, soporte RLS en Drizzle fijado / INV-04a, estrategia JS/TS / INV-08, y el modelo de amenazas completo. P-011 e INV-04b consolidadas en D-080 a D-086)
+**Estado:** BLOQUEADA (faltan decisiones técnicas: P-009 / INV-07 sobre hash de contraseñas, soporte RLS en Drizzle fijado / INV-04a, estrategia JS/TS / INV-08, especificación de parámetros temporales de sesión, y el modelo de amenazas completo. P-010 y P-011 consolidadas en D-080 a D-090)
 **Aprobación:** Aprobado (alcance como tarea de diseño previa a las capacidades). Su contenido depende de evidencia restante.
-**Dependencias:** INV-03, INV-04a, INV-05b / INV-08, INV-07 (resultados reportados/pendientes) y modelo de amenazas. P-011 resuelta (D-080 a D-086).
+**Dependencias:** INV-04a, INV-05b / INV-08, INV-07 (resultados reportados/pendientes) y modelo de amenazas. P-010 y P-011 resueltas (D-080 a D-090).
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
@@ -276,8 +276,13 @@ Notas:
 - **Administración de plataforma separada de la organizacional (D-084):** sin acceso global automático a datos de organizaciones ni bypass genérico de RLS.
 - **Bootstrap seguro y aprovisionamiento local (D-085):** comandos CLI locales del proyecto generado, sin credenciales por defecto, resistente a concurrencia y sin endpoint público. Aprovisionamiento organizacional mediante herramientas locales; panel de plataforma fuera de v1.
 - **Registro público opcional para Auth sin multitenancy (D-086):** configurable en el CLI exclusivamente para Auth sin multitenancy (registro administrado como predeterminado), sin privilegios administrativos automáticos y sin creación pública de organizaciones. Posterior al núcleo Auth y con controles de seguridad.
+- **Credenciales de sesión opacas con hash SHA-256 (D-087):** sesiones opacas generadas con 32 bytes criptográficamente aleatorios como único modelo de Auth v1, sin JWT. Almacén exclusivo de hashes SHA-256 en BD; validación y revocación en servidor; token opaco sin identidad, roles, permisos ni organización; núcleo común para cookies y Bearer.
+- **Ciclo de vida de sesiones (D-088):** expiración deslizante por inactividad y límite absoluto; revocación efectiva inmediata; actualización de actividad segura frente a concurrencia; rotación controlada del identificador en eventos de seguridad relevantes; sin esquema access+refresh rotativo en v1. Parámetros temporales concretos pendientes de especificación detallada.
+- **Transporte y CSRF (D-089):** fullstack exclusivamente cookies en v1; backend independiente con cookies o Bearer seleccionables (sin mezcla simultánea de transportes); cookies HttpOnly, Secure, SameSite=Lax, Path=/, sin Domain, con nombre específico por proyecto; protección CSRF obligatoria en operaciones autenticadas por cookies con comprobación de origen y mecanismos adicionales; Bearer mediante cabecera Authorization; sin soporte automático general de cookies cross-site en v1 (precisión formal del alcance de D-064).
+- **Frontend y navegación protegida (D-090):** React Router en modo declarativo cuando fullstack incluya Auth (sin router obligatorio para proyectos que no lo necesiten); estado de sesión centralizado con 4 estados (verificación, autenticado, no autenticado, error de comunicación); recuperación de sesión mediante consulta al backend sin almacenar credenciales en JavaScript; rutas protegidas para experiencia de usuario/navegación con autorización efectiva siempre en Express; integración compositiva con i18n, RBAC y futuros módulos; accesibilidad explícita obligatoria (título de página, gestión de foco y anuncios de navegación); y pruebas reales de navegación, redirecciones, recargas y accesibilidad.
 - **Criterio de extensibilidad modular (aprobado):** Las capacidades Auth, RBAC y multitenancy deben permitir incorporar módulos de negocio, permisos nuevos y validaciones adicionales sin modificar sus mecanismos internos. No implica implementar un motor ABAC/ReBAC ni actualizaciones automáticas de overlays después de generar un proyecto.
-- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); credencial opaca o JWT, renovación y CSRF (INV-03); algoritmo y parámetros de hash de contraseñas (P-009 / INV-07); estrategia JavaScript/TypeScript (INV-05b / INV-08); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
+- **Propuesta de backlog (sin implementación aprobada):** generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
+- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); algoritmo y parámetros de hash de contraseñas (P-009 / INV-07); soporte de RLS en Drizzle fijado (INV-04a); estrategia JavaScript/TypeScript (INV-05b / INV-08); duraciones predeterminadas de expiración, periodicidad de rotación y frecuencia de actualización de actividad (D-088); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
 
 **Áreas afectadas:** ninguna de código. Producto: documento de diseño y propuestas de decisión.
 
@@ -432,34 +437,35 @@ Notas:
 ### T-014a — Autenticación seleccionable
 
 **Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 e INV-07)
-**Aprobación:** Aprobado (dos opciones en el CLI, núcleo común, no se generan ambas por defecto). Detalles técnicos pendientes de evidencia.
-**Dependencias:** T-014-0, T-017b, T-018, INV-01 e INV-03 (resultados reportados), INV-07. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
+**Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089). Detalles de hash y parámetros de sesión pendientes.
+**Dependencias:** T-014-0, T-017b, T-018, INV-01 e INV-07. Decisiones de diseño consolidadas en D-080 a D-090. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
 
 **Objetivo:** cuentas y credenciales funcionales y verificadas, con una modalidad elegida por proyecto.
 
-**Opciones en el CLI:** **A.** sesiones mediante cookies. **B.** autenticación mediante tokens Bearer.
+**Opciones en el CLI:** **A.** Sesiones mediante cookies (exclusiva para aplicación completa / fullstack; seleccionable en backend independiente). **B.** Autenticación mediante tokens Bearer (exclusivamente para backend independiente). Sin mezcla simultánea de transportes (D-089).
 
 **Alcance común:**
 - Núcleo de identidad y gestión de cuentas compartido; sin duplicar tablas de usuarios ni la lógica de cuentas.
-- Credencial opaca almacenada por huella frente a JWT: **no decidido** (INV-03). Bearer y JWT son conceptos distintos.
+- Sesiones opacas generadas con 32 bytes criptográficamente aleatorios y hashes SHA-256 en base de datos como único modelo de v1, sin JWT (D-087). Validación y revocación en servidor; token sin identidad, roles ni organización; núcleo común para cookies y Bearer.
 - Hash de contraseñas: **no decidido** (INV-01, INV-07; P-009). `crypto.argon2` existe desde Node 24.7.0 y `engines.node` admite `^24.0.0`; con `@types/node` 26.x el type-check no detectaría el uso en una versión anterior. Si se elige la API nativa, el proyecto generado necesita su propio `engines` y tipos alineados. No llamar «PHC» a un formato con Base64URL sin aclararlo.
-- Renovación o refresh: pendiente de evidencia.
-- CSRF y atributo `Secure` de las cookies según las tres topologías reales: pendiente de evidencia.
+- Ciclo de vida de sesión con expiración deslizante por inactividad y límite absoluto; revocación efectiva inmediata; actualización de actividad segura frente a concurrencia; rotación controlada en eventos sensibles; sin esquema access+refresh rotativo en v1 (D-088).
+- Cookies de sesión con configuración estricta: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, sin `Domain`, y nombre de cookie específico por proyecto para evitar colisiones en `localhost` (D-089).
+- Protección CSRF obligatoria en operaciones mutables autenticadas por cookies mediante comprobaciones de origen y mecanismos adicionales (D-089).
+- Bearer mediante cabecera estándar `Authorization: Bearer <token>` (D-089).
 - Límite de intentos de autenticación sin bloqueo permanente de cuentas (nivel 2 de abuso).
 - Mensajes de error que no revelan si una cuenta existe.
-- A decidir en T-014-0: cambio de contraseña, primera cuenta administradora sin credenciales por defecto (resuelta: bootstrap local seguro en D-085), creación de usuarios y registro administrado por defecto frente a registro público opcional en Auth sin multitenancy (D-086), listado y cierre de sesiones, desactivación y reactivación de cuentas, normalización de identificadores, limpieza de credenciales caducadas, caducidad absoluta o por inactividad.
+- A decidir en T-014-0: cambio de contraseña, primera cuenta administradora sin credenciales por defecto (resuelta: bootstrap local seguro en D-085), creación de usuarios y registro administrado por defecto frente a registro público opcional en Auth sin multitenancy (D-086), listado y cierre de sesiones, desactivación y reactivación de cuentas, normalización de identificadores, limpieza de credenciales caducadas, parámetros temporales de sesión (D-088).
 - Protección de la documentación de API cuando está activa.
-- Bearer en fullstack: no se descarta ni se admite hasta ver la matriz de INV-03.
 
-**Fuera de alcance:** registro público en proyectos con multitenancy (excluido terminantemente por D-086; admisible como opción en Auth sin multitenancy con registro administrado como predeterminado tras consolidar el núcleo), creación pública de organizaciones (D-086), recuperación de contraseña (salvo que aparezca una razón importante), MFA y OAuth/SSO.
+**Fuera de alcance:** JWT en v1 (D-087), Bearer en fullstack en v1 (D-089), access+refresh rotativo en v1 (D-088), cookies cross-site en v1 (D-089), registro público en proyectos con multitenancy (excluido terminantemente por D-086; admisible como opción en Auth sin multitenancy con registro administrado como predeterminado tras consolidar el núcleo), creación pública de organizaciones (D-086), recuperación de contraseña (salvo que aparezca una razón importante), MFA y OAuth/SSO.
 
-**Matriz de compatibilidad (modalidad × backend/fullstack × cliente):** la entrega INV-03; define qué combinaciones se soportan inicialmente.
+**Matriz de compatibilidad (modalidad × backend/fullstack × cliente):** definida según D-089 (fullstack exclusivo cookies; backend independiente con cookies o Bearer sin mezcla simultánea).
 
 **Áreas afectadas:** **[I]** pregunta y validación del CLI (`src/prompts/questions.ts`, `src/validation/options.ts`, `src/types.ts`), generador, `src/verified-variants.ts`, arnés. **[L]** plantillas backend, overlays de base de datos (cuatro archivos de esquema por tabla: dos motores por dos lenguajes). Rutas nuevas: por determinar.
 
 **Criterios de aceptación:**
 - Alta, inicio y cierre de sesión funcionan en cada combinación declarada soportada.
-- Credenciales no almacenadas en texto plano (ni la credencial de sesión ni las contraseñas).
+- Credenciales no almacenadas en texto plano (ni la credencial de sesión ni las contraseñas). En sesión, únicamente hash SHA-256 en BD (D-087).
 - Revocación efectiva en la petición siguiente.
 - Ninguna credencial ni secreto en el proyecto generado; secretos obligatorios validados al arrancar.
 
@@ -467,33 +473,41 @@ Notas:
 **Pruebas negativas (SECURITY §11):** no autenticado accede a recurso protegido; credencial caducada, revocada o manipulada; usuario deshabilitado con credencial viva; enumeración de cuentas por mensaje o por tiempo; fuerza bruta con respuesta 429 y **recuperación del acceso tras la espera** (sin bloqueo permanente); solicitud entre orígenes sin CSRF (cookie); credencial anterior tras cambio de contraseña; la credencial en reposo no aparece en la base de datos en claro; contraseña por encima del máximo rechazada; campos como `role` o `isActive` enviados por el cliente sin efecto; ninguna respuesta ni registro contiene hashes o secretos.
 **Verificaciones:** batería local, `verify:generated` y `verify:security` en las variantes de la sección 6.3 que incluyan autenticación.
 
-**Riesgos y limitaciones (reportado en INV-03b):** los navegadores no aíslan cookies por puerto en `localhost`, así que dos proyectos con el mismo nombre de cookie se pisan; `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; el refresh rotativo con peticiones simultáneas puede destruir la sesión; Safari no está verificado. La cookie `Secure` no se envía por HTTP fuera de `localhost` y los proyectos generados no terminan TLS; el comportamiento de cada navegador debe comprobarse. Un límite de intentos en memoria no se comparte entre instancias.
+**Riesgos y limitaciones (reportado en INV-03b):** los navegadores no aíslan cookies por puerto en `localhost`, mitigado mediante nombre específico de cookie por proyecto (D-089); `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; Safari no está verificado. La cookie `Secure` no se envía por HTTP fuera de `localhost` y los proyectos generados no terminan TLS; el comportamiento de cada navegador debe comprobarse. Un límite de intentos en memoria no se comparte entre instancias.
 
 ---
 
 ### T-014a-ui — Vistas de autenticación (aplicación completa)
 
 **Estado:** BLOQUEADA (por T-014a y T-017a-ui)
-**Aprobación:** Aprobado (vista de producto: componentes pequeños, presentación separada de la lógica, fáciles de personalizar). Router, estilos y pruebas del frontend, pendientes.
+**Aprobación:** Aprobado (arquitectura frontend: React Router declarativo condicionado a Auth, componentes pequeños, presentación separada de la lógica, accesibilidad explícita, D-090). Estilos y pruebas de componentes pendientes.
 **Dependencias:** T-014a, T-017a-ui.
 
 **Objetivo:** vistas funcionales, accesibles y fáciles de modificar. Solo en aplicación completa; en backend solo se generan los endpoints.
 
-**Alcance:** inicio de sesión, formularios y componentes reutilizables, estado de autenticación, integración con el backend y navegación protegida **como mecanismo de experiencia de usuario** (no es una barrera de seguridad). Router, estilos e integración con i18n según INV-03, INV-05a e INV-06.
+**Alcance consolidado (D-090):**
+- React Router en modo declarativo adoptado cuando fullstack incluya Auth; proyectos sin Auth no incorporan router obligatorio.
+- Estado de sesión centralizado con 4 estados explícitos: verificación inicial (cargando), autenticado, no autenticado y error de comunicación.
+- Recuperación de sesión mediante consulta al backend; ninguna credencial almacenada en JavaScript (`localStorage`/`sessionStorage`).
+- Rutas protegidas como mecanismo de experiencia de usuario y navegación defensiva; autorización efectiva siempre en Express.
+- Integración compositiva con i18n, RBAC y futuros módulos.
+- Accesibilidad explícita obligatoria (CODE_STANDARDS §12): actualización dinámica de `document.title`, gestión de foco del teclado en navegación y anuncios de cambio de ruta para lectores de pantalla.
+- Pruebas reales de navegación, redirecciones, recargas de página y accesibilidad.
 
 **Áreas afectadas:** **[L]** plantillas de frontend y overlay i18n. Rutas nuevas: por determinar.
 
 **Criterios de aceptación:**
 - Disponible en JavaScript y TypeScript.
 - Con i18n activo, las vistas usan sus claves; sin i18n, texto fijo, sin duplicar vistas.
-- Accesibilidad básica (CODE_STANDARDS §12): etiquetas, teclado, estados de error y carga.
+- Accesibilidad obligatoria: etiquetas, teclado, estados de error y carga, foco dinámico y anuncios de ruta (D-090).
 - El acceso HTTP, el estado de autenticación y la presentación están en archivos separados; sin componentes que mezclen todo.
+- Pruebas reales de navegación y recarga ejecutables en frontend.
 
-**Pruebas positivas:** inicio de sesión correcto; estado de autenticación tras recargar.
+**Pruebas positivas:** inicio de sesión correcto; estado de autenticación tras recargar; navegación entre rutas públicas y protegidas.
 **Pruebas negativas:** credenciales inválidas con mensaje uniforme; acceso a una vista protegida sin sesión redirige; respuesta 401 del backend limpia el estado; en modalidad cookie no se guarda ninguna credencial en el almacenamiento accesible a JavaScript; sin `dangerouslySetInnerHTML`.
-**Verificaciones:** compilación, lint y pruebas de componentes según la herramienta que se decida con INV-06. **Hoy no hay pruebas en navegador real y la plantilla de frontend no incluye pruebas**: sin ellas, el comportamiento visual solo puede declararse comprobado manualmente.
+**Verificaciones:** compilación, lint, pruebas de componentes y pruebas reales de navegación y accesibilidad.
 
-**Riesgos:** introducir un router y una herramienta de pruebas son dependencias nuevas en el frontend (hoy no hay router [INSP]); solo deben entrar cuando se eligen las vistas. Un router no resuelve por sí solo la accesibilidad (reportado en INV-03b): hay que programar la actualización de `document.title`, el foco al navegar y los anuncios de cambio de ruta, y no se afirma compatibilidad con lectores de pantalla sin pruebas reales.
+**Riesgos:** introducir un router en fullstack con Auth agrega una dependencia nueva; debe mantenerse estrictamente desacoplada y accesible (gestión de `document.title`, foco al navegar y anuncios de cambio de ruta, D-090).
 
 ---
 
@@ -671,7 +685,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 1. **Identidad externa en T-014c.** ¿Se implementa un adaptador (opción del CLI y función `resolveActor`) en esta etapa o solo el contrato? Propuesta: solo el contrato.
 2. **Administrador de plataforma entre organizaciones.** Resuelta por D-084 y D-085: administración de plataforma estrictamente separada de la organizacional, sin acceso global automático a datos de organizaciones ni bypass genérico de RLS; aprovisionamiento local seguro sin panel global en v1.
 3. **Propiedades desconocidas en validación** (descartar o rechazar). Tras INV-02.
-4. **Router, estilos y pruebas del frontend.** Tras INV-03, INV-05a e INV-06 (P-010, P-017).
+4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; estilos y pruebas específicas pendientes de INV-05a e INV-06 (P-017).
 5. **Versión de `package.json` en `main`** tras el tag (P-016). Por defecto: versión de preparación.
 6. **T-013e.** ¿Se abre o T-018 absorbe el trabajo?
 7. **Relación con la decisión de validar `DATABASE_URL` sin que el servidor lo importe.** Tras INV-02.
@@ -681,7 +695,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 11. **Reproducibilidad de las plantillas** (P-008) tras las versiones resueltas de T-020.
 12. **Protección de tags `v*`** en el repositorio (cambio de configuración no autorizado en T-019).
 
-Dependen de evidencia (no se deciden antes): hash de contraseñas (INV-07 / P-009), credencial opaca o JWT, Bearer en fullstack, CSRF, renovación (INV-03), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), soporte de políticas RLS en Drizzle y evaluación de rendimiento de RLS en PostgreSQL (INV-04a / T-014c), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy.
+Dependen de evidencia (no se deciden antes): hash de contraseñas (INV-07 / P-009), parámetros temporales de inactividad/límite absoluto y rotación de identificadores de sesión (D-088), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), soporte de políticas RLS en Drizzle y evaluación de rendimiento de RLS en PostgreSQL (INV-04a / T-014c), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy (credenciales opacas, transporte exclusivo de cookies en fullstack, CSRF y React Router resueltos por D-087 a D-090).
 
 ## 12. Regla de actualización
 

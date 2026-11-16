@@ -192,6 +192,10 @@ No forman parte del MVP inicial, salvo que se apruebe expresamente:
 - Sistemas complejos de plugins o extensiones.
 - Abstracciones arquitectónicas que todavía no resuelvan una necesidad real.
 
+### Propuestas de backlog en evaluación (sin implementación aprobada)
+
+- **Generación de aplicaciones móviles y evaluación PWA:** se registra en el backlog la posibilidad de reutilizar las plantillas de frontend React y Vite junto con Capacitor para la generación de aplicaciones móviles, orientadas inicialmente a Android y con iOS como posibilidad posterior, así como la evaluación de Progressive Web Apps (PWA). Deberán analizarse en su momento la arquitectura de autenticación móvil, el almacenamiento seguro en dispositivo, la comunicación con el backend y las capacidades offline. **Brixa no soporta actualmente aplicaciones móviles ni PWA; se trata únicamente de una propuesta exploratoria de backlog sin implementación aprobada.**
+
 ## 6. Gestión de cambios
 
 El roadmap es un documento vivo.

@@ -283,9 +283,9 @@ La inspección del 2026-11-07 indica que las plantillas no tienen lockfile y que
 
 ### P-010 — Sesiones, transporte, CSRF y router
 
-**Estado:** Pendiente de evidencia (INV-03).
+**Estado:** Resuelta (D-087 a D-090).
 
-Solo se dispone del complemento INV-03b (Chromium 156 y Firefox 157; Safari no verificado). Reportado: los navegadores no aíslan cookies por puerto; `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; el refresh rotativo con peticiones simultáneas puede destruir la sesión. React Router no está instalado en Brixa: la elección del router y la accesibilidad de la navegación (título, foco, anuncios) siguen abiertas.
+Resuelta mediante la consolidación de decisiones arquitectónicas: sesiones opacas con tokens de 32 bytes criptográficamente aleatorios y hash SHA-256 en base de datos como único modelo en v1 sin JWT (D-087); ciclo de vida con expiración deslizante por inactividad y límite absoluto, revocación efectiva y rotación controlada sin access/refresh rotativo en v1 (D-088); transporte exclusivo por cookies seguras con nombre por proyecto en fullstack, cookies o Bearer seleccionables en backend independiente, protección CSRF obligatoria para cookies y sin soporte general de cookies cross-site en v1 (D-089, precisando el alcance de D-064); y React Router declarativo condicionado a fullstack con Auth, estado centralizado con 4 estados sin credenciales en JS, rutas protegidas para UX con autorización efectiva en Express, accesibilidad explícita y pruebas reales (D-090). Quedan pendientes de especificación detallada las duraciones predeterminadas de expiración, la periodicidad de rotación y la frecuencia de actualización de actividad.
 
 ### P-011 — Modelo de acceso: estados, alcances y primer administrador
 
@@ -1001,7 +1001,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ### D-064 — Alcance de seguridad y autorización posterior a 0.1.0
 
-**Estado:** Confirmada en alcance (aprobada por el propietario el 2026-11-04; registrada el 2026-11-07; alcance de registro público modificado formalmente por D-086). Los detalles técnicos siguen pendientes de evidencia y decisión.
+**Estado:** Confirmada en alcance (aprobada por el propietario el 2026-11-04; registrada el 2026-11-07; alcance de registro público modificado formalmente por D-086; alcance de transporte precisado por D-089). Los detalles técnicos pendientes continúan resolviéndose según evidencia y decisión.
 
 **Decisión:** El trabajo de T-014 se divide y se registra en `TASKS_POST_MVP.md`: diseño previo (T-014-0); autenticación con dos opciones en el CLI, cookies o Bearer, sobre un núcleo común (T-014a) y sus vistas en aplicación completa (T-014a-ui); RBAC con motor, API administrativa y auditoría mínima (T-014b1) y panel de administración (T-014b2); multitenancy con PostgreSQL RLS, **independiente de RBAC** (T-014c); integración de RBAC con multitenancy (T-014d). Antes de ellas: composición de overlays (T-017a, T-017a-ui), seguridad base con Zod (T-017b) y arnés de verificación (T-018).
 
@@ -1009,7 +1009,9 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Nota de modificación de alcance (D-086):** El alcance relativo al registro público fue modificado expresamente por D-086: se admite como opción en el CLI exclusivamente para proyectos con autenticación sin multitenancy (manteniendo registro administrado como predeterminado), implementado de forma posterior al núcleo de Auth y sujeto a controles de seguridad. Se mantiene fuera de alcance la creación pública de organizaciones y el registro público para multitenancy.
 
-**Pendiente de evidencia o decisión:** hash de contraseñas, tipo de credencial (opaca o JWT), Bearer en fullstack, CSRF, versión de Zod, almacén de contadores de abuso, catálogo de permisos, contexto del actor, estrategia JS/TS, mecanismo de composición y forma del esquema (ver P-008 a P-017).
+**Nota de precisión de alcance sobre transporte (D-089):** El alcance relativo a los transportes de autenticación fue precisado expresamente por D-089: en fullstack (React + Express) se generan exclusivamente cookies en v1 (Bearer no se ofrece en fullstack); en backend independiente se selecciona entre cookies o Bearer, sin admitir mezcla simultánea en un mismo proyecto ni soporte automático general de cookies cross-site en v1.
+
+**Pendiente de evidencia o decisión:** hash de contraseñas (P-009 / INV-07), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL (INV-04a / T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017).
 
 ---
 
@@ -1411,6 +1413,80 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-087 — Credenciales de autenticación: sesiones opacas con tokens de 32 bytes y hash SHA-256 en base de datos
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-010.1).
+
+**Contexto:** Se requería definir el modelo de credenciales para la autenticación en v1, evaluando la disyuntiva entre credenciales opacas referenciadas en base de datos frente a tokens autocontenidos (JWT), así como los algoritmos de generación y almacenamiento seguro.
+
+**Decisión:**
+- Sesiones opacas como **único modelo de autenticación en v1**, descartando JWT.
+- Los tokens de sesión se generan utilizando 32 bytes criptográficamente aleatorios (`crypto.randomBytes(32)` o equivalente de la Web Crypto API).
+- En la base de datos se almacena **únicamente el hash SHA-256** del token, nunca el token en claro ni codificado de forma reversible.
+- La validación de sesiones y su revocación residen enteramente en el servidor contra la base de datos.
+- El token es puramente un identificador aleatorio opaco: no contiene información de identidad de usuario, roles, permisos ni organización.
+- El mecanismo de sesiones opacas constituye un núcleo común aplicable indistintamente tanto al transporte por cookies como a Bearer.
+
+**Motivo:** Las sesiones opacas con almacenamiento por hash garantizan revocación instantánea, evitan fugas de información sensible dentro del token y protegen la base de datos frente a la exposición de tokens activos en caso de volcado no autorizado, sin la complejidad ni los problemas de revocación inherentes a JWT.
+
+---
+
+### D-088 — Ciclo de vida de sesiones: expiración por inactividad, límite absoluto y rotación sin esquema access/refresh
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-010.2).
+
+**Contexto:** Se requería establecer las reglas de ciclo de vida, renovación y caducidad de las sesiones activas, abordando los riesgos medidos en INV-03b respecto a peticiones concurrentes y refresh rotativo.
+
+**Decisión:**
+- Ciclo de vida de sesión gobernado por doble control temporal: expiración deslizante por inactividad (desplazamiento al registrar actividad del usuario) y límite de vida absoluto e improrrogable desde la creación de la sesión.
+- Revocación efectiva inmediata que impide el acceso en la siguiente petición.
+- Actualizaciones de actividad en base de datos diseñadas para ser eficientes y seguras frente a concurrencia (evitando contención o bloqueos en peticiones paralelas simultáneas).
+- Rotación controlada del identificador de sesión en eventos de seguridad relevantes (como cambio de contraseña o elevación de privilegios).
+- Se descarta el esquema de pares access token + refresh token rotativo en v1.
+- Las duraciones predeterminadas de expiración, la periodicidad de rotación y la frecuencia de actualización de actividad quedan pendientes de especificación detallada.
+
+**Motivo:** Evita condiciones de carrera detectadas en navegadores al rotar tokens con múltiples peticiones concurrentes (reportado en INV-03b) y proporciona un control estricto del tiempo máximo de vida de la sesión sin degradar el rendimiento de la base de datos.
+
+---
+
+### D-089 — Transporte de credenciales y protección CSRF: cookies en fullstack, selección en backend y precisión de alcance de D-064
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-010.3 y precisión de alcance de D-064).
+
+**Contexto:** Se requería definir qué transportes se ofrecen según la modalidad del proyecto generado, las propiedades de seguridad de las cookies y la mitigación de ataques CSRF.
+
+**Decisión:**
+- **Modalidad fullstack (React + Express):** utiliza **exclusivamente cookies** en v1 (Bearer no se ofrece para fullstack).
+- **Modalidad backend independiente:** permite seleccionar en el CLI entre **cookies** o **Bearer**, sin admitir mezcla simultánea de transportes en un mismo proyecto.
+- Configuración estricta de cookies de sesión: `HttpOnly`, `Secure` (obligatorio), `SameSite=Lax`, `Path=/`, y ausencia de atributo `Domain` (para restringir el ámbito al host emisor). Cada proyecto generado utiliza un **nombre de cookie específico** para evitar colisiones en `localhost` entre proyectos locales.
+- **Protección CSRF obligatoria** en el servidor para todas las operaciones mutables autenticadas mediante cookies, utilizando validación estricta de cabeceras de origen (`Origin` / `Referer`) y mecanismos adicionales de defensa cuando corresponda.
+- El transporte Bearer se transmite exclusivamente mediante la cabecera estándar `Authorization: Bearer <token>`.
+- **Sin soporte automático general de cookies cross-site en v1.**
+- Esta decisión precisa formalmente el alcance original de D-064 en relación con la disponibilidad de transportes por modalidad.
+
+**Motivo:** Mantener el modelo más seguro y simple para cada arquitectura: cookies seguras con CSRF son la mejor práctica para aplicaciones web en el mismo origen, mientras que Bearer satisface clientes de API puros sin introducir la fragilidad de cookies entre dominios o almacenamiento inseguro en frontend.
+
+---
+
+### D-090 — Frontend y navegación protegida: React Router declarativo condicionado a Auth, estado centralizado y accesibilidad explícita
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-010.4).
+
+**Contexto:** La arquitectura base de frontend no incluía router ni estado de sesión. Se requería definir cómo se gestionan la navegación, las rutas protegidas, la sincronización de sesión y la accesibilidad en aplicaciones completas con autenticación.
+
+**Decisión:**
+- Se adopta **React Router en modo declarativo**, incorporado condicionalmente **únicamente cuando la aplicación fullstack incluya autenticación**. Los proyectos que no incluyan Auth no incorporan router de forma obligatoria.
+- Estado de sesión centralizado en frontend que distingue explícitamente cuatro estados: verificación inicial (cargando), autenticado, no autenticado y error de comunicación.
+- La sesión se recupera y valida mediante consulta al backend; ninguna credencial de sesión se almacena en memoria accesible a JavaScript ni en almacenamiento del navegador (`localStorage` / `sessionStorage`).
+- Las rutas protegidas en frontend actúan exclusivamente como **mecanismo de experiencia de usuario y navegación defensiva**; la autorización efectiva reside siempre de forma inmutable en el backend Express.
+- Integración compositiva limpia con los overlays de internacionalización (`i18n`), RBAC y futuros módulos sin acoplamiento monolítico.
+- Accesibilidad explícita obligatoria en la navegación: actualización dinámica de `document.title`, gestión de foco del teclado en cambios de ruta y anuncios de navegación para lectores de pantalla.
+- La verificación de esta capacidad exige pruebas reales de navegación, redirecciones, recargas de página y controles de accesibilidad.
+
+**Motivo:** Garantiza una arquitectura limpia y accesible sin sobrecargar variantes sencillas que no requieran enrutamiento, manteniendo al mismo tiempo la estricta barrera de seguridad en el servidor.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1429,7 +1505,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a hash de contraseñas (P-009 / INV-07), sesiones, transporte y CSRF (INV-03 / P-010), estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), invitaciones y reglas de delegación.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-010, resuelta en D-087 a D-090, y P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a hash de contraseñas (P-009 / INV-07), estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), invitaciones y reglas de delegación.
+- Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
 - Orden explícito entre overlays: la ordenación por punto de código del nombre del contribuyente (`compareCodePoints`) es determinista pero arbitraria si un overlay depende semánticamente de otro.
