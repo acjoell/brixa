@@ -47,6 +47,12 @@ Si se implementa renovación de tokens, deben definirse las reglas de expiració
 
 Los errores de autenticación no deben revelar innecesariamente si una cuenta existe.
 
+### Registro, aprovisionamiento y bootstrap
+
+- **Registro administrado por defecto:** El modelo estándar de provisión de cuentas es administrado (alta por un administrador o invitación controlada).
+- **Registro público condicionado (D-086):** Si se habilita registro público en proyectos de Auth sin multitenancy, este no debe otorgar privilegios administrativos automáticamente bajo ningún concepto. Debe incorporar controles estrictos de seguridad (rate limiting, mitigación de abuso y validación de contraseñas) y no debe permitir la creación pública de organizaciones.
+- **Bootstrap del primer administrador (D-085):** La inicialización de la primera cuenta administrativa debe realizarse exclusivamente mediante comandos de consola locales del proyecto generado. Queda prohibido el uso de credenciales predeterminadas o "de fábrica" y la exposición de endpoints HTTP públicos de configuración inicial. El comando debe ser idempotente y resistente a condiciones de carrera.
+
 ## 4. Autorización y RBAC
 
 Si se selecciona RBAC, el sistema debe distinguir entre autenticación y autorización.
@@ -55,27 +61,35 @@ Estar autenticado no implica tener permiso para realizar cualquier operación.
 
 ### Catálogo de permisos
 
-Los módulos pueden declarar los permisos que necesitan.
+Los módulos declaran los permisos que necesitan en el código fuente.
 
-El sistema puede reunirlos en un catálogo central para permitir su consulta, documentación y asignación a roles.
+El sistema debe definirlos de forma declarativa en el código y sincronizarlos con la base de datos (D-082).
 
-Registrar un permiso en el catálogo no protege automáticamente una ruta ni una operación.
+Registrar un permiso en el catálogo no protege automáticamente una ruta ni una operación. Los administradores no pueden definir permisos arbitrarios desde la interfaz o la API sin respaldo en el código.
 
-### Aplicación efectiva de permisos
+### Aplicación efectiva de permisos y propagación de contexto
 
 Cada ruta, controlador o caso de uso protegido debe aplicar explícitamente el control de autorización correspondiente.
 
 La implementación debe verificar el permiso requerido antes de ejecutar la operación protegida.
 
+El contexto del actor (`ActorContext`) debe propagarse de forma estrictamente explícita como argumento en servicios, casos de uso, repositorios y transacciones (D-080). Queda descartado el uso de `AsyncLocalStorage` (ALS) para comprobaciones de autorización o decisiones de aislamiento.
+
 Los controles no deben depender exclusivamente de que el frontend oculte botones o páginas.
 
-### Roles y permisos
+### Roles y permisos dinámicos
 
-Los roles deben agrupar permisos conocidos por el sistema.
+Los roles agrupan permisos conocidos del catálogo y pueden crearse, editarse y asignarse dinámicamente desde el panel o la API administrativa (D-082).
 
-La asignación de permisos debe validar que los permisos existen y que quien realiza la asignación está autorizado para hacerlo.
+Los alcances de autorización admitidos en esta etapa son exclusivamente de **aplicación** (sistema) y de **organización** (D-082). Se descarta la implementación de motores genéricos ABAC o ReBAC.
+
+La asignación de permisos debe validar que los permisos existen en el catálogo y que quien realiza la asignación está autorizado para hacerlo.
 
 No se deben aceptar permisos arbitrarios enviados por el cliente.
+
+### Extensibilidad modular
+
+Las capacidades Auth, RBAC y multitenancy deben permitir incorporar módulos de negocio, permisos nuevos y validaciones adicionales sin modificar sus mecanismos internos ni la lógica del núcleo de seguridad.
 
 ### Alcance sobre recursos
 
@@ -94,9 +108,35 @@ Estas restricciones deben verificarse en el servidor y aplicarse también a cons
 
 Si se selecciona multitenancy, el aislamiento entre organizaciones es un requisito crítico.
 
-El sistema debe determinar el contexto de la organización a partir de una fuente confiable y validada en el servidor.
+### Obligatoriedad de PostgreSQL RLS
 
-No debe confiar únicamente en un `tenantId`, `organizationId` o `carWashId` enviado por el cliente.
+El aislamiento a nivel de base de datos mediante Row-Level Security (RLS) en PostgreSQL es obligatorio para todas las variantes con multitenancy (D-064). SQLite queda excluido de multitenancy.
+
+El rol de la aplicación debe operar sin privilegios administrativos ni `BYPASSRLS`, forzando `FORCE ROW LEVEL SECURITY` en las tablas con aislamiento.
+
+### Determinación y validación del contexto de organización
+
+El sistema debe determinar la organización activa por petición y validarla obligatoriamente contra la base de datos en cada solicitud, comprobando que el actor posee una concesión de acceso vigente (D-080).
+
+No debe confiar únicamente en un `tenantId`, `organizationId` o parámetro enviado por el cliente.
+
+### Independencia de RBAC
+
+Multitenancy es completamente independiente de RBAC (D-064, D-083). Cuando multitenancy opera sin RBAC, existen organizaciones y concesiones de acceso organizacionales para vincular al usuario con la organización, pero NO se crean roles fijos `owner/member`. La autorización básica consiste en verificar la existencia de una concesión de acceso válida y vigente.
+
+### Ciclo de vida de concesiones de acceso
+
+Las concesiones de acceso entre usuarios y organizaciones se gobiernan mediante una marca temporal `revoked_at` (D-081). La revocación es definitiva; una reconcesión posterior genera una nueva fila independiente sin heredar roles previos. En PostgreSQL se debe aplicar un índice de unicidad parcial para concesiones vigentes (`WHERE revoked_at IS NULL`). Queda descartado el uso de campos booleanos universales `isActive`.
+
+### Separación estricta de administración de plataforma
+
+La administración de plataforma está estrictamente separada de la administración organizacional (D-084). Los administradores de plataforma operan a nivel de sistema y no poseen acceso global automático a los datos de negocio de las organizaciones ni cuentan con bypass genérico de Row-Level Security (RLS). Para operar sobre datos internos de una organización, requieren una concesión de acceso explícita y vigente en dicha organización.
+
+### Rendimiento y análisis de ejecución
+
+El uso de RLS no debe degradar inadvertidamente el rendimiento del sistema. Toda implementación con multitenancy y RLS requiere pruebas de rendimiento representativas con cargas realistas, comparación formal de rendimiento con y sin RLS, diseño cuidadoso de índices en columnas de aislamiento y filtros, y análisis sistemático de planes de ejecución (`EXPLAIN ANALYZE`) para descartar escaneos secuenciales innecesarios.
+
+### Operaciones bajo aislamiento
 
 Todas las operaciones relevantes deben respetar el contexto de la organización, incluidas:
 
@@ -114,8 +154,6 @@ Las modificaciones deben verificar que el recurso pertenece al ámbito autorizad
 La validación de identificadores aislada no sustituye el control de autorización.
 
 Las relaciones entre entidades también deben respetar el mismo ámbito. No debe ser posible asociar un recurso de una organización con otro recurso perteneciente a una organización diferente, salvo que exista una regla explícita y segura que lo permita.
-
-Los accesos administrativos globales deben estar definidos de forma explícita y contar con controles apropiados.
 
 ## 6. Validación de entradas
 
@@ -198,6 +236,10 @@ Casos importantes:
 - Usuario intenta asociar entidades de organizaciones diferentes.
 - Usuario intenta asignar permisos que no puede administrar.
 - Usuario deshabilitado intenta continuar usando una sesión, según el mecanismo implementado.
+- Usuario con concesión de acceso revocada (`revoked_at` registrado) intenta acceder a la organización.
+- Administrador de plataforma intenta acceder directamente a datos organizacionales sin concesión explícita o intenta eludir RLS.
+- Intento de asignación de privilegios administrativos o creación no autorizada de organizaciones en el registro público.
+- Ejecución concurrente o repetida del comando de bootstrap del primer administrador.
 
 Las pruebas deben verificar el resultado observable y que no se produzcan cambios indebidos en los datos.
 

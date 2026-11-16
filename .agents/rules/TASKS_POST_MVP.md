@@ -57,7 +57,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | PENDIENTE | — |
 | INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
-| T-014-0 | BLOQUEADA | Decisiones de INV-03, INV-04a, INV-04b e INV-05b; P-011 |
+| T-014-0 | BLOQUEADA | Decisiones técnicas pendientes de INV-03, INV-04a, INV-05b / INV-08, P-009 / INV-07 y modelo de amenazas completo (P-011 e INV-04b consolidadas en D-080 a D-086) |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
@@ -262,38 +262,35 @@ Notas:
 
 ### T-014-0 — Diseño del modelo de identidad, organización y contexto
 
-**Estado:** BLOQUEADA (por las decisiones que dependen de INV-03, INV-04a, INV-04b e INV-05b, ya ejecutadas, y por P-011)
-**Aprobación:** Aprobado (alcance como tarea de diseño previa a las capacidades). Su contenido depende de evidencia.
-**Dependencias:** INV-03, INV-04a, INV-04b, INV-05b (resultados reportados) y P-011.
+**Estado:** BLOQUEADA (faltan decisiones técnicas: INV-03, P-009 / INV-07, soporte RLS en Drizzle fijado / INV-04a, estrategia JS/TS / INV-08, y el modelo de amenazas completo. P-011 e INV-04b consolidadas en D-080 a D-086)
+**Aprobación:** Aprobado (alcance como tarea de diseño previa a las capacidades). Su contenido depende de evidencia restante.
+**Dependencias:** INV-03, INV-04a, INV-05b / INV-08, INV-07 (resultados reportados/pendientes) y modelo de amenazas. P-011 resuelta (D-080 a D-086).
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
-**Alcance (sin código):**
-- Usuarios, organizaciones y **concesiones de acceso** (D-063): cardinalidad. Sin suscripciones, planes ni jerarquías empresariales obligatorias.
-- **Estados de la concesión** (borrado de la fila, `revoked_at` o estado explícito; sin `isActive` universal) y **alcances** (sistema y organización en la primera versión; unidad o recurso solo si se decide), P-011.
-- Concesión de acceso básica cuando RBAC no está activo (INV-04b propuso roles fijos de propietario y miembro: es una propuesta, no una decisión) y su integración con roles y permisos por organización cuando sí lo está. Con multitenancy, los roles se asignan a la concesión de acceso y no al usuario global (propuesta de INV-04b).
-- **Primer administrador:** script dentro del proyecto generado, sin credenciales por defecto y sin depender del CLI de Brixa; en TypeScript con Docker de producción debe poder ejecutarse como JavaScript compilado (propuesta, pendiente).
-- **Forma única o variante del esquema** con y sin RBAC y con y sin multitenancy: se decide si las tablas de roles llevan siempre un ámbito de organización opcional o si hay variantes (cada variante multiplica los archivos de esquema, ver T-014a).
-- Organización activa y su relación con la credencial.
-- Tablas globales frente a tablas con alcance. El inicio de sesión busca al usuario antes de conocer la organización.
-- **Identidad externa verificada.** El responsable estableció que multitenancy requiere «autenticación o una identidad externa verificada». Se define el contrato (una función que resuelve al actor verificado) y se decide si T-014c lo implementa en esta etapa (ver «Cuestiones abiertas»).
-- Contexto de ejecución (actor, organización, transacción): forma elegida según INV-04b.
-- Catálogo de permisos persistido o servido desde el código.
-- Estrategia JavaScript/TypeScript, según INV-05b.
-- Reglas de validación del CLI (sección 8).
-- Actualización del modelo de amenazas con un control asignado a cada amenaza.
+**Alcance consolidado y decisiones aprobadas (sin código):**
+- **Identidad, organizaciones y concesiones N:M (D-080):** usuarios globales y organizaciones desacoplados. La organización activa se selecciona por petición y se valida obligatoriamente contra la base de datos comprobando que existe una concesión vigente. Propagación de `ActorContext` de forma estrictamente explícita como argumento en servicios, repositorios y transacciones; se descarta `AsyncLocalStorage` (ALS) para autorización y aislamiento.
+- **Ciclo de vida de concesiones con `revoked_at` (D-081):** revocación definitiva mediante marca temporal, sin `isActive` universal. Volver a conceder acceso inserta una nueva fila que no hereda roles anteriores. Unicidad parcial de concesiones vigentes en PostgreSQL (`WHERE revoked_at IS NULL`).
+- **RBAC dinámico (D-082):** catálogo canónico de permisos definido en código y sincronizado con BD. Roles, asignaciones y permisos administrables desde el panel/API. Alcances de aplicación y organización. Se descarta expresamente un motor genérico ABAC/ReBAC.
+- **Multitenancy independiente de RBAC (D-083):** sin RBAC, existen concesiones organizacionales pero no se imponen roles fijos `owner/member`.
+- **Administración de plataforma separada de la organizacional (D-084):** sin acceso global automático a datos de organizaciones ni bypass genérico de RLS.
+- **Bootstrap seguro y aprovisionamiento local (D-085):** comandos CLI locales del proyecto generado, sin credenciales por defecto, resistente a concurrencia y sin endpoint público. Aprovisionamiento organizacional mediante herramientas locales; panel de plataforma fuera de v1.
+- **Registro público opcional para Auth sin multitenancy (D-086):** configurable en el CLI exclusivamente para Auth sin multitenancy (registro administrado como predeterminado), sin privilegios administrativos automáticos y sin creación pública de organizaciones. Posterior al núcleo Auth y con controles de seguridad.
+- **Criterio de extensibilidad modular (aprobado):** Las capacidades Auth, RBAC y multitenancy deben permitir incorporar módulos de negocio, permisos nuevos y validaciones adicionales sin modificar sus mecanismos internos. No implica implementar un motor ABAC/ReBAC ni actualizaciones automáticas de overlays después de generar un proyecto.
+- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); credencial opaca o JWT, renovación y CSRF (INV-03); algoritmo y parámetros de hash de contraseñas (P-009 / INV-07); estrategia JavaScript/TypeScript (INV-05b / INV-08); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
 
 **Áreas afectadas:** ninguna de código. Producto: documento de diseño y propuestas de decisión.
 
 **Criterios de aceptación:**
-- Cada pregunta del alcance tiene respuesta con referencia a la evidencia de su investigación.
+- Cada pregunta técnica abierta tiene respuesta con referencia a la evidencia de su investigación.
 - Existe la lista de tablas globales y con alcance para cada combinación de capacidades.
 - Cada amenaza del modelo tiene al menos un control y una prueba negativa asignados.
+- Las capacidades permiten incorporar módulos de negocio, permisos y validaciones sin tocar sus mecanismos internos.
 - Las decisiones salen como propuestas para aprobación.
 
 **Pruebas positivas / negativas:** no aplican. **Verificaciones:** revisión cruzada del modelo de amenazas contra los casos de SECURITY §11.
 
-**Riesgos:** diseñar sin evidencia suficiente (por ejemplo, soporte de RLS en el Drizzle fijado). Si falta evidencia, la tarea no se cierra.
+**Riesgos:** diseñar sin evidencia suficiente (soporte de RLS en el Drizzle fijado, INV-04a; hash nativo vs librería, INV-07). Si falta evidencia o el modelo de amenazas está incompleto, la tarea no se cierra.
 
 ---
 
@@ -450,11 +447,11 @@ Notas:
 - CSRF y atributo `Secure` de las cookies según las tres topologías reales: pendiente de evidencia.
 - Límite de intentos de autenticación sin bloqueo permanente de cuentas (nivel 2 de abuso).
 - Mensajes de error que no revelan si una cuenta existe.
-- A decidir en T-014-0: cambio de contraseña, primera cuenta administradora sin credenciales por defecto, creación de usuarios sin registro público, listado y cierre de sesiones, desactivación y reactivación de cuentas, normalización de identificadores, limpieza de credenciales caducadas, caducidad absoluta o por inactividad.
+- A decidir en T-014-0: cambio de contraseña, primera cuenta administradora sin credenciales por defecto (resuelta: bootstrap local seguro en D-085), creación de usuarios y registro administrado por defecto frente a registro público opcional en Auth sin multitenancy (D-086), listado y cierre de sesiones, desactivación y reactivación de cuentas, normalización de identificadores, limpieza de credenciales caducadas, caducidad absoluta o por inactividad.
 - Protección de la documentación de API cuando está activa.
 - Bearer en fullstack: no se descarta ni se admite hasta ver la matriz de INV-03.
 
-**Fuera de alcance:** registro público y recuperación de contraseña (salvo que aparezca una razón importante), MFA y OAuth/SSO.
+**Fuera de alcance:** registro público en proyectos con multitenancy (excluido terminantemente por D-086; admisible como opción en Auth sin multitenancy con registro administrado como predeterminado tras consolidar el núcleo), creación pública de organizaciones (D-086), recuperación de contraseña (salvo que aparezca una razón importante), MFA y OAuth/SSO.
 
 **Matriz de compatibilidad (modalidad × backend/fullstack × cliente):** la entrega INV-03; define qué combinaciones se soportan inicialmente.
 
@@ -516,9 +513,8 @@ Notas:
 - Autorización invocable desde servicios y casos de uso, no solo desde middleware HTTP.
 - Auditoría mínima: quién cambió roles, permisos y asignaciones.
 
-**Pendiente de decisión (INV-04b ejecutada):** forma del contexto del actor y de la organización. INV-04b reportó 0 fugas en 200 tareas concurrentes con paso explícito y con `AsyncLocalStorage`, y recomienda el paso explícito (propuesta, no aprobada). Catálogo de permisos en el código y roles en la base de datos (propuesta de INV-04b). Con multitenancy, los roles se asignan a la concesión de acceso, no al usuario global.
-**Propuesto:** regla «solo se otorgan permisos que se poseen»; prohibir editar el propio rol; invariante del último administrador comprobada dentro de una transacción con bloqueo; permisos leídos por petición, sin caché local entre instancias.
-**Pendiente de decisión:** administrador de plataforma entre organizaciones (propuesto: excluido en esta etapa).
+**Decisiones consolidadas (D-080, D-082, D-083, D-084):** paso estrictamente explícito de `ActorContext` (descartando `AsyncLocalStorage` para autorización); RBAC dinámico con catálogo de permisos en código sincronizado con BD; roles, asignaciones y permisos administrables desde el panel/API; alcances de aplicación y organización; sin motor genérico ABAC/ReBAC; con multitenancy, los roles se asignan a la concesión de acceso y no al usuario global; administración de plataforma separada de la organizacional sin bypass de RLS ni acceso global automático.
+**Propuesto / pendientes de diseño en T-014-0:** regla «solo se otorgan permisos que se poseen» y reglas de delegación; prohibir editar el propio rol; invariante del último administrador comprobada dentro de una transacción con bloqueo; permisos leídos por petición, sin caché local entre instancias; invitaciones a organizaciones.
 
 **Áreas afectadas:** **[I]** CLI y generador. **[L]** plantillas backend y overlays de base de datos (cuatro archivos de esquema por tabla). Rutas nuevas: por determinar.
 
@@ -561,9 +557,9 @@ Notas:
 **Aprobación:** Aprobado (alcance). **No depende de RBAC.**
 **Dependencias:** T-014a, T-014-0, T-018, INV-04a. La composición de backend requerida ya está disponible (D-069).
 
-**Objetivo:** aislamiento por organización en PostgreSQL con RLS. SQLite no tiene multitenancy en esta etapa.
+**Objetivo:** aislamiento obligatorio por organización en PostgreSQL mediante Row-Level Security (RLS) para todas las variantes con multitenancy. SQLite no tiene multitenancy en esta etapa.
 
-**Requisitos de identidad:** autenticación de Brixa **o una identidad externa verificada**. Sin RBAC activo, concesión de acceso básica (D-063); los roles fijos de propietario y miembro son una propuesta de INV-04b, no una decisión. La integración con identidad externa depende de la decisión de T-014-0 (ver «Cuestiones abiertas»).
+**Requisitos de identidad y acceso:** autenticación de Brixa **o una identidad externa verificada**. Sin RBAC activo, concesiones de acceso organizacionales N:M con ciclo de vida gobernado por `revoked_at` y unicidad parcial (D-080, D-081), sin roles fijos `owner/member` (D-083). Organización seleccionada por petición y validada contra la BD comprobando la vigencia de la concesión; propagación estrictamente explícita de `ActorContext` sin ALS (D-080). Administración de plataforma separada sin bypass genérico de RLS ni acceso global automático (D-084). La integración con identidad externa depende de la decisión de T-014-0 (ver «Cuestiones abiertas»).
 
 **Alcance a confirmar con INV-04a:**
 - Rol propietario para migraciones y rol de ejecución sin privilegios ni `BYPASSRLS`.
@@ -579,6 +575,7 @@ Notas:
 2. Guía y ejemplo práctico probado (en documentación y pruebas, no como código de negocio ficticio).
 3. Pruebas negativas reutilizables.
 4. Auditoría estructural de tablas y políticas RLS que trabaja con un **registro explícito** de tablas con aislamiento. No descubre por sí sola qué tablas deben ser multiempresa.
+5. Evaluación de rendimiento representativa: conjunto de pruebas con cargas realistas, comparación formal con y sin RLS, definición de índices requeridos y análisis sistemático de planes de ejecución (`EXPLAIN ANALYZE`).
 
 **Áreas afectadas:** **[L]** overlay `database-postgres` (ts y js), `compose.postgres.yaml` y variante fullstack (roles de base de datos en el arranque del contenedor: por determinar). **[I]** CLI y generador. Rutas nuevas: por determinar.
 
@@ -586,12 +583,13 @@ Notas:
 - La aplicación se conecta con un rol sin privilegios; una prueba falla si el rol es superusuario, propietario o tiene `BYPASSRLS`.
 - Una tabla del registro sin RLS habilitado y forzado, o sin política, hace fallar la auditoría.
 - Los controles negativos del arnés detectan la eliminación de una política y la conexión con un rol privilegiado.
+- Se entregan pruebas de rendimiento representativas que comparan escenarios con y sin RLS, validando que los índices definidos eviten escaneos secuenciales innecesarios mediante análisis de planes de ejecución (`EXPLAIN ANALYZE`).
 
 **Pruebas positivas:** cada organización lee y escribe sus datos; cambio de organización activa con concesión de acceso válida.
 **Pruebas negativas (SECURITY §11):** usuario de una organización lee, modifica o elimina datos de otra; envía un identificador de organización propio; asocia entidades de organizaciones distintas; consulta sin contexto; contexto residual tras reutilizar una conexión del pool; exportaciones y agregados; cambio a una organización sin concesión de acceso; concesión de acceso retirada.
-**Verificaciones:** requieren PostgreSQL, por tanto el ámbito `full` (Linux). No se verifica en Windows ni macOS.
+**Verificaciones:** requieren PostgreSQL, por tanto el ámbito `full` (Linux). No se verifica en Windows ni macOS. Incluye ejecución de pruebas de rendimiento con/sin RLS y análisis de planes de ejecución (`EXPLAIN ANALYZE`).
 
-**Riesgos y limitaciones:** **RLS no protege frente a SQL arbitrario ni inyección SQL** (reportado en INV-04a e INV-04b): es defensa en profundidad contra filtros olvidados, y el servidor sigue siendo responsable de autenticar al actor, validar su acceso y establecer el contexto. El aislamiento solo cubre tablas registradas y el acceso que pasa por el patrón generado. Tareas en segundo plano, cachés, archivos y vistas del desarrollador quedan bajo su responsabilidad. En bases gestionadas, el desarrollador debe crear los dos roles. Soporte de políticas en el Drizzle fijado: sin comprobar.
+**Riesgos y limitaciones:** **RLS no protege frente a SQL arbitrario ni inyección SQL** (reportado en INV-04a e INV-04b): es defensa en profundidad contra filtros olvidados, y el servidor sigue siendo responsable de autenticar al actor, validar su acceso y establecer el contexto. El aislamiento solo cubre tablas registradas y el acceso que pasa por el patrón generado. Tareas en segundo plano, cachés, archivos y vistas del desarrollador quedan bajo su responsabilidad. En bases gestionadas, el desarrollador debe crear los dos roles. Soporte de políticas en el Drizzle fijado: sin comprobar. Sobrecoste de rendimiento de RLS en consultas complejas o filtros masivos sin los índices adecuados.
 
 ---
 
@@ -671,7 +669,7 @@ Se rechaza con mensaje claro y no se fuerzan valores en silencio (PROJECT_VISION
 Para decisión del responsable (con valor por defecto cuando se propone uno):
 
 1. **Identidad externa en T-014c.** ¿Se implementa un adaptador (opción del CLI y función `resolveActor`) en esta etapa o solo el contrato? Propuesta: solo el contrato.
-2. **Administrador de plataforma entre organizaciones.** Propuesta: excluirlo. La propuesta v3 deja abierto el alcance «sistema»; hay que aclarar si equivale a este administrador (P-011).
+2. **Administrador de plataforma entre organizaciones.** Resuelta por D-084 y D-085: administración de plataforma estrictamente separada de la organizacional, sin acceso global automático a datos de organizaciones ni bypass genérico de RLS; aprovisionamiento local seguro sin panel global en v1.
 3. **Propiedades desconocidas en validación** (descartar o rechazar). Tras INV-02.
 4. **Router, estilos y pruebas del frontend.** Tras INV-03, INV-05a e INV-06 (P-010, P-017).
 5. **Versión de `package.json` en `main`** tras el tag (P-016). Por defecto: versión de preparación.
@@ -679,11 +677,11 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 7. **Relación con la decisión de validar `DATABASE_URL` sin que el servidor lo importe.** Tras INV-02.
 8. **Orden entre composición y seguridad base.** Este archivo ordena T-017a antes de T-017b; la propuesta v3 propone endurecer antes. ¿Se adelantan solo las partes que no tocan archivos compartidos (`redact` en los overlays de base de datos, `nginx.conf`)?
 9. **Multitenancy con SQLite.** D-064 la deja fuera de esta etapa según el alcance aprobado el 2026-11-04; la propuesta v3 la lista como abierta. Confirmar que queda excluida.
-10. **Estados de la concesión de acceso y alcances de la primera versión** (P-011), incluida la columna de alcance desde el inicio.
+10. **Estados de la concesión de acceso y alcances de la primera versión.** Resuelta por D-080 a D-083 (P-011): ciclo de vida con `revoked_at` definitivo sin `isActive` universal, unicidad parcial en PostgreSQL (`WHERE revoked_at IS NULL`), alcances de aplicación y organización, y multitenancy sin roles fijos `owner/member`.
 11. **Reproducibilidad de las plantillas** (P-008) tras las versiones resueltas de T-020.
 12. **Protección de tags `v*`** en el repositorio (cambio de configuración no autorizado en T-019).
 
-Dependen de evidencia (no se deciden antes): hash (INV-07), credencial opaca o JWT, Bearer en fullstack, CSRF, versión de Zod, almacén de abuso, catálogo de permisos, contexto del actor, estrategia JS/TS (INV-08), mecanismo de composición, forma del esquema con y sin RBAC y multitenancy.
+Dependen de evidencia (no se deciden antes): hash de contraseñas (INV-07 / P-009), credencial opaca o JWT, Bearer en fullstack, CSRF, renovación (INV-03), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), soporte de políticas RLS en Drizzle y evaluación de rendimiento de RLS en PostgreSQL (INV-04a / T-014c), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy.
 
 ## 12. Regla de actualización
 

@@ -289,9 +289,9 @@ Solo se dispone del complemento INV-03b (Chromium 156 y Firefox 157; Safari no v
 
 ### P-011 — Modelo de acceso: estados, alcances y primer administrador
 
-**Estado:** Pendiente (continuación de D-063).
+**Estado:** Resuelta (D-080 a D-086).
 
-Estados de la concesión de acceso: borrado de la fila, `revoked_at` o un estado explícito, sin `isActive` universal. Alcances de la primera versión (sistema y organización) y si se incluye desde el inicio una columna de alcance, dado que un proyecto generado no recibe migraciones de Brixa. Primer administrador mediante un script del propio proyecto generado, sin credenciales por defecto y sin depender del CLI.
+Resuelta mediante la consolidación de decisiones: relación N:M entre usuarios y organizaciones, validación de organización por petición y paso explícito de `ActorContext` (D-080); ciclo de vida con `revoked_at` y unicidad parcial (D-081); RBAC dinámico con catálogo en código, sincronizado con BD y alcances de aplicación y organización (D-082); independencia de multitenancy sin roles fijos (D-083); separación de plataforma y organizaciones sin bypass de RLS (D-084); bootstrap seguro local sin credenciales predeterminadas ni endpoint público (D-085); y registro público opcional para Auth sin multitenancy (D-086).
 
 ### P-012 — Estrategia de composición de overlays
 
@@ -989,23 +989,25 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ### D-063 — Modelo genérico de identidad y acceso (dirección)
 
-**Estado:** Confirmada como dirección. Detalles pendientes (ver P-011).
+**Estado:** Confirmada como dirección. Detalles resueltos en D-080 a D-086 (P-011).
 
 **Decisión:** Las futuras capacidades de autenticación, autorización y multitenancy se modelan con estos conceptos separados: **usuario** (identidad global), **organización** (contexto de administración y aislamiento de datos), **concesión de acceso** (relación que determina a qué organización puede acceder un usuario; se evita el término «membresía» por su connotación comercial), **roles**, **permisos** y **alcances** de autorización (sistema, organización y, si se decide, unidad o recurso).
 
 **No se presupone:** suscripciones, planes ni límites comerciales; que cada usuario pertenezca a una sola organización; que cada organización sea un cliente que paga; una jerarquía empresarial obligatoria; un campo `isActive` universal. Los roles globales y los organizacionales no se mezclan automáticamente.
 
-**Pendiente:** estados de la concesión de acceso, alcances en la primera versión y primer administrador (P-011).
+**Detalles consolidados:** los estados de la concesión de acceso (`revoked_at`), los alcances de la primera versión (aplicación y organización), la relación N:M, el paso explícito de `ActorContext` y el primer administrador (bootstrap local seguro) quedan fijados en las decisiones D-080 a D-086.
 
 ---
 
 ### D-064 — Alcance de seguridad y autorización posterior a 0.1.0
 
-**Estado:** Confirmada en alcance (aprobada por el propietario el 2026-11-04; registrada el 2026-11-07). Los detalles técnicos siguen pendientes de evidencia y decisión.
+**Estado:** Confirmada en alcance (aprobada por el propietario el 2026-11-04; registrada el 2026-11-07; alcance de registro público modificado formalmente por D-086). Los detalles técnicos siguen pendientes de evidencia y decisión.
 
 **Decisión:** El trabajo de T-014 se divide y se registra en `TASKS_POST_MVP.md`: diseño previo (T-014-0); autenticación con dos opciones en el CLI, cookies o Bearer, sobre un núcleo común (T-014a) y sus vistas en aplicación completa (T-014a-ui); RBAC con motor, API administrativa y auditoría mínima (T-014b1) y panel de administración (T-014b2); multitenancy con PostgreSQL RLS, **independiente de RBAC** (T-014c); integración de RBAC con multitenancy (T-014d). Antes de ellas: composición de overlays (T-017a, T-017a-ui), seguridad base con Zod (T-017b) y arnés de verificación (T-018).
 
 **Reglas de alcance aprobadas:** multitenancy solo con PostgreSQL en esta etapa (SQLite sin multitenancy); multitenancy requiere autenticación de Brixa o una identidad externa verificada; se mantienen JavaScript y TypeScript para toda capacidad; quedan fuera de esta etapa MFA, OAuth/SSO, auditoría avanzada, registro público y recuperación de contraseña (salvo razón importante), integración con proveedores de identidad externos (solo contrato) y MongoDB.
+
+**Nota de modificación de alcance (D-086):** El alcance relativo al registro público fue modificado expresamente por D-086: se admite como opción en el CLI exclusivamente para proyectos con autenticación sin multitenancy (manteniendo registro administrado como predeterminado), implementado de forma posterior al núcleo de Auth y sujeto a controles de seguridad. Se mantiene fuera de alcance la creación pública de organizaciones y el registro público para multitenancy.
 
 **Pendiente de evidencia o decisión:** hash de contraseñas, tipo de credencial (opaca o JWT), Bearer en fullstack, CSRF, versión de Zod, almacén de contadores de abuso, catálogo de permisos, contexto del actor, estrategia JS/TS, mecanismo de composición y forma del esquema (ver P-008 a P-017).
 
@@ -1291,6 +1293,124 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-080 — Identidad global, organizaciones N:M y propagación explícita de ActorContext
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011 e INV-04b).
+
+**Contexto:** Se requería definir la relación estructural entre identidades de usuario y organizaciones, el mecanismo para seleccionar y validar la organización activa por petición y cómo viaja el contexto de ejecución del actor en el backend.
+
+**Decisión:**
+- Desacoplamiento entre identidad global (usuarios) y organizaciones mediante una relación N:M a través de concesiones de acceso (`access grants`). Un usuario puede pertenecer a múltiples organizaciones y una organización agrupar a múltiples usuarios.
+- La organización activa se selecciona por petición (mediante cabecera o parámetro explícito) y se valida obligatoriamente contra la base de datos en cada solicitud comprobando que el actor posee una concesión de acceso vigente hacia dicha organización.
+- El contexto del actor (`ActorContext`) se propaga de forma estrictamente explícita como argumento en llamadas a servicios, casos de uso, repositorios y transacciones.
+- Se descarta el uso de `AsyncLocalStorage` (ALS) para comprobaciones de autorización y aislamiento de datos.
+
+**Motivo:** La propagación explícita de `ActorContext` es determinista, comprobable en tiempo de compilación y análisis estático, y elimina riesgos de fugas de contexto o retención residual en entornos asíncronos y pools de conexiones.
+
+**Consecuencias:** Todo servicio y repositorio que realice operaciones sensibles o dependientes de organización debe recibir `ActorContext` como argumento.
+
+---
+
+### D-081 — Ciclo de vida de concesiones de acceso con revoked_at y unicidad parcial
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011).
+
+**Contexto:** Se necesitaba definir el ciclo de vida de las concesiones de acceso entre usuarios y organizaciones, evitando campos `isActive` universales que enmascaran el estado real.
+
+**Decisión:**
+- La baja o revocación de una concesión de acceso se registra mediante una marca temporal `revoked_at`.
+- La revocación es definitiva: la fila revocada no se reactiva ni se limpia `revoked_at`.
+- Si se vuelve a conceder acceso a un usuario previamente revocado en una organización, se inserta una nueva fila de concesión independiente, la cual no hereda ningún rol ni asignación previa.
+- En PostgreSQL se aplica un índice de unicidad parcial para concesiones vigentes (`WHERE revoked_at IS NULL`) que garantiza a nivel de base de datos que solo exista una concesión activa por par `(user_id, organization_id)`.
+
+**Motivo:** Proporciona un registro histórico inmutable y auditable del ciclo de vida del acceso, previene la reactivación accidental de privilegios obsoletos y asegura la integridad relacional en la base de datos.
+
+---
+
+### D-082 — RBAC dinámico con catálogo en código, sincronización en BD y alcances
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011 e INV-04b).
+
+**Contexto:** Se requería definir el balance entre rigidez del código y flexibilidad operativa para la definición de roles y permisos en proyectos generados.
+
+**Decisión:**
+- RBAC dinámico. El catálogo canónico de permisos se define de manera declarativa en el código fuente del proyecto generado y se sincroniza con la base de datos.
+- Los administradores no pueden inventar ni registrar permisos arbitrarios desde la API o el panel que no existan previamente en el código fuente.
+- Los roles, las asignaciones de permisos a roles y las asignaciones de roles a concesiones de acceso son dinámicos y administrables desde el panel y la API administrativa.
+- Los alcances de autorización admitidos en esta etapa son exclusivamente dos: **aplicación** (sistema) y **organización**.
+- Se descarta expresamente la implementación de un motor genérico ABAC (Attribute-Based Access Control) o ReBAC (Relationship-Based Access Control).
+
+**Motivo:** Garantiza que los permisos correspondan a capacidades reales implementadas por el desarrollador, dotando a la vez de flexibilidad operativa para configurar roles según las necesidades del despliegue, sin incurrir en la complejidad de motores de políticas dinámicas.
+
+---
+
+### D-083 — Independencia de Multitenancy respecto a RBAC y ausencia de roles fijos
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011).
+
+**Contexto:** La propuesta INV-04b sugería introducir roles fijos de `owner` y `member` cuando multitenancy estuviera activo sin RBAC.
+
+**Decisión:**
+- Multitenancy es completamente independiente de RBAC (en concordancia con D-064).
+- Cuando un proyecto se genera con multitenancy pero sin RBAC, existen organizaciones y concesiones de acceso organizacionales, pero NO se crean roles fijos `owner` ni `member`.
+- La autorización en multitenancy sin RBAC se limita a verificar la existencia de una concesión de acceso válida y vigente hacia la organización seleccionada.
+
+**Motivo:** Preserva la ortogonalidad de las capacidades y evita imponer modelos de roles prescriptivos o artificiales cuando el desarrollador solo requiere aislamiento de datos entre organizaciones.
+
+---
+
+### D-084 — Separación estricta entre administración de plataforma y organizacional
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011).
+
+**Contexto:** Se requería delimitar si un administrador con alcance global de plataforma podría consultar datos de cualquier organización o eludir Row-Level Security (RLS).
+
+**Decisión:**
+- La administración de plataforma está estrictamente separada de la administración organizacional.
+- Los administradores de plataforma operan exclusivamente a nivel de alcance de sistema (p. ej., aprovisionamiento de organizaciones o gestión global de usuarios) y no poseen acceso global automático a los datos de negocio de las organizaciones ni cuentan con bypass genérico de Row-Level Security (RLS).
+- Si un usuario con privilegios de plataforma requiere operar sobre los datos internos de una organización, debe contar con una concesión de acceso explícita y vigente en dicha organización.
+
+**Motivo:** Aplicación rigurosa del principio de mínimo privilegio y prevención de fugas de aislamiento o accesos no autorizados a través de cuentas de infraestructura/sistema.
+
+---
+
+### D-085 — Bootstrap seguro mediante comandos locales y aprovisionamiento organizacional
+
+**Estado:** Confirmada (2026-11-16; consolidación de P-011).
+
+**Contexto:** Definir cómo se crea el primer administrador del sistema y las organizaciones iniciales sin introducir vulnerabilidades de arranque o endpoints desprotegidos.
+
+**Decisión:**
+- La inicialización (bootstrap) de la primera cuenta administrativa se realiza exclusivamente mediante comandos de consola (CLI / scripts) del propio proyecto generado.
+- Queda prohibido el uso de credenciales predeterminadas o "de fábrica".
+- Queda prohibida la exposición de endpoints HTTP públicos o asistentes web de inicialización para el primer administrador.
+- El comando de bootstrap debe ser idempotente y resistente a condiciones de carrera y concurrencia.
+- El aprovisionamiento de organizaciones iniciales se realiza igualmente mediante herramientas y comandos locales del proyecto generado.
+- El desarrollo de un panel global de administración de plataforma queda fuera del alcance de la versión v1.
+
+**Motivo:** Cierra vectores de ataque críticos en el despliegue inicial y elimina riesgos derivados de credenciales por defecto o endpoints de instalación accesibles desde la red.
+
+---
+
+### D-086 — Registro público opcional para Auth sin multitenancy (modificación de alcance de D-064)
+
+**Estado:** Confirmada (2026-11-16; modifica formalmente el alcance de D-064).
+
+**Contexto:** D-064 dejó fuera de alcance el registro público ("quedan fuera de esta etapa MFA, OAuth/SSO, auditoría avanzada, registro público y recuperación de contraseña"). Se evaluó la necesidad de permitir auto-registro en aplicaciones mono-organización o de consumo general.
+
+**Decisión:**
+- Se admite el registro público de usuarios como opción configurable en el CLI exclusivamente para proyectos que incluyan Auth sin multitenancy (tanto Auth básica como Auth combinada con RBAC).
+- El registro administrado (creación de usuarios por un administrador o invitación) se mantiene como la opción predeterminada.
+- El registro público nunca otorga privilegios administrativos de manera automática.
+- Queda terminantemente excluida la creación pública de organizaciones en proyectos con multitenancy.
+- La implementación del registro público se realizará de forma posterior a la entrega y verificación del núcleo de autenticación (T-014a), incorporando controles de seguridad obligatorios (limitación de tasa / rate limiting, validación robusta y mitigación de abuso).
+
+**Motivo:** Brindar flexibilidad para proyectos orientados al público sin comprometer el modelo de multitenancy ni la seguridad de privilegios iniciales.
+
+**Relación con D-064:** Esta decisión modifica formalmente la exclusión absoluta de registro público establecida en D-064, limitándola a proyectos con multitenancy y fijando las condiciones de seguridad requeridas.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1309,7 +1429,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a hash de contraseñas (P-009 / INV-07), sesiones, transporte y CSRF (INV-03 / P-010), estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), invitaciones y reglas de delegación.
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
 - Orden explícito entre overlays: la ordenación por punto de código del nombre del contribuyente (`compareCodePoints`) es determinista pero arbitraria si un overlay depende semánticamente de otro.
