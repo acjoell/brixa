@@ -1605,6 +1605,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Motivo:** La asignación local por transacción con `is_local = true` y propagación explícita de `tx` es atómica, previene fugas de contexto entre conexiones de un pool y asegura un comportamiento determinista y verificable sin depender de contextos globales o hilos asíncronos opacos.
 
+**Nota de aclaración técnica (2026-11-17, T-014-0 B-8):** Se corrige la imprecisión del informe preliminar: ejecutar `SET LOCAL` o `set_config(..., true)` fuera de una transacción explícita en PostgreSQL no implica automáticamente una contaminación persistente de la conexión del pool; el fallo técnico real es que en modo autocommit el efecto finaliza inmediatamente al completarse la sentencia y el contexto local no permanece disponible para las operaciones posteriores, provocando denegación por defecto (cero filas). Por ello, todas las operaciones sobre tablas organizacionales (incluidas lecturas `SELECT` y endpoints `GET`) deben ejecutarse invariablemente dentro de una transacción explícita (`db.transaction`).
+
 **Consecuencias:** Todo acceso a entidades organizacionales debe envolverse en una transacción con contexto organizacional establecido.
 
 ---
@@ -1744,6 +1746,236 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-099 — Cookies y desarrollo local: Secure obligatorio en producción, excepción HTTP controlada y prefijo __Host- (T-014-0 A-1)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 A-1).
+
+**Contexto:** D-089 fijó las opciones base de cookies (`HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, sin `Domain` y nombre específico por proyecto). Sin embargo, era necesario reglamentar formalmente los entornos de desarrollo local sobre HTTP, el comportamiento ante proxies de terminación TLS y las condiciones de emisión del prefijo `__Host-`.
+
+**Decisión:**
+- **Producción:** HTTPS y cookies con atributo `Secure` estrictamente obligatorias. Cualquier configuración que intente emitir cookies de sesión sin `Secure` en producción o staging debe fallar de forma temprana y explícita al arrancar el servidor (mediante validación Zod en `src/config`), sin degradación silenciosa ni permisiva.
+- **Desarrollo HTTP local:** Se autoriza una excepción explícita y acotada únicamente cuando `NODE_ENV === 'development'` sobre orígenes locales (`localhost` o `127.0.0.1`), permitiendo omitir el atributo `Secure`. Esta excepción debe emitir un aviso técnico visible en la consola de arranque; queda prohibido silenciarla. La excepción nunca aplica a entornos staging ni producción.
+- **HttpOnly y SameSite=Lax:** Se mantienen rigurosamente obligatorios en todos los entornos sin excepción alguna, incluido desarrollo local sobre HTTP.
+- **Prefijo `__Host-`:** Se utilizará única y exclusivamente cuando se cumplan de forma acumulativa y estricta todos sus requisitos formales: conexión sobre origen seguro HTTPS (atributo `Secure` activo), ruta raíz (`Path=/`) y ausencia total del atributo `Domain`. En desarrollo local sobre HTTP donde `Secure` no esté habilitado, el prefijo `__Host-` no se emitirá para evitar el rechazo de la cookie por el navegador.
+- **Terminación TLS mediante proxy:** En topologías con terminación TLS en proxies inversos o balanceadores de carga confiables (p. ej. Nginx, Cloudflare, AWS ALB), Express debe configurarse explícitamente con `trust proxy` acotado a la red interna confiable para inspeccionar cabeceras `X-Forwarded-Proto` y validar el protocolo seguro.
+- **Separación conceptual de HSTS:** No confundir la configuración de cookies seguras con la cabecera HSTS (`Strict-Transport-Security`). De acuerdo con D-074, HSTS no es configurado por Brixa en la aplicación Express y debe ser gestionado por el operador en el proxy de terminación TLS.
+
+**Motivo:** Proporciona una clara frontera defensiva que impide que excepciones de desarrollo degraden la seguridad de producción, respetando los estándares de navegadores modernos sin romper la experiencia del desarrollador en local.
+
+---
+
+### D-100 — Proveedor de identidad en Auth v1: identidad interna exclusiva y desacoplamiento para extensiones futuras (T-014-0 A-2)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 A-2).
+
+**Contexto:** Se requería delimitar si Auth v1 contemplaría autenticación externa o federada y cómo se vincula la identidad global con el modelo de multitenancy.
+
+**Decisión:**
+- **Identidad interna exclusiva en v1:** Auth v1 utiliza única y exclusivamente el proveedor de identidad interno de Brixa (usuarios creados y autenticados localmente en el backend del proyecto generado).
+- **Multitenancy acoplado a la identidad global interna:** El modelo multitenant de Brixa v1 depende exclusivamente de esta identidad global interna y sus concesiones de acceso (`access_grants`).
+- **Fuera de alcance en v1:** Quedan terminantemente excluidos en v1 protocolos OAuth 2.0, OIDC, SAML, SSO empresarial y la autenticación mediante proveedores externos de identidad (Google, GitHub, Microsoft, etc.).
+- **Preservación arquitectónica:** La arquitectura de identidad desacopla limpiamente la entidad de usuario (`users`) y la propagación de `ActorContext` (D-080) respecto a los casos de uso y la autorización. No se generan adaptadores, interfaces ni hooks especulativos en v1, pero la estructura de datos no asume que el identificador global deba provenir irremediablemente de una contraseña local, facilitando adaptaciones futuras sin refactorizaciones destructivas.
+
+**Motivo:** Enfocar los recursos y garantías en un núcleo seguro, comprobable y sin dependencias externas de red o servicios de terceros para el hito v1.
+
+---
+
+### D-101 — Ciclo de vida y expiración de sesiones: doble control temporal, persistencia desacoplada y revocación inmediata (T-014-0 B-1)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-1 y especificación de D-088).
+
+**Contexto:** D-088 estableció el modelo general de sesiones opacas con expiración deslizante y límite absoluto. Era necesario fijar los parámetros operativos predeterminados, los mecanismos de actualización en base de datos para evitar contención por concurrencia y las garantías formales de expiración.
+
+**Decisión:**
+- **Doble control temporal predeterminado:**
+  - **Inactividad máxima deslizante (`idle_timeout`):** 30 minutos.
+  - **Duración absoluta e improrrogable (`max_lifetime`):** 12 horas desde la creación original de la sesión.
+  - Ambos parámetros son configurables mediante variables de entorno validadas con Zod (`SESSION_IDLE_TIMEOUT_MINUTES`, `SESSION_MAX_LIFETIME_HOURS`).
+- **Validación del lado servidor en cada petición:** PostgreSQL es la única autoridad sobre la vigencia y estado de las sesiones. Cada solicitud autenticada verifica en la base de datos que la sesión no esté expirada por inactividad, que no haya superado el límite absoluto y que no haya sido revocada explícitamente.
+- **Actualización diferida de actividad con umbral de 60 segundos:**
+  - Para evitar saturación y contención por bloqueos en bases de datos ante ráfagas de solicitudes concurrentes de un mismo usuario, la actualización de `last_activity_at` en base de datos solo se persiste si han transcurrido al menos **60 segundos** desde la última actualización persistida.
+  - Las peticiones intermedias leen y validan la sesión en memoria/BD sin emitir sentencias `UPDATE`.
+- **Garantías estrictas de expiración en actualización diferida:**
+  - El mecanismo de actualización diferida nunca puede extender la vida de la sesión más allá del límite absoluto (`created_at + max_lifetime`).
+  - La expiración efectiva por inactividad se evalúa siempre contra el valor persistido de `last_activity_at` y el umbral configurado. El retraso máximo en la persistencia (60 s) es conocido y acotado, no compromete la seguridad y se contempla en la validación.
+- **Exclusión de tráfico de mantenimiento:** Las consultas automáticas de mantenimiento (tales como sondeos de salud `/health`, polling periódico de interfaz o telemetría) **no prolongan la sesión**. Solo solicitudes que correspondan a interacción intencional o mutaciones de negocio actualizan la marca de actividad.
+- **Sin rotación periódica de tokens en v1:** Se ratifica D-088. No se realiza rotación automática periódica de tokens de sesión durante peticiones ordinarias para evitar condiciones de carrera en navegadores. La rotación del identificador de sesión se reserva estrictamente para eventos de seguridad sensibles (cambio de credenciales o elevación de privilegios).
+- **Revocación inmediata:** La invalidación de una sesión (vía borrado o marca `revoked_at` en BD) surte efecto instantáneo e ineludible en la petición inmediatamente posterior.
+
+**Motivo:** Equilibrio riguroso entre seguridad estricta (revocación inmediata, caducidad absoluta improrrogable) y eficiencia operativa en PostgreSQL, evitando problemas de contención de filas detectados en pruebas de carga concurrentes.
+
+---
+
+### D-102 — Límites defensivos criptográficos y operativos de Argon2id (T-014-0 B-2)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-2 y concreción de parámetros de D-092/D-093).
+
+**Contexto:** D-091 a D-093 fijaron Argon2id (`@node-rs/argon2` 2.2.2) y sus parámetros de coste base (`m=19456`, `t=2`, `p=1`). Se requería establecer los límites defensivos de verificación de formato PHC, los parámetros del limitador de concurrencia y la política de protección frente a saturación de memoria en contenedores.
+
+**Decisión:**
+- **Límites defensivos para verificación PHC (validación previa antes de invocar `verify()`):**
+  - **Algoritmo:** estrictamente `argon2id`, versión `19` (`v=19`).
+  - **Longitud máxima del string PHC:** 512 bytes.
+  - **Rango de memoria permitido ($m$):** `19456 KiB` a `65536 KiB` (19 MiB a 64 MiB).
+  - **Rango de iteraciones ($t$):** `2` a `4` pasadas.
+  - **Rango de paralelismo ($p$):** `1` a `2` hilos.
+  - **Longitud de salt:** `16` a `32` bytes (en Base64 sin padding).
+  - **Longitud de hash de salida:** exactamente `32` bytes (en Base64 sin padding).
+  - Hashes que no cumplan estos límites o presenten sintaxis corrupta se rechazan inmediatamente **sin ejecutar Argon2id**, registrando un aviso técnico estructurado que omite secretos y contraseñas.
+- **Configuración operativa del limitador de concurrencia por proceso:**
+  - Máximo de **2 operaciones simultáneas** de Argon2id por proceso Node.js.
+  - Cola de espera acotada a un máximo de **8 solicitudes** por proceso.
+  - Ante saturación (cola llena > 8): rechazo inmediato y controlado con **HTTP 503 (Service Unavailable)** y cabecera `Retry-After: 5`.
+  - Este limitador aplica a todas las operaciones computacionales de Argon2id: `hash()`, `verify()` y la verificación simulada (*dummy hash*) contra enumeración por tiempo.
+- **Independencia de capas de rate limiting:** El limitador de concurrencia local protege la memoria y la CPU del contenedor ante ráfagas. En la capa HTTP previa opera de forma independiente el rate limiting de autenticación, respondiendo con **HTTP 429 (Too Many Requests)** ante exceso de intentos por IP o identificador de cuenta.
+- **Estrategia de rehash transparente:** La actualización de coste se ejecuta únicamente tras una verificación exitosa de credenciales y cuando los parámetros del hash almacenado difieran de los parámetros operativos vigentes (D-092), pero sigan dentro del rango defensivo aprobado.
+- **Ajustes operativos y restricciones:** Los valores operativos de concurrencia y cola pueden ajustarse mediante variables de entorno según la capacidad del host/contenedor, pero queda prohibida la ampliación arbitraria de los límites criptográficos defensivos máximos ($m > 65536$ KiB, $t > 4$).
+- **Limitación documentada:** El limitador es local a la memoria de cada proceso Node.js. En despliegues multinodo o multi-proceso (clustering, PM2, réplicas de Kubernetes), la concurrencia global simultánea equivale a $N \times 2$. La protección global ante ataques distribuidos recae en el rate limiting perimetral.
+- **Sin preguntas individuales en el CLI:** Los parámetros se generan con valores predeterminados seguros sin añadir prompts redundantes al generador.
+
+**Motivo:** Garantiza que un atacante no pueda provocar la muerte del proceso por falta de memoria (OOM kill) enviando hashes manipulados con parámetros extremos, manteniendo la disponibilidad del servicio mediante colas acotadas y degradación elegante con HTTP 503.
+
+---
+
+### D-103 — Protección CSRF multicapa para cookies sin sincronizador en topología same-origin (T-014-0 B-3)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-3; complementa D-089).
+
+**Contexto:** D-089 determinó el uso exclusivo de cookies para aplicaciones fullstack y selección en backend independiente, obligando a proteger contra falsificación de solicitudes entre sitios (CSRF). Se requería definir el contrato técnico exacto de protección CSRF para la topología de Brixa.
+
+**Decisión:**
+- **Middleware centralizado de protección CSRF:** Se implementa un middleware centralizado obligatorio en Express aplicado a todas las rutas que alteren estado (`POST`, `PUT`, `PATCH`, `DELETE`) autenticadas mediante cookies de sesión.
+- **Validación estricta de origen:**
+  - Verificación obligatoria de las cabeceras `Origin` (prioritaria) o `Referer` (como alternativa si `Origin` está ausente) contra la lista estricta de orígenes autorizados del proyecto (`CORS_ALLOWED_ORIGINS` y el propio origen de la aplicación).
+  - Si la cabecera está ausente o su valor no coincide con un origen autorizado, la petición se deniega inmediatamente por defecto con **HTTP 403 (Forbidden)**.
+- **Fetch Metadata complementario:** Utilización de cabeceras estándar de metadatos de petición del navegador (`Sec-Fetch-Site: same-origin` o `same-site`, `Sec-Fetch-Mode`, `Sec-Fetch-Dest`) como capa adicional de defensa en profundidad donde estén soportadas por el cliente.
+- **Cabecera personalizada obligatoria en mutaciones de API:** Las peticiones mutables dirigidas a la API deben incluir obligatoriamente una cabecera personalizada (p. ej. `X-Requested-With: XMLHttpRequest` o cabecera declarativa de cliente). Dado que las peticiones entre orígenes inducidas por HTML estándar (`<form>`, `<img>`, `<iframe>`) no pueden adjuntar cabeceras personalizadas sin activar preflight CORS, esta regla bloquea vectores tradicionales de explotación CSRF.
+- **CORS restrictivo (D-074):** CORS permanece restringido estrictamente a orígenes explícitos; denegación absoluta de comodines (`*`) o valor `null`.
+- **Sin token CSRF sincronizador adicional en v1:** En la topología fullstack generada por Brixa (mismo origen bajo Nginx en producción y proxy Vite en desarrollo), la combinación rigurosa de cookies con `SameSite=Lax`, validación de `Origin`/`Referer`, Fetch Metadata y cabecera personalizada obligatoria proporciona protección robusta y suficiente sin la sobrecarga ni los problemas de desincronización de tokens CSRF en memoria/sesión.
+- **Cobertura de operaciones de autenticación:** La protección CSRF aplica también a los endpoints de inicio de sesión (`/login`), cierre de sesión (`/logout`) y activación de cuentas, impidiendo ataques de *login CSRF* o revocaciones forzadas de sesión.
+- **Idempotencia de métodos seguros:** Se garantiza contractualmente que los métodos `GET` y `HEAD` nunca realicen mutaciones de negocio ni alteren el estado de recursos o sesiones.
+- **Defensa en profundidad y distinción frente a XSS:** La protección CSRF mitiga únicamente solicitudes no autorizadas originadas en otros sitios; no sustituye ni protege contra ataques XSS. Si un atacante ejecuta JavaScript en el mismo origen, puede eludir la protección CSRF. Por ello, las defensas contra XSS (CSP estricta D-074/D-075, atributos `HttpOnly` en cookies y escape en React) son obligatorias e independientes.
+
+**Motivo:** Solución estandarizada, de alto rendimiento y cero mantenimiento de estado de tokens en el servidor, adaptada a la arquitectura fullstack moderna en el mismo origen.
+
+---
+
+### D-104 — Migraciones PostgreSQL RLS: Drizzle Schema y migraciones SQL versionadas con separación de privilegios (T-014-0 B-4)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-4 y especificación de D-094 a D-096).
+
+**Contexto:** D-094 a D-096 establecieron el diseño de roles (`app_exec` / `table_owner`), políticas RLS y directivas `FORCE ROW LEVEL SECURITY`. Se requería definir el flujo de migraciones y compatibilidad con Drizzle ORM y Drizzle Kit.
+
+**Decisión:**
+- **Drizzle Schema como fuente de verdad estructural:** El modelo de tablas, columnas, tipos de datos, índices y relaciones continúa definiéndose y manteniéndose exclusivamente en el esquema Drizzle (`schema.ts` / `schema.js`).
+- **Migraciones SQL versionadas y personalizadas para RLS:** Las directivas que escapan a la definición declarativa de Drizzle ORM —tales como `ALTER TABLE ... ENABLE ROW LEVEL SECURITY;`, `ALTER TABLE ... FORCE ROW LEVEL SECURITY;`, `CREATE POLICY ...` y concesiones de privilegios (`GRANT`/`REVOKE`) a roles PostgreSQL— se implementan como **migraciones SQL personalizadas y versionadas**.
+- **Integración con el flujo de migraciones de Drizzle:** Estas sentencias SQL se incorporan en la carpeta de migraciones estándar (`drizzle/`) como archivos `.sql` versionados y registrados en el manifiesto de Drizzle, asegurando su ejecución ordenada y reproducible mediante el comando estándar del proyecto (`npm run db:migrate`).
+- **Separación estricta de credenciales en migraciones (D-094):**
+  - Las migraciones (`npm run db:migrate`) se ejecutan exclusivamente utilizando `MIGRATION_DATABASE_URL` conectada con el rol propietario del esquema (`table_owner`).
+  - La aplicación en ejecución opera estrictamente con `DATABASE_URL` conectada con el rol de privilegios mínimos `app_exec`.
+- **Aprovisionamiento previo de roles separado de las migraciones:** La creación de los roles de base de datos (`app_exec`, `table_owner`) y la asignación inicial de contraseñas constituyen tareas de aprovisionamiento de infraestructura externa (documentadas con scripts SQL de aprovisionamiento para el operador), independientes de las migraciones de esquema de la aplicación. Las migraciones asumen la existencia previa de estos roles.
+- **Verificación en PostgreSQL real:** La compatibilidad de las políticas RLS y de las migraciones SQL personalizadas debe verificarse empíricamente contra instancias reales de PostgreSQL 17 utilizando la versión exacta fijada de Drizzle Kit en el proyecto.
+- **Prohibición absoluta:** Bajo ninguna circunstancia se desactivará RLS ni se otorgarán privilegios de superusuario a `app_exec` para eludir fallos de configuración de migraciones.
+
+**Motivo:** Preserva la elegancia y tipado de Drizzle para la definición del esquema mientras asegura la aplicación reproducible, determinista e inmutable de las políticas de seguridad a nivel de motor de base de datos.
+
+---
+
+### D-105 — Auditoría de dos ámbitos: sistema global y organizacional con integridad transaccional (T-014-0 B-5)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-5 y especificación de D-097).
+
+**Contexto:** D-097 aprobó la auditoría operativa y de acciones de negocio. Se requería estructurar la taxonomía de registros distinguiendo claramente los ámbitos de plataforma frente a los de tenant, el comportamiento transaccional y la inmutabilidad relacional.
+
+**Decisión:**
+- **Taxonomía en dos ámbitos de auditoría:**
+  1. **Auditoría global o de sistema (`audit_log_system`):**
+     - Registra eventos de autenticación y seguridad (inicios de sesión exitosos y fallidos, logouts, activación de cuentas, cambios de contraseña, intentos de fuerza bruta detectados), operaciones administrativas globales (creación y desactivación de usuarios globales, aprovisionamiento de organizaciones, bootstrap inicial) e intentos no autorizados de acceso a organizaciones.
+     - Ámbito global sin columna obligatoria `organization_id`.
+     - Acceso de consulta restringido estrictamente a operadores y administradores de plataforma autorizados.
+  2. **Auditoría organizacional (`audit_log_org`):**
+     - Registra acciones relevantes y mutaciones de recursos dentro de cada organización (cambios de configuración de tenant, asignación/revocación de roles RBAC a concesiones, altas/bajas de concesiones de acceso, eventos críticos de negocio).
+     - Contiene obligatoriamente la columna `organization_id` no nula.
+     - Protegida obligatoriamente mediante PostgreSQL RLS (`ENABLE` y `FORCE ROW LEVEL SECURITY`), asegurando que ningún tenant pueda consultar eventos de auditoría de otra organización.
+     - Acceso de consulta disponible para administradores autorizados de la propia organización.
+- **Garantías de inmutabilidad y privilegios de base de datos:**
+  - Tablas estrictamente *append-only* (solo inserción).
+  - El rol de base de datos de ejecución (`app_exec`) carece contractualmente de privilegios `UPDATE` y `DELETE` sobre las tablas de auditoría.
+  - Queda prohibida la generación de endpoints o interfaces que permitan modificar o eliminar entradas de auditoría.
+- **Atomicidad transaccional y registro de fallos:**
+  - Las acciones de negocio exitosas y su correspondiente evento de auditoría se persisten atómicamente dentro de la misma transacción de base de datos (`tx`). Si la operación de negocio falla, el evento de auditoría de negocio no se persiste.
+  - Los **eventos de seguridad y operaciones rechazadas** (p. ej. denegación de autorización 403, accesos no autorizados, anomalías) se persisten **fuera de la transacción revertida**, utilizando una transacción o conexión de registro independiente para garantizar que el intento hostil o anómalo quede registrado de forma indeleble.
+- **Correlación y trazabilidad:** Cada entrada de auditoría incluye obligatoriamente el identificador de correlación `requestId` extraído de la petición HTTP, marca temporal UTC de alta precisión y el `actor_id` extraído del `ActorContext` autenticado.
+- **Proyectos sin multitenancy:** Cuando un proyecto se genera con Auth pero sin multitenancy, la auditoría opera exclusivamente bajo el ámbito global (`audit_log_system`), sin generar la tabla ni la infraestructura RLS de `audit_log_org`.
+- **Limitación documentada:** La inmutabilidad relacional protege contra ataques a nivel de aplicación; no se promete inmutabilidad absoluta frente a superusuarios o administradores con acceso físico a PostgreSQL (D-097 ratificado).
+- **Alcance v1:** Sin panel empresarial de visualización masiva de auditoría ni integración obligatoria con sistemas SIEM en la versión v1.
+
+**Motivo:** Garantiza trazabilidad forense completa, separación estricta de responsabilidades entre plataforma y organizaciones y resistencia técnica frente a intentos de borrado de huellas por actores comprometidos.
+
+---
+
+### D-106 — Delegación administrativa, RBAC efectivo, protección del último administrador y no abandono voluntario (T-014-0 B-6)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-6 y especificación de D-082/D-084).
+
+**Contexto:** Se requería definir el modelo de autoridad delegable para operaciones administrativas, las salvaguardas de integridad en asignación de roles y la política formal respecto al abandono de organizaciones.
+
+**Decisión:**
+- **Autorización administrativa explícita:** Toda operación administrativa (creación de usuarios, asignación de roles, modificación o revocación de accesos) requiere permisos específicos e inequívocos en el catálogo de permisos.
+- **Principio de autoridad delegable:** Poseer un permiso no otorga automáticamente la facultad de concederlo a otros. La asignación de roles y permisos exige un permiso explícito de delegación administrativa y está restringida a conceder únicamente capacidades que formen parte de la autoridad delegable del actor. Nadie puede otorgar privilegios superiores a los que posee.
+- **Verificación de permisos efectivos:** El motor de autorización comprueba los permisos efectivos y vigentes del actor tras resolver su jerarquía/asignación, nunca basándose en comparaciones directas de nombres literales de roles (p. ej. `role.name === 'ADMIN'`).
+- **Prohibición de automodificación de privilegios:** Ningún actor autenticado puede modificar directamente sus propios roles, permisos o concesiones de acceso, ni alterar los privilegios de otros actores con el fin de auto-escalarse privilegios o auto-degradarse sin supervisión.
+- **Separación rigurosa de plataforma y organización (D-084 ratificado):** Los administradores de plataforma operan estrictamente en el ámbito de sistema y no administran roles internos de organizaciones salvo que cuenten con una concesión explícita en el tenant respectivo.
+- **Protección del último administrador efectivo:**
+  - En cada ámbito que requiera administración (nivel global de plataforma y en cada organización con RBAC activo), se garantiza la invariante de que **siempre debe existir al menos un administrador activo y efectivo**.
+  - Cualquier intento de revocar la concesión, degradar el rol o eliminar la cuenta del último administrador efectivo debe ser rechazado inmediatamente con error explícito de regla de negocio.
+  - La verificación de esta invariante debe realizarse dentro de una transacción de base de datos con bloqueo de concurrencia (`SELECT ... FOR UPDATE` o bloqueo pesimista equivalente) para prevenir condiciones de carrera cuando dos administradores intenten revocarse mutuamente de forma concurrente.
+- **Multitenancy sin RBAC (D-083 ratificado):** En proyectos generados con multitenancy pero sin RBAC, no se generan administradores basados en roles ni jerarquías artificiales en las organizaciones.
+- **Gestión de concesiones administrada y prohibición de auto-abandono:**
+  - **Decisión adicional expresa:** Los usuarios no pueden abandonar voluntariamente una organización ni autorrevocar sus propias concesiones de acceso.
+  - Las concesiones de acceso (`access_grants`) son creadas, administradas y revocadas exclusivamente por actores formalmente autorizados mediante las operaciones administrativas de la organización.
+  - Queda expresamente prohibido generar endpoints o interfaces de autoservicio para "abandonar organización" (*leave organization*).
+- **Trazabilidad:** Toda modificación, concesión o revocación administrativa se registra de forma obligatoria en la auditoría correspondiente (D-105).
+
+**Motivo:** Elimina vectores críticos de escalada de privilegios y previene el bloqueo irreversible de organizaciones por desadministración o carreras concurrentes.
+
+---
+
+### D-107 — Aprovisionamiento administrado y activación segura de cuentas sin contraseñas predeterminadas ni SMTP (T-014-0 B-7 y Decisión Adicional de Activación)
+
+**Estado:** Confirmada (2026-11-17; consolidación de T-014-0 B-7 y resolución formal del pendiente de activación inicial de cuentas).
+
+**Contexto:** Se requería definir el flujo de aprovisionamiento de identidades globales en Auth v1 y resolver el mecanismo para el establecimiento inicial de credenciales de forma segura, sin introducir contraseñas predeterminadas ni dependencias externas de correo electrónico (SMTP).
+
+**Decisión:**
+- **Modelo de aprovisionamiento administrado en Auth v1:**
+  - El alta de usuarios se realiza de forma administrada: un administrador autorizado inicia la creación de la identidad global a través del endpoint administrativo correspondiente.
+  - **Reutilización de identidad global:** Si la dirección de correo o identificador global ya existe en el sistema, se reutiliza su identidad global única sin crear registros duplicados.
+  - **Concesión directa de acceso organizacional:** El administrador puede asignar directamente una concesión de acceso (`access_grants`) al usuario sobre la organización correspondiente. Si RBAC está activo, los roles organizacionales se asignan a dicha concesión.
+  - **Independencia en revocación:** Revocar el acceso a una organización afecta únicamente a la concesión (`revoked_at` en `access_grants`), sin destruir la identidad global del usuario.
+  - **Invitaciones fuera de alcance en v1:** No se genera un sistema de invitaciones con aceptación voluntaria ni enlaces de invitación para unirse a organizaciones. Las invitaciones voluntarias quedan como evolución futura.
+  - **Sin dependencia de SMTP en el núcleo:** Brixa Auth v1 no exige servidores de correo saliente ni bibliotecas de envío de emails.
+- **Activación segura de cuentas creadas administrativamente:**
+  1. Al crear administrativamente un nuevo usuario, la cuenta permanece en estado **pendiente de activación** (`pending_activation`).
+  2. El backend genera un token de activación de alta entropía compuesto por **32 bytes criptográficamente aleatorios** (`crypto.randomBytes(32)` o Web Crypto API), con tiempo de caducidad limitado y de **un solo uso**.
+  3. En la base de datos se almacena **exclusivamente el hash SHA-256** del token de activación; bajo ninguna circunstancia se persiste el token en claro ni de forma reversible.
+  4. El enlace de activación completo (conteniendo el token en claro en el fragmento o parámetro) se entrega al administrador de forma controlada y segura en la respuesta del comando o API administrativa, para que sea compartido con el destinatario final mediante un canal privado y confiable (mensajería segura, entrega directa, etc.).
+  5. **Propósito estrictamente acotado:** El enlace de activación únicamente permite acceder al formulario para establecer la contraseña inicial; no otorga acceso a datos de negocio, no permite omitir la autenticación y no inicia automáticamente una sesión autenticada.
+  6. **Consumo atómico y validación:** El endpoint de activación valida el token contra su hash en base de datos, comprueba que no haya expirado ni haya sido utilizado, procesa la contraseña inicial mediante Argon2id (D-091/D-092) y **consume el token de forma estrictamente atómica** dentro de la misma transacción (marcado como consumido o eliminado).
+  7. **Transición a estado activo:** Una vez completada la activación, la cuenta pasa a estado activo y el usuario puede iniciar sesión normalmente a través del flujo ordinario de autenticación.
+  8. **Revocación y regeneración administrativa:** Un administrador autorizado puede invalidar en cualquier momento un enlace de activación pendiente y generar un nuevo token de activación sin necesidad de eliminar ni recrear la identidad del usuario.
+  9. **Protección de confidencialidad:** Prohibición absoluta de registrar el token de activación en claro en logs, registros de auditoría o respuestas de error de la API.
+  10. **Defensa contra abuso y enumeración:** El endpoint de activación aplica rate limiting riguroso contra ataques de fuerza bruta y devuelve respuestas uniformes ante tokens inválidos o expirados para mitigar la enumeración de estados de cuentas.
+  11. **Auditoría:** Todos los eventos del ciclo de vida de la cuenta (creación de identidad, generación de token de activación, consumo exitoso, revocación y expiración) se registran de forma obligatoria en la auditoría global de sistema (D-105).
+- **Comportamiento con usuarios existentes y multitenancy:**
+  - Si una identidad global ya completó su activación previamente, el administrador puede concederle acceso a nuevas organizaciones directamente sin generar nuevos enlaces de activación.
+  - En proyectos multitenant, las concesiones organizacionales pueden preconfigurarse para una cuenta, pero permanecen inutilizables hasta que la cuenta complete satisfactoriamente su activación inicial.
+- **Parámetros configurables en implementación:** La duración de validez del enlace de activación (valor de referencia propuesto: 48 horas) se define como una variable de entorno validada con Zod (`ACTIVATION_TOKEN_EXPIRY_HOURS`), sin inventar una decisión histórica rígida.
+
+**Motivo:** Resuelve de forma segura, elegante y autocontenida el aprovisionamiento de identidades sin credenciales predeterminadas ni falsas dependencias de infraestructura SMTP, cerrando el modelo de autenticación y autorización de Brixa.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1762,7 +1994,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; P-011, resuelta en D-080 a D-086; RLS/multitenancy/auditorías resueltas en D-094 a D-097 tras INV-04a; y estrategia JS/TS P-013 resuelta en D-098 tras INV-05b e INV-08 con implementación pendiente en T-023). Permanecen abiertas las relativas a comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), modelo integral de amenazas, invitaciones y reglas de delegación.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090 y D-101; P-011, resuelta en D-080 a D-086 y D-106; RLS/multitenancy/auditorías resueltas en D-094 a D-097, D-104 y D-105; estrategia JS/TS P-013 resuelta en D-098 tras INV-08 con implementación pendiente en T-023; y cuestiones A-1, A-2 y B-1 a B-8 de T-014-0 resueltas formalmente en D-099 a D-107). Permanecen abiertas como validaciones de implementación: la comprobación de soporte de sintaxis de políticas RLS en Drizzle Kit 0.31.x sobre PostgreSQL real (T-014c) y la parametrización configurable de la duración exacta del token de activación (T-014a).
 - Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
