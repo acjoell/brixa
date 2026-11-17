@@ -45,7 +45,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "verify:generated": "node scripts/verify-generated.js"
+    "verify:generated": "node scripts/verify-generated.js",
+    "verify:security": "node scripts/verify-security.js",
+    "verify:all": "npm run verify:generated && npm run verify:security"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

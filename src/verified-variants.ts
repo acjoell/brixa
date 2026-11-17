@@ -99,3 +99,38 @@ export function isVerified(opts: {
     }),
   );
 }
+
+/**
+ * Lista de combinaciones cubiertas por el arnés de seguridad (verify:security).
+ * Piloto inicial T-018: backend TS, backend JS y fullstack TS.
+ */
+export const VERIFIED_SECURITY_VARIANTS: readonly VerifiedVariant[] = [
+  { modality: "backend", language: "ts" },
+  { modality: "backend", language: "js" },
+  { modality: "fullstack", language: "ts" },
+] as const;
+
+const _verifiedSecuritySet = new Set(VERIFIED_SECURITY_VARIANTS.map(variantLabel));
+
+/**
+ * Devuelve true si la combinación dada está entre las verificadas por el arnés de seguridad.
+ */
+export function isSecurityVerified(opts: {
+  modality: string;
+  language: string;
+  database?: string | undefined;
+  docker?: boolean | undefined;
+  apiDocs?: boolean | undefined;
+  i18n?: boolean | undefined;
+}): boolean {
+  return _verifiedSecuritySet.has(
+    variantLabel({
+      modality: opts.modality,
+      language: opts.language,
+      database: opts.database,
+      docker: opts.docker,
+      apiDocs: opts.apiDocs,
+      i18n: opts.i18n,
+    }),
+  );
+}

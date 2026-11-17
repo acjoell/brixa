@@ -106,6 +106,8 @@ npm run verify:generated
 npm run verify:generated -- frontend+ts fullstack+js+sqlite+i18n
 ```
 
+`npm run verify:security` ejecuta el piloto de T-018 (en implementación): genera backends temporales para `backend+ts`, `backend+js` y `fullstack+ts`, instala sus dependencias y exige una línea base verde antes de probar tres mutaciones por variante (HTTP 500, rechazo de `Origin: null` y CSP). Solo una aserción de seguridad esperada cuenta como `MUTATION_DETECTED`; una mutación sobreviviente o un error de infraestructura hacen fallar el comando. Los archivos se restauran byte a byte y los directorios temporales se eliminan. Requiere acceso a npm y puertos HTTP locales; no requiere Docker. La integración en CI y la validación multiplataforma del piloto siguen pendientes de revisión. `npm run verify:all` ejecuta ambas verificaciones en secuencia.
+
 La documentación de diseño, las decisiones y las tareas del proyecto están en `.agents/rules/`.
 
 ## Contribuir
