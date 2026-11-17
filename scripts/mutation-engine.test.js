@@ -274,7 +274,15 @@ export function testMe() {
   });
 
   it("clasifica errores reales al iniciar procesos y timeouts", async () => {
-    const missing = await executeCommand("brixa-command-that-does-not-exist", [], tmpDir);
+    // En Windows, un comando inexistente falla dentro del shell que sí arrancó.
+    // Un cwd inexistente impide crear el proceso, incluso cuando se usa shell.
+    const missing = await executeCommand(
+      process.execPath,
+      ["--version"],
+      path.join(tmpDir, "missing-cwd"),
+    );
+    expect(missing.spawnError?.code).toBe("ENOENT");
+    expect(missing.timedOut).toBe(false);
     expect(classify(null, missing).reason).toBe("SPAWN_ERROR");
     const timeout = await executeCommand(
       process.execPath,

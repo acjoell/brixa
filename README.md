@@ -76,7 +76,8 @@ El CLI permite cualquier combinación de las capacidades soportadas, pero marca 
 ## Limitaciones
 
 - **La versión 0.1.0 no incluye autenticación, RBAC ni multitenancy.** Los proyectos generados no tienen control de acceso: no los despliegues con datos sensibles sin añadirlo.
-- **Compatibilidad verificada en GitHub Actions:** Ubuntu, Windows y macOS con Node.js 24 y 26, para las variantes que no requieren Docker ni PostgreSQL. PostgreSQL y Docker solo se verifican en Linux con Node.js 24, mediante un job de CI que se lanza manualmente. El CLI interactivo y la instalación del paquete en un Windows real no se han probado: la CI verifica el generador y los proyectos generados.
+- **Compatibilidad histórica verificada en GitHub Actions:** Ubuntu, Windows y macOS con Node.js 24 y 26, para las variantes que no requieren Docker ni PostgreSQL. PostgreSQL y Docker solo se verifican en Linux con Node.js 24, mediante un job de CI que se lanza manualmente. El CLI interactivo y la instalación del paquete en un Windows real no se han probado: la CI verifica el generador y los proyectos generados.
+- **Estado de CI al 17/11/2026:** T-018 sigue en implementación. La validación global actual está bloqueada por la auditoría estricta de una vulnerabilidad externa de picomatch (GHSA-fc5q-39xc-vjpf, sin parche oficial confirmado en esa fecha) y queda por confirmar en Windows una corrección local del test de creación de procesos. Los resultados locales satisfactorios no equivalen a una CI completamente verde. Se mantienen los controles sin excepciones; evidencia y pendientes en [T-018](.agents/rules/TASKS_POST_MVP.md#t-018--infraestructura-de-verificación-avanzada).
 - Los proyectos de solo frontend se verifican con compilación y lint, sin arrancar un servidor. En la aplicación completa sí se arranca el servidor de desarrollo de Vite.
 - La plantilla de frontend no incluye pruebas.
 - No hay pruebas automáticas en un navegador real, incluido el selector de idioma.

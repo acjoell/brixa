@@ -1027,6 +1027,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Motivo:** Ninguna capacidad se considera segura por compilar, generar archivos o pasar `verify:generated`.
 
+**Seguimiento de implementación (2026-11-17):** T-018 continúa en progreso. El piloto local registra 201 pruebas y nueve mutaciones detectadas; la integración CI y el cierre no están acreditados. La ejecución `44135365877` presenta un fallo de portabilidad del test Windows (corrección local pendiente de confirmar en CI) y un bloqueo externo de auditoría por GHSA-fc5q-39xc-vjpf, reproducido en un frontend TS temporal. Se conserva la exigencia de auditoría completa y `verify:all` en verde; no se aprueba excepción ni aceptación de riesgo. Evidencia, límites y acciones pendientes en [T-018](TASKS_POST_MVP.md#t-018--infraestructura-de-verificación-avanzada). Los resultados históricos de D-055 no acreditan el estado verde de esta ejecución.
+
 ---
 
 ### D-066 — Versiones exactas y cadencia de actualización
@@ -1743,6 +1745,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 **Motivo:** Las investigaciones INV-05b e INV-08 demostraron que la derivación por AST/Babel proporciona diffs limpios, conserva fidelidad con el código original, elimina la duplicación manual y garantiza paridad estricta entre variantes sin añadir latencia de generación al CLI ni dependencias a los proyectos generados.
 
 **Consecuencias:** Se formaliza la tarea T-023 para implementar el derivador y `verify:sync`, la cual debe completarse y verificarse antes de abordar la codificación de las plantillas de Auth y RBAC.
+
+**Continuidad de trabajo (2026-11-17):** T-023 puede continuar de forma independiente de la validación pendiente de T-018. Sus resultados específicos no sustituyen las verificaciones globales, que pueden seguir condicionadas por el bloqueo de auditoría y la integración CI de T-018. Esta continuidad no cierra T-018, no reduce sus controles ni elimina los prerrequisitos de Auth/RBAC.
 
 ---
 
