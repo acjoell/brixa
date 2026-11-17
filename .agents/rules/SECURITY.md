@@ -431,8 +431,8 @@ Este apartado describe las garantías reales del endurecimiento de seguridad de 
 
 ### Lo que no existe todavía
 
-- `trust proxy`: no configurado (pendiente de T-017b).
-- Rate limiting / protección de abuso: no implementado (pendiente de T-017b / T-014a).
+- `trust proxy`: no configurado en plantilla base; Express utiliza `trust proxy: false` por defecto para prevenir IP spoofing; su parametrización por topología y verificación de `X-Forwarded-Proto` se formaliza para Auth y cookies de sesión en T-014a (D-089, D-099).
+- Rate limiting / protección de abuso: no implementado en plantilla base (el rate limiting de autenticación, activación y registro corresponde a T-014a conforme a D-086, D-093, D-102 y D-107).
 - HSTS: no activado (responsabilidad del operador en el proxy de terminación TLS).
 - Autenticación, RBAC, multitenancy: especificación arquitectónica completada en T-014-0; implementación de plantillas pendiente sujeta a T-023 y T-018.
 

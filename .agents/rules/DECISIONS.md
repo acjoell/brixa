@@ -307,9 +307,9 @@ Aprobada la estrategia de híbrido versionado con TypeScript como fuente de verd
 
 ### P-014 — Seguridad base del backend: errores, cabeceras, CORS y contadores
 
-**Estado:** Pendiente de evidencia (INV-02); el alcance está aprobado en T-017b.
+**Estado:** Confirmada (resuelta mediante D-070, D-071, D-073, D-074, D-075 y D-076 en T-017b/T-022; almacén de contadores de autenticación y `trust proxy` transferidos a T-014a conforme a D-086, D-089, D-093, D-099, D-102 y D-107).
 
-Hecho confirmado: `redact` existe en cuatro archivos (overlays de PostgreSQL y SQLite, JS y TS) y solo se usa en el `catch` de los migradores; el manejador global de errores ejecuta `console.error(err)` sin redacción. Pendiente: diseño de la redacción común, `trust proxy` por topología, cabeceras (nativas o `helmet`), CORS, configuración de Nginx y almacén de contadores.
+Hecho confirmado: Zod 4.6.7 incorporado con validación pura de configuración (D-070); contrato uniforme de errores HTTP y 404 JSON (D-071); `redact` centralizado con mitigación ReDoS y límite de 100 KB en Express (D-073, D-076); Helmet 8.3.0 con CSP estricta, CSP específica en Swagger y CORS restrictivo desactivado por defecto (D-074); cabeceras SPA en Nginx con Docker (D-075). La evaluación de `trust proxy` y el rate limiting específico de endpoints de autenticación quedan transferidos a T-014a.
 
 ### P-015 — Alineación de imágenes y tipos
 

@@ -61,9 +61,9 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-014-0 | COMPLETADA (DISEÑO) | Decisiones consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; diseño completado sin código; validaciones técnicas de implementación diferidas a T-014a/c |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
-| T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
-| T-018 | BLOQUEADA | T-017b, INV-06 |
-| T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b, T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
+| T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
+| T-018 | PENDIENTE (desbloqueada por T-017b e INV-06) | T-017b, INV-06 |
+| T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
@@ -72,7 +72,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 **Orden de ejecución propuesto (actualizado):**
 
-T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
+T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b ✔ → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
 
 - T-014c y T-014b1 no dependen entre sí. El orden lineal es de conveniencia, no una restricción técnica.
 - T-017a y T-017a-ui ya están completadas; la incorporación de T-023 no altera ni reabre la composición de overlays existente, sino que se integra con el mecanismo existente.
@@ -410,7 +410,7 @@ Notas:
 
 ### T-017b — Seguridad base y Zod
 
-**Estado:** PARCIAL (configuración con Zod 4.6.7, contrato de errores, redacción, cabeceras (Helmet/Nginx), CORS y límite de cuerpo completados; pendiente: `trust proxy`, protección de abuso/rate limiting)
+**Estado:** COMPLETADA (2026-11-17; todas las protecciones base implementadas y verificadas con D-070, D-071, D-073, D-074, D-075 y T-022/D-076; `trust proxy` y rate limiting específico de autenticación transferidos a T-014a)
 **Aprobación:** Aprobado (alcance). D-070, D-071, D-073, D-074 y D-075 confirmadas.
 **Dependencias:** T-017a (Fase 1 backend completada).
 
@@ -420,11 +420,11 @@ Notas:
 - **Zod 4.6.7 y configuración [COMPLETADO - D-070, commit `702f477`]:** Zod fijado en versión exacta como dependencia obligatoria en backend ts y js. Validación descentralizada de configuración al arrancar (`src/config.{ts,js}` y `src/docs/validate-env.{ts,js}`) con `parseConfig` puro. Mensajes de error claros sin imprimir valores sensibles. `portSchema` (entero 0..65535, vacío no es 0), `strictBooleanSchema` (no usa `z.coerce.boolean`).
 - **Validación de entradas y propiedades desconocidas [COMPLETADO - D-070, D-071, commits `702f477`, `2bd09b9`]:** Convención documentada y probada con `parseInput`: `body` y `params` se validan con `z.strictObject` (rechaza desconocidas); `query` descarta propiedades desconocidas (`z.object`). No se genera middleware validador automático ni esquemas vacíos: validación explícita en handler.
 - **Contrato uniforme de errores [COMPLETADO - D-071, commit `2bd09b9`]:** Módulo `src/errors.{ts,js}`. Clase `ValidationError` propia (solo `path` y `code`, sin `cause`) que responde exclusivamente 400. Estados 400, 401, 403, 404 y 413 conservan código con texto fijo; resto 500 genérico sin filtrar `err.message` ni pilas. `notFoundHandler` devuelve 404 en JSON para rutas no registradas. `res.headersSent` delega a `next(err)`.
-- **Redacción centralizada [COMPLETADO - D-067, D-071, D-073, commits `1b6f7ad`, `2bd09b9`, `4295376`]:** Módulo central `src/redact.{ts,js}` aplicado en migradores y en el manejador global (`console.error(redact(inspect(err, { depth: 5 })))`). Ampliado para cubrir `Authorization`, `Proxy-Authorization`, Bearer, `Cookie`/`Set-Cookie`, `password`, tokens y secretos comunes. Aplicado también en arranque y cierre (`src/index.{ts,js}`). Límite de cuerpo `express.json({ limit: "100kb" })`. Riesgo de ReDoS pendiente (ver DECISIONS.md §5).
+- **Redacción centralizada [COMPLETADO - D-067, D-071, D-073, D-076/T-022, commits `1b6f7ad`, `2bd09b9`, `4295376`, `fc19490`]:** Módulo central `src/redact.{ts,js}` aplicado en migradores y en el manejador global (`console.error(redact(inspect(err, { depth: 5 })))`). Ampliado para cubrir `Authorization`, `Proxy-Authorization`, Bearer, `Cookie`/`Set-Cookie`, `password`, tokens y secretos comunes. Aplicado también en arranque y cierre (`src/index.{ts,js}`). Límite de cuerpo `express.json({ limit: "100kb" })`. Mitigación de ReDoS verificada en T-022 (D-076).
 - **Cabeceras de seguridad (Helmet) [COMPLETADO - D-074, commit `4295376`]:** Helmet 8.3.0 con CSP estricta (`default-src 'none'`) en todas las rutas del backend; CSP específica con `style-src 'unsafe-inline'` solo en `/docs` (Swagger UI). HSTS desactivado a propósito. `cors 2.8.6` con validación Zod de `CORS_ALLOWED_ORIGINS`; desactivado por defecto; sin `*` ni `null`. `x-powered-by` desactivado.
 - **Cabeceras de seguridad (Nginx/SPA) [COMPLETADO - D-075, commit `4295376`]:** `server_tokens off`, CSP sin `unsafe-inline`/`unsafe-eval`, `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer` en `location /`. Solo con Docker. `location /api/` sin `add_header`.
-- **`trust proxy` y límites [PENDIENTE]:** Por topología y configuración de Nginx; comportamiento aún no documentado ni configurado.
-- **Protección general de la API (nivel 1 de abuso) [PENDIENTE]:** Almacén de contadores y límites pendientes de decisión.
+- **`trust proxy` [DIFERIDO A T-014a]:** En la plantilla base Express opera de forma segura con `trust proxy: false` por defecto para prevenir IP spoofing sin consumidores de IP ni protocolo en v1 base. Su parametrización y evaluación en topologías con terminación TLS se formaliza como prerrequisito de las cookies de sesión y rate limiting en T-014a (D-089, D-099).
+- **Protección general de la API / rate limiting [DIFERIDO A T-014a]:** La plantilla base solo expone `/health` y no requiere contadores globales en memoria ni dependencias adicionales. El rate limiting específico de autenticación, activación y registro se implementará en T-014a conforme a D-086, D-093, D-102 y D-107.
 
 **Áreas afectadas:** **[L]** `src/templates/backend-express-{ts,js}` (`src/app`, `src/index`, `src/config`, `src/errors`, `src/redact`, `tests/config.test`, `tests/cors.test`, `tests/errors.test`, `tests/health.test`, `package.json`), overlay `api-docs` (`swagger.{ts,js}`, `docs.test.{ts,js}`), `src/templates/docker/fullstack/frontend/nginx.conf`, `src/generator/generate.test.ts`.
 
@@ -440,14 +440,13 @@ Notas:
 
 **Pruebas positivas y negativas:** Batería completa de pruebas unitarias en `tests/config.test.{ts,js}`, `tests/errors.test.{ts,js}`, `tests/cors.test.{ts,js}` y `tests/health.test.{ts,js}` en verde. Tests del generador (`generate.test.ts`) verifican contexto de cabeceras en Nginx.
 
-**Riesgos y limitaciones:** ReDoS en `redact` (medido; ver DECISIONS.md §5). `ValidationError` y `parseInput` carecen de rutas de negocio que las consuman (solo existe `/health`). Cabeceras de la SPA solo disponibles con Docker. `trust proxy` y rate limiting quedan para la siguiente fase.
+**Riesgos y limitaciones:** Riesgo de ReDoS en `redact` resuelto en T-022 (D-076). `ValidationError` y `parseInput` quedan provistos y verificados para consumo de futuras rutas de negocio (en plantilla base solo existe `/health`). Cabeceras de la SPA solo disponibles con Docker. `trust proxy` y rate limiting de autenticación quedan transferidos a T-014a para su integración con transporte de cookies y endpoints protegidos.
 
 ---
 
-
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** BLOQUEADA (por T-017b e INV-06)
+**Estado:** PENDIENTE (desbloqueada tras el cierre de T-017b e INV-06)
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -478,7 +477,7 @@ Notas:
 **Pruebas positivas:** línea base sin mutación pasa. **Pruebas negativas:** mutación sin efecto, mutación doble y mutación cuyo texto desapareció de la plantilla.
 **Verificaciones:** batería local, `verify:generated` completo y `verify:security` piloto.
 
-**Riesgos:** mutaciones frágiles frente a cambios de plantilla; coste de minutos de CI.
+**Riesgos:** mutaciones frágiles frente a cambios de plantilla; coste de minutos de CI. Advertencia DEP0190 en Windows (`shell: true` con argumentos en `execFileSync`): deuda técnica del arnés (`scripts/verify-generated.js` y `scripts/verify-i18n.js`), a evaluar durante el mantenimiento de la infraestructura de verificación sin alterar el comportamiento de las plantillas generadas ni refactorizar el manejo de procesos en esta etapa.
 
 ---
 
