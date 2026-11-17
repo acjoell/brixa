@@ -1011,7 +1011,9 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Nota de precisión de alcance sobre transporte (D-089):** El alcance relativo a los transportes de autenticación fue precisado expresamente por D-089: en fullstack (React + Express) se generan exclusivamente cookies en v1 (Bearer no se ofrece en fullstack); en backend independiente se selecciona entre cookies o Bearer, sin admitir mezcla simultánea en un mismo proyecto ni soporte automático general de cookies cross-site en v1.
 
-**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL (INV-04a / T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093).
+**Nota de consolidación de decisiones RLS (D-094 a D-097):** Las cuatro decisiones arquitectónicas de PostgreSQL RLS (roles y privilegios separados, contexto transaccional, políticas e integridad, y verificación con auditoría operativa y de acciones) quedan fijadas en D-094 a D-097 tras INV-04a.
+
+**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093; RLS y auditorías resueltas por D-094 a D-097).
 
 ---
 
@@ -1552,6 +1554,154 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-094 — PostgreSQL RLS: Roles de base de datos, privilegios mínimos y credenciales separadas (RLS.1)
+
+**Estado:** Confirmada (2026-11-16; consolidación de RLS.1 tras INV-04a).
+
+**Contexto:** En arquitecturas multitenant con PostgreSQL, el aislamiento de datos exige garantías de base de datos que impidan a la aplicación acceder a datos fuera de su ámbito asignado. Era necesario definir el modelo de identidades y roles en PostgreSQL, los privilegios otorgados y la separación de credenciales para garantizar que las políticas RLS se apliquen de forma ineludible.
+
+**Decisión:**
+- Row-Level Security (RLS) en PostgreSQL es **obligatorio** en todos los proyectos generados que incluyan multitenancy.
+- SQLite queda **terminantemente excluido** de multitenancy en esta etapa (en concordancia con D-064).
+- Se establece una **separación estricta de identidades** en PostgreSQL entre el tiempo de ejecución y la gestión del esquema:
+  - **Identidad de ejecución (`app_exec`):** utilizada por el servidor de aplicaciones en sus operaciones cotidianas.
+  - **Identidad de migraciones (`table_owner`):** utilizada exclusivamente durante la ejecución de migraciones y cambios de esquema DDL.
+- El rol de ejecución (`app_exec`):
+  - No puede ser superusuario ni poseer el atributo `BYPASSRLS`.
+  - No puede ser propietario de tablas protegidas por RLS (el propietario elude RLS por defecto en PostgreSQL).
+  - No posee privilegios de definición de datos (DDL) ni permiso `TRUNCATE` sobre tablas protegidas.
+  - Únicamente posee privilegios DML mínimos (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) en las tablas requeridas.
+- **Credenciales separadas:** el proyecto generado debe utilizar cadenas de conexión independientes (`DATABASE_URL` con el rol `app_exec` para el servicio Express y `MIGRATION_DATABASE_URL` con el rol `table_owner` para las migraciones de Drizzle).
+- **Aprovisionamiento documentado:** se proporciona documentación y scripts de aprovisionamiento claros para proveedores administrados de PostgreSQL (RDS, Cloud SQL, Supabase, Neon, etc.) donde el usuario debe configurar los dos roles y sus permisos.
+- **Fallo explícito ante privilegios insuficientes:** si en el arranque o verificación no se pueden garantizar los privilegios y restricciones requeridos para `app_exec` (por ejemplo, si se conecta como superusuario o propietario de las tablas), el sistema debe **fallar explícitamente**. Bajo ninguna circunstancia se debe desactivar RLS como solución o degradación permisiva.
+
+**Motivo:** Las políticas RLS de PostgreSQL solo se evalúan obligatoriamente si el usuario conectado no es superusuario ni propietario de la tabla. Separar `table_owner` de `app_exec` garantiza que la aplicación esté técnica y formalmente forzada a someterse a las políticas RLS, limitando drásticamente el impacto de posibles errores en la capa de aplicación.
+
+**Consecuencias:** Todo despliegue de un proyecto multitenant exige la configuración previa de dos roles y dos credenciales de base de datos.
+
+---
+
+### D-095 — Contexto organizacional transaccional, set_config local y aislamiento en Drizzle (RLS.2)
+
+**Estado:** Confirmada (2026-11-16; consolidación de RLS.2 tras INV-04a).
+
+**Contexto:** Se requería definir el mecanismo seguro para transmitir el identificador de la organización activa a PostgreSQL para la evaluación de RLS, compatible con pools de conexiones y el ORM Drizzle, evitando retención residual de estado entre peticiones y fugas de contexto.
+
+**Decisión:**
+- La organización activa se **selecciona explícitamente por petición** (vía cabecera o parámetro explícito) y se valida obligatoriamente contra la base de datos en cada solicitud, comprobando la identidad del actor y la vigencia de su concesión de acceso (D-080).
+- Queda terminantemente prohibido confiar ciegamente en identificadores de organización enviados por el cliente sin validación previa en el servidor.
+- El contexto organizacional en PostgreSQL se establece exclusivamente a nivel local de transacción mediante:
+  `SELECT set_config('app.current_organization_id', ?, true)`
+  con el parámetro `is_local = true`, utilizando **parámetros enlazados (bound parameters)** y transacciones de Drizzle ORM (`db.transaction(async (tx) => { ... })`).
+- **Una organización por transacción:** cada transacción organizacional corresponde estrictamente a una única organización.
+- Los servicios y repositorios organizacionales reciben el objeto transaccional explícitamente autorizado (`tx`) como argumento, manteniendo la propagación explícita de `ActorContext` (D-080) y descartando `AsyncLocalStorage` (ALS) para transmitir autorización.
+- **Denegación por defecto:** si una consulta sobre una tabla protegida opera sin contexto organizacional o con un valor nulo/vacío, las políticas RLS deniegan el acceso devolviendo cero filas.
+- **Separación de operaciones globales y organizacionales:** las operaciones globales de identidad y autorización (autenticación de usuario, recuperación de concesiones) se ejecutan en transacciones o consultas globales sin fijar contexto organizacional. Las operaciones de negocio multitenant operan siempre dentro de una transacción organizacional con contexto fijado.
+- **Agregaciones legítimas multiorganización:** cuando una funcionalidad requiera consultar o agregar datos de varias organizaciones para un actor autorizado en todas ellas, se debe ejecutar mediante consultas independientes y autorizadas para cada organización; queda prohibido cualquier bypass general o global de RLS.
+- **Compatibilidad con pooling por transacción:** el uso de `set_config` con `is_local = true` dentro de transacciones garantiza compatibilidad total con pools de conexiones y poolers en modo transacción (como PgBouncer), sin hacer obligatorio el uso de PgBouncer. Al finalizar la transacción (`COMMIT` o `ROLLBACK`), PostgreSQL limpia automáticamente la variable GUC local, evitando contaminación entre peticiones que compartan conexión.
+- **Limitación conocida documentada:** la ejecución de SQL arbitrario puede modificar la variable GUC (`set_config`). RLS proporciona defensa en profundidad contra filtros olvidados o errores lógicos de aplicación; **RLS no sustituye la prevención de inyección SQL**.
+
+**Motivo:** La asignación local por transacción con `is_local = true` y propagación explícita de `tx` es atómica, previene fugas de contexto entre conexiones de un pool y asegura un comportamiento determinista y verificable sin depender de contextos globales o hilos asíncronos opacos.
+
+**Consecuencias:** Todo acceso a entidades organizacionales debe envolverse en una transacción con contexto organizacional establecido.
+
+---
+
+### D-096 — Políticas de Row-Level Security, clasificación de tablas e integridad relacional (RLS.3)
+
+**Estado:** Confirmada (2026-11-16; consolidación de RLS.3 tras INV-04a).
+
+**Contexto:** Se requería definir la taxonomía de tablas, las cláusulas de las políticas RLS, la gestión del identificador de organización, la integridad referencial y las restricciones de base de datos para garantizar que el aislamiento no se degrade por operaciones especiales o dependencias relacionales cruzadas.
+
+**Decisión:**
+- **Clasificación explícita de tablas:** cada tabla del esquema debe clasificarse de forma inequívoca como **global** (sin pertenencia a organización, p. ej. `users`, `sessions`, `roles`, `permissions`) u **organizacional** (perteneciente a un tenant).
+- **Entidades organizacionales protegidas:** toda tabla organizacional debe contener obligatoriamente una columna `organization_id` no nula, y debe tener RLS habilitado y forzado explícitamente:
+  `ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;`
+  `ALTER TABLE <table> FORCE ROW LEVEL SECURITY;`
+- **Políticas de lectura y escritura:**
+  - Lectura (`SELECT`): cláusula `USING (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid)` (cuando el identificador sea UUID) o su tipo correspondiente.
+  - Escritura (`INSERT`, `UPDATE`): cláusula `WITH CHECK (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid)`.
+  - La barrera organizacional restrictiva se combina adecuadamente con políticas permisivas si existen reglas adicionales de autorización. Queda terminantemente prohibido el uso de políticas permisivas abiertas (`USING (true)`) en tablas organizacionales.
+- **Manejo seguro de contexto ausente o vacío:** la expresión `NULLIF(current_setting('app.current_organization_id', true), '')::uuid` asegura que ante una variable no definida o vacía se devuelva `NULL`, evitando errores de conversión y denegando la comparación frente a `organization_id`.
+- **Claves primarias simples:** se mantienen claves primarias simples por defecto (p. ej. `id uuid PRIMARY KEY`), sin imponer claves primarias compuestas universalmente (`organization_id, id`).
+- **Integridad referencial y claves foráneas (FK):**
+  - Se utilizan claves foráneas para garantizar la integridad referencial.
+  - En relaciones entre entidades organizacionales que deban permanecer estrictamente aisladas, se deben utilizar claves foráneas compuestas que incluyan `organization_id` (`FOREIGN KEY (organization_id, parent_id) REFERENCES parent_table(organization_id, id)`), impidiendo a nivel de motor de base de datos que una fila de la organización A enlace con un padre de la organización B.
+  - Solo se permiten diseños avanzados sin claves foráneas físicas cuando existan garantías alternativas explícitas y verificables.
+- **Restricciones únicas por organización:** las restricciones de unicidad sobre datos de negocio organizacionales deben tener alcance de tenant (p. ej. `UNIQUE (organization_id, slug)`).
+- **Restricción de operaciones especiales:**
+  - `TRUNCATE` no respeta políticas RLS en PostgreSQL; el rol `app_exec` no debe poseer privilegios de `TRUNCATE`.
+  - `COPY FROM` elude ciertas comprobaciones RLS y no se admite para operaciones de aplicación sujetas a RLS.
+  - Las vistas sobre tablas organizacionales deben crearse obligatoriamente con `WITH (security_invoker = true)`.
+  - Las funciones con `SECURITY DEFINER` deben restringirse rigurosamente y fijar explícitamente un `search_path` seguro para evitar escaladas de privilegios.
+- **Separación de capas:** la autorización efectiva y las comprobaciones RBAC permanecen en Express; RLS actúa como garantía estricta de aislamiento de filas a nivel de datos.
+- **Consultas parametrizadas:** todas las consultas SQL se construyen y parametrizan mediante Drizzle ORM; cualquier fragmento SQL personalizado debe validarse y tratarse de forma segura.
+- **Extensibilidad modular:** los nuevos módulos de negocio generados o desarrollados deben poder incorporar entidades organizacionales registrando sus tablas y políticas bajo este patrón, sin necesidad de reescribir Auth ni desactivar RLS.
+
+**Motivo:** Aborda metódicamente los hallazgos empíricos de INV-04a (comportamiento de `FORCE ROW LEVEL SECURITY`, cláusulas `WITH CHECK`, fallo de tipo con UUID vacíos, fuga por claves foráneas cruzadas, vulnerabilidades en vistas sin `security_invoker` y operaciones no aisladas como `TRUNCATE`).
+
+**Consecuencias:** Las tablas organizacionales requieren la columna `organization_id`, políticas RLS completas (`USING` y `WITH CHECK`) y claves foráneas compuestas cuando se requiera garantizar aislamiento referencial entre entidades del mismo tenant.
+
+---
+
+### D-097 — Verificación estructural, evaluación de rendimiento, auditoría operativa y auditoría de acciones (RLS.4)
+
+**Estado:** Confirmada (2026-11-16; consolidación de RLS.4 tras INV-04a e INV-04b).
+
+**Contexto:** Se requería definir el marco de verificación automática del aislamiento RLS, la metodología de evaluación de rendimiento, la infraestructura de auditoría operativa de seguridad y la auditoría de acciones de negocio como capacidad transversal.
+
+**Decisión:**
+- **A. Auditoría estructural:**
+  - Verificaciones automáticas de roles, privilegios de PostgreSQL, tablas protegidas, políticas activas, restricciones de integridad y aislamiento.
+  - Inspección programática de catálogos del sistema PostgreSQL (`pg_tables`, `pg_roles`, `pg_policies`, etc.) combinada con pruebas funcionales reales sobre conexiones de prueba.
+  - Detección automática de tablas organizacionales sin protección o con políticas permisivas (`USING (true)`) que comprometan el aislamiento.
+  - Pruebas negativas y de concurrencia obligatorias: peticiones concurrentes de distintas organizaciones con contexto transaccional para verificar que no existan interferencias ni fugas de datos.
+  - Fallos en verificaciones estructurales críticas bloquean la integración continua (CI).
+  - Garantías y paridad funcional equivalentes en variantes JavaScript y TypeScript.
+  - Integración futura en el sistema de verificación de seguridad previsto (`verify:security`, T-018).
+  - Las comprobaciones estructurales de catálogo son de verificación y prueba; no deben ejecutarse en cada petición HTTP en producción.
+- **B. Evaluación de rendimiento:**
+  - Benchmarks representativos con y sin RLS ejecutados exclusivamente en laboratorios de prueba aislados.
+  - Comparación formal de consultas equivalentes con filtros organizacionales e índices adecuados en `organization_id`.
+  - Métricas obligatorias: `EXPLAIN (ANALYZE, BUFFERS)` para descartar escaneos secuenciales involuntarios, latencias p50 y p95, y consumo de recursos de memoria y CPU.
+  - Documentación sistemática de degradaciones observadas y optimizaciones de índices recomendadas.
+  - Queda terminantemente prohibido ofrecer una variante pública multitenant sin RLS.
+- **C. Auditoría operativa de seguridad:**
+  - Infraestructura centralizada en el backend para registrar eventos relevantes de seguridad: intentos de autenticación fallidos/exitosos, decisiones de autorización denegadas y accesos denegados a organizaciones.
+  - Correlación obligatoria mediante identificador de petición (`requestId` / `correlationId`).
+  - Recolección de evidencia suficiente para investigar anomalías o intentos repetidos sospechosos (IP de origen, actor, timestamp, recurso intentado).
+  - Posibilidad de generar alertas ante patrones configurables de anomalía o abuso.
+  - Principio de diseño: no asumir que PostgreSQL RLS informa automáticamente de consultas que devuelven cero filas por filtrado.
+  - Minimización de datos: prohibido registrar contraseñas, tokens de sesión o datos sensibles innecesarios.
+  - En la versión v1 no se incluye dashboard visual de seguridad empresarial ni integración obligatoria con SIEM.
+- **D. Auditoría de acciones de negocio:**
+  - **Capacidad transversal** disponible para proyectos que incluyan Auth, no exclusiva de multitenancy.
+  - Registro estructurado de auditoría: quién ejecutó la acción (actor autenticado), cuándo (timestamp UTC), sobre qué recurso (tipo e ID) y qué campos relevantes cambiaron (valores anteriores/posteriores relevantes).
+  - Identidad del actor extraída siempre de forma inmutable del `ActorContext` autenticado y validado, nunca de campos arbitrarios del cliente.
+  - Instrumentación de operaciones críticas del sistema: cambios en Auth, asignación/revocación de roles y permisos en RBAC, aprovisionamiento/revocación de concesiones de acceso organizacionales.
+  - Mecanismo reutilizable y sencillo para que futuros módulos de negocio registren sus eventos críticos.
+  - **Atomicidad transaccional:** la operación de negocio y su correspondiente evento de auditoría deben persistirse atómicamente dentro de la misma transacción de base de datos.
+  - Minimización de datos: evitar almacenar secretos o copias completas innecesarias de datos sensibles.
+  - Distinción explícita entre acciones ejecutadas por humanos y procesos automatizados del sistema.
+  - **Historial de solo adición (*append-only*):** la tabla de auditoría no admite modificaciones ni borrados.
+  - Administradores autorizados: únicamente pueden visualizar los eventos de auditoría correspondientes a su ámbito (alcance de sistema o de su respectiva organización).
+  - Prohibición de controles visuales o endpoints de API para editar o borrar entradas del historial de auditoría.
+  - Privilegios de base de datos: el rol `app_exec` carece de permisos `UPDATE` y `DELETE` sobre las tablas de auditoría de acciones.
+  - Rechazo explícito de intentos de manipulación de registros de auditoría, registrando dichos intentos observables como incidentes de seguridad.
+  - Definición de políticas de retención, protección de registros y acceso autorizado.
+  - Limitación documentada: no se promete inmutabilidad absoluta frente a administradores con privilegios de superusuario en el motor de base de datos.
+  - Extensiones futuras: paneles visuales avanzados de auditoría y detección especializada de fraudes.
+- **Documentación para desarrolladores (requisito de implementación):**
+  - Se establecen como entregables obligatorios dos niveles de documentación:
+    1. **Guía práctica breve:** orientada al desarrollador, con ejemplos concretos de cómo agregar nuevas tablas organizacionales, ejecutar operaciones autorizadas en transacciones y registrar eventos en la auditoría de acciones.
+    2. **Referencia técnica:** descripción detallada de políticas RLS, permisos de roles PostgreSQL, análisis de amenazas mitigadas, batería de pruebas de aislamiento, garantías formales y limitaciones conocidas.
+
+**Motivo:** El aislamiento mediante RLS exige verificación automatizada rigurosa para evitar degradaciones silenciosas del aislamiento. Asimismo, la seguridad operativa y la trazabilidad de negocio proporcionan visibilidad y rendición de cuentas indispensables para mitigar riesgos internos, manteniendo una implementación pragmática sin sobreingeniería para v1.
+
+**Consecuencias:** La CI debe incorporar verificaciones estructurales de catálogo PostgreSQL y pruebas de concurrencia RLS. Los módulos críticos de Auth/RBAC deben registrar eventos de negocio atómicamente. Se requiere elaborar la guía práctica y la referencia técnica para desarrolladores.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1570,7 +1720,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; y P-011, resuelta en D-080 a D-086). Permanecen abiertas las relativas a estrategia JS/TS (P-013 / INV-05b / INV-08), soporte y rendimiento de RLS en Drizzle/PostgreSQL con análisis de planes de ejecución (INV-04a / T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), invitaciones y reglas de delegación.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; P-011, resuelta en D-080 a D-086; y RLS/multitenancy/auditorías resueltas en D-094 a D-097 tras INV-04a). Permanecen abiertas las relativas a estrategia JS/TS (P-013 / INV-05b / INV-08), comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), modelo integral de amenazas, invitaciones y reglas de delegación.
 - Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).

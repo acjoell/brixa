@@ -108,17 +108,45 @@ Estas restricciones deben verificarse en el servidor y aplicarse también a cons
 
 Si se selecciona multitenancy, el aislamiento entre organizaciones es un requisito crítico.
 
-### Obligatoriedad de PostgreSQL RLS
+### Obligatoriedad de PostgreSQL RLS y exclusión de SQLite (D-064, D-094)
 
-El aislamiento a nivel de base de datos mediante Row-Level Security (RLS) en PostgreSQL es obligatorio para todas las variantes con multitenancy (D-064). SQLite queda excluido de multitenancy.
+El aislamiento a nivel de base de datos mediante Row-Level Security (RLS) en PostgreSQL es obligatorio para todas las variantes con multitenancy. SQLite queda terminantemente excluido de multitenancy en esta etapa.
 
-El rol de la aplicación debe operar sin privilegios administrativos ni `BYPASSRLS`, forzando `FORCE ROW LEVEL SECURITY` en las tablas con aislamiento.
+### Roles, privilegios y separación de credenciales (D-094)
 
-### Determinación y validación del contexto de organización
+- **Separación estricta de identidades:** se separan la identidad de ejecución de la aplicación (`app_exec`) y la identidad de migraciones y gestión de esquema (`table_owner`).
+- **Restricciones del rol de ejecución (`app_exec`):** no puede ser superusuario ni poseer el atributo `BYPASSRLS`; no puede ser propietario de tablas protegidas por RLS; no posee privilegios de DDL ni `TRUNCATE` sobre tablas protegidas; y opera con privilegios DML mínimos (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
+- **Credenciales separadas:** el servicio de aplicación Express utiliza `DATABASE_URL` (con rol `app_exec`) y las herramientas de migración Drizzle utilizan `MIGRATION_DATABASE_URL` (con rol `table_owner`).
+- **Aprovisionamiento administrado:** se documenta y proporciona aprovisionamiento claro para proveedores de PostgreSQL administrados (RDS, Cloud SQL, Neon, Supabase, etc.).
+- **Fallo explícito ante privilegios inadecuados:** si en el arranque o verificación no se garantizan las restricciones requeridas para `app_exec`, el sistema debe fallar explícitamente. Queda prohibido desactivar RLS como solución o degradación permisiva.
 
-El sistema debe determinar la organización activa por petición y validarla obligatoriamente contra la base de datos en cada solicitud, comprobando que el actor posee una concesión de acceso vigente (D-080).
+### Contexto organizacional y transacciones (D-080, D-095)
 
-No debe confiar únicamente en un `tenantId`, `organizationId` o parámetro enviado por el cliente.
+- **Determinación y validación:** la organización activa se selecciona explícitamente por petición y se valida obligatoriamente contra la base de datos en cada solicitud, comprobando la existencia de una concesión de acceso vigente (D-080). Queda prohibido confiar en identificadores provistos por el cliente.
+- **Contexto local por transacción:** el contexto en PostgreSQL se establece exclusivamente mediante `SELECT set_config('app.current_organization_id', ?, true)` con `is_local = true`, parámetros enlazados y transacciones de Drizzle ORM (`db.transaction`).
+- **Una organización por transacción:** cada transacción organizacional corresponde estrictamente a una única organización.
+- **Propagación explícita:** los servicios organizacionales reciben explícitamente el objeto transaccional autorizado (`tx`). Se descarta `AsyncLocalStorage` (ALS) para transmitir autorización o aislamiento.
+- **Denegación por defecto:** ante la ausencia o vacío de contexto organizacional, las políticas RLS deniegan el acceso devolviendo cero filas.
+- **Separación de operaciones:** las operaciones globales (identidad, autenticación, validación de concesiones) se ejecutan sin contexto organizacional; las operaciones de tenant operan en transacciones con contexto fijado.
+- **Agregaciones legítimas multiorganización:** agregaciones que requieran datos de múltiples organizaciones para un actor autorizado se realizan mediante consultas independientes y autorizadas por organización; sin bypass general de RLS.
+- **Compatibilidad con pooling por transacción:** compatible con transaction pooling (como PgBouncer); al finalizar la transacción (`COMMIT` o `ROLLBACK`), PostgreSQL limpia automáticamente la variable GUC local, impidiendo contaminación entre clientes en conexiones reutilizadas.
+- **Limitación documentada:** la ejecución de SQL arbitrario puede alterar el GUC (`set_config`). RLS actúa como defensa en profundidad contra filtros olvidados; **RLS no sustituye la prevención de inyección SQL**.
+
+### Políticas de aislamiento e integridad relacional (D-096)
+
+- **Clasificación de tablas:** clasificación explícita entre tablas globales y tablas organizacionales.
+- **Protección de tablas organizacionales:** columna `organization_id` obligatoria, con RLS habilitado y forzado mediante `FORCE ROW LEVEL SECURITY`.
+- **Políticas de lectura y escritura:**
+  - Lectura (`SELECT`): `USING (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid)`.
+  - Escritura (`INSERT`, `UPDATE`): `WITH CHECK (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid)`.
+  - Barrera restrictiva combinada con políticas permisivas; prohibición expresa de políticas permisivas abiertas (`USING (true)`) en tablas organizacionales.
+- **Manejo seguro de contexto ausente/vacío:** la expresión `NULLIF(..., '')::uuid` asegura evaluación a `NULL` ante variable ausente o vacía, denegando el acceso.
+- **Claves primarias simples:** se mantienen claves primarias simples por defecto (`id uuid PRIMARY KEY`), sin imponer PK compuestas universales.
+- **Integridad referencial (FK):** claves foráneas estándar para garantizar integridad relacional. En relaciones entre entidades organizacionales que deban permanecer aisladas, claves foráneas compuestas con `organization_id` (`FOREIGN KEY (organization_id, parent_id) REFERENCES parent_table(organization_id, id)`). Diseños sin FK física solo admisibles con garantías alternativas explícitas y verificables.
+- **Restricciones UNIQUE:** alcance por organización (`UNIQUE (organization_id, ...)`).
+- **Operaciones especiales restringidas:** prohibición de permiso `TRUNCATE` para `app_exec`; `COPY FROM` no admitido con RLS; vistas obligatoriamente con `WITH (security_invoker = true)`; funciones `SECURITY DEFINER` restringidas y con `search_path` explícito y seguro.
+- **Separación de capas:** la autorización efectiva y las comprobaciones RBAC permanecen en Express; RLS garantiza aislamiento de filas en datos. Consultas SQL parametrizadas en Drizzle.
+- **Extensibilidad modular:** los nuevos módulos de negocio deben poder incorporar entidades organizacionales registrando sus tablas y políticas bajo este patrón, sin necesidad de reescribir Auth ni desactivar RLS.
 
 ### Independencia de RBAC
 
@@ -131,10 +159,6 @@ Las concesiones de acceso entre usuarios y organizaciones se gobiernan mediante 
 ### Separación estricta de administración de plataforma
 
 La administración de plataforma está estrictamente separada de la administración organizacional (D-084). Los administradores de plataforma operan a nivel de sistema y no poseen acceso global automático a los datos de negocio de las organizaciones ni cuentan con bypass genérico de Row-Level Security (RLS). Para operar sobre datos internos de una organización, requieren una concesión de acceso explícita y vigente en dicha organización.
-
-### Rendimiento y análisis de ejecución
-
-El uso de RLS no debe degradar inadvertidamente el rendimiento del sistema. Toda implementación con multitenancy y RLS requiere pruebas de rendimiento representativas con cargas realistas, comparación formal de rendimiento con y sin RLS, diseño cuidadoso de índices en columnas de aislamiento y filtros, y análisis sistemático de planes de ejecución (`EXPLAIN ANALYZE`) para descartar escaneos secuenciales innecesarios.
 
 ### Operaciones bajo aislamiento
 
@@ -200,7 +224,7 @@ Los archivos `.env.example` deben contener nombres de variables y valores ilustr
 
 La configuración debe validarse al iniciar la aplicación.
 
-## 9. Errores y registros
+## 9. Errores, registros y auditoría (D-097)
 
 Los mensajes de error públicos deben ser útiles sin exponer detalles internos.
 
@@ -209,6 +233,33 @@ Las trazas completas y los detalles técnicos pueden registrarse de forma contro
 Los registros deben evitar almacenar contraseñas, tokens de autenticación u otras credenciales.
 
 La información personal debe tratarse con criterios de minimización y protección adecuados al contexto.
+
+### Auditoría operativa de seguridad (D-097)
+
+- **Infraestructura centralizada:** registro centralizado de eventos relevantes de seguridad: intentos de autenticación exitosos y fallidos, decisiones de autorización denegadas y accesos denegados a organizaciones.
+- **Correlación de peticiones:** correlación obligatoria mediante identificadores de petición (`requestId` / `correlationId`) para trazabilidad de extremo a extremo.
+- **Evidencia forense:** evidencia suficiente para investigar anomalías o ataques repetidos (actor, timestamp UTC, IP de origen, recurso solicitado y resultado).
+- **Ganchos de alertas:** capacidad de disparar alertas ante patrones sospechosos o anómalos configurables.
+- **Principio de no presunción:** no asumir que PostgreSQL RLS informa automáticamente de consultas filtradas que retornan cero filas.
+- **Minimización estricta:** prohibición de registrar contraseñas, tokens de sesión o datos sensibles innecesarios. Sin obligación de SIEM ni dashboard empresarial en v1.
+
+### Auditoría de acciones de negocio (D-097)
+
+- **Capacidad transversal:** disponible para todos los proyectos generados que incluyan Auth (no exclusiva de multitenancy).
+- **Contenido del registro:** quién ejecutó la acción (actor autenticado), cuándo (timestamp UTC), sobre qué recurso (tipo e identificador) y qué campos relevantes cambiaron (valores anteriores y posteriores relevantes).
+- **Origen fidedigno de identidad:** la identidad del actor se extrae exclusivamente del `ActorContext` autenticado y validado, nunca de campos arbitrarios enviados por el cliente.
+- **Instrumentación de operaciones críticas:** cambios en Auth, asignación/revocación de roles y permisos en RBAC, aprovisionamiento/revocación de concesiones de acceso organizacionales.
+- **Mecanismo reutilizable:** interfaz sencilla para que futuros módulos de negocio registren sus eventos críticos.
+- **Atomicidad transaccional:** la operación de negocio y su evento de auditoría deben persistirse atómicamente en la misma transacción de base de datos.
+- **Minimización:** evitar almacenar secretos o copias completas innecesarias de datos sensibles.
+- **Distinción de actores:** diferenciar explícitamente entre acciones humanas y procesos automatizados del sistema.
+- **Historial de solo adición (*append-only*):** la tabla de auditoría no admite modificaciones ni borrados.
+- **Visualización acotada:** administradores autorizados acceden exclusivamente a los eventos correspondientes a su ámbito (alcance de sistema o de su organización).
+- **Sin controles de edición:** no generar controles visuales ni endpoints de API para editar o borrar entradas de auditoría.
+- **Protección de base de datos:** el rol `app_exec` carece de permisos `UPDATE` y `DELETE` sobre las tablas de auditoría de acciones.
+- **Rechazo de manipulación:** rechazar explícitamente intentos de modificación o borrado y registrar los intentos observables como incidentes de seguridad.
+- **Gestión de ciclo de vida:** definir políticas de retención, archivado, protección de registros y acceso autorizado.
+- **Limitación documentada:** no se promete inmutabilidad absoluta frente a superusuarios del motor de base de datos. Paneles avanzados de auditoría y detección de fraudes quedan como extensiones futuras.
 
 ## 10. Dependencias y cadena de suministro
 
@@ -222,27 +273,49 @@ No se debe considerar que una dependencia es segura únicamente porque es popula
 
 Los cambios de dependencias deben evaluarse y verificarse con las pruebas disponibles.
 
-## 11. Pruebas de seguridad
+## 11. Pruebas y verificación de seguridad (D-097)
 
 Cuando existan controles de autenticación, autorización o multitenancy, las pruebas deben cubrir tanto el acceso permitido como el denegado.
 
-Casos importantes:
+### Auditoría estructural de RLS (D-097)
+
+- **Verificaciones automáticas:** comprobación automática de roles, privilegios de PostgreSQL, tablas protegidas, políticas activas, restricciones de integridad y aislamiento.
+- **Inspección de catálogo:** inspección programática de catálogos del sistema PostgreSQL (`pg_tables`, `pg_roles`, `pg_policies`, etc.) combinada con pruebas funcionales reales sobre conexiones de prueba.
+- **Detección de vulnerabilidades:** detección de tablas organizacionales sin protección o con políticas permisivas (`USING (true)`) que comprometan el aislamiento.
+- **Bloqueo de CI:** las verificaciones estructurales críticas fallidas bloquean la integración continua.
+- **Paridad funcional:** garantías equivalentes en variantes JavaScript y TypeScript.
+- **Integración futura:** integración en el sistema de verificación de seguridad previsto (`verify:security`, T-018).
+- **Separación de entornos:** las comprobaciones estructurales pesadas de catálogo no deben ejecutarse en cada petición HTTP en producción.
+
+### Evaluación de rendimiento de RLS (D-097)
+
+- **Entorno aislado:** benchmarks representativos con y sin RLS ejecutados exclusivamente en laboratorios de prueba aislados.
+- **Comparación formal:** comparar consultas equivalentes con filtros organizacionales e índices adecuados en `organization_id`.
+- **Métricas obligatorias:** análisis de planes de ejecución mediante `EXPLAIN (ANALYZE, BUFFERS)` para descartar escaneos secuenciales innecesarios, latencias p50/p95 y consumo de memoria/CPU.
+- **Documentación:** documentar degradaciones observadas y optimizaciones de índices recomendadas.
+- **Prohibición:** no ofrecer una variante pública multitenant sin RLS.
+
+### Casos de prueba negativos críticos:
 
 - Usuario no autenticado intenta acceder a un recurso protegido.
 - Usuario autenticado carece del permiso requerido.
 - Usuario intenta acceder a un recurso ajeno.
 - Usuario de una organización intenta acceder a datos de otra.
 - Usuario intenta modificar el identificador de organización.
-- Usuario intenta asociar entidades de organizaciones diferentes.
+- Usuario intenta asociar entidades de organizaciones diferentes (violación de FK compuesta).
 - Usuario intenta asignar permisos que no puede administrar.
 - Usuario deshabilitado intenta continuar usando una sesión, según el mecanismo implementado.
 - Usuario con concesión de acceso revocada (`revoked_at` registrado) intenta acceder a la organización.
 - Administrador de plataforma intenta acceder directamente a datos organizacionales sin concesión explícita o intenta eludir RLS.
 - Intento de asignación de privilegios administrativos o creación no autorizada de organizaciones en el registro público.
 - Ejecución concurrente o repetida del comando de bootstrap del primer administrador.
+- Conexión de aplicación con rol superusuario, propietario de tabla o con `BYPASSRLS` (debe fallar explícitamente).
+- Consulta a tabla organizacional sin contexto organizacional o con contexto vacío (debe retornar cero filas).
+- Peticiones concurrentes entre organizaciones compartiendo conexión de pool (sin contaminación cruzada de GUC).
+- Intento de mutación de variable GUC mediante inyección o datos arbitrarios.
+- Intento de `UPDATE` o `DELETE` sobre la tabla de auditoría de acciones (rechazado por base de datos).
 
 Las pruebas deben verificar el resultado observable y que no se produzcan cambios indebidos en los datos.
-
 
 ## 12. Incorporación gradual de capacidades de seguridad
 
@@ -262,6 +335,13 @@ Antes de habilitar cada capacidad, deben definirse:
 - Los riesgos y limitaciones conocidos.
 
 La arquitectura inicial debe mantenerse sencilla. No se deben añadir capas o abstracciones de seguridad sin una necesidad concreta, pero tampoco se deben diseñar las capacidades futuras de forma que resulte innecesariamente difícil implementarlas de manera segura.
+
+### Requisitos de documentación para desarrolladores (D-097)
+
+Toda implementación de seguridad debe incluir dos niveles obligatorios de documentación técnica:
+
+1. **Guía práctica breve:** orientada al desarrollador, con ejemplos concretos de cómo agregar nuevas tablas organizacionales, ejecutar operaciones autorizadas en transacciones y registrar eventos en la auditoría de acciones.
+2. **Referencia técnica:** descripción detallada de políticas RLS, permisos de roles PostgreSQL, análisis de amenazas mitigadas, batería de pruebas de aislamiento, garantías formales y limitaciones conocidas.
 
 ## 13. Endurecimiento base implementado (commit 4295376, 2026-11-14)
 

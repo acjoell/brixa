@@ -455,7 +455,7 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 
 ### T-014 — Diseñar e implementar autenticación y autorización
 
-**Estado:** EN PROGRESO (solo diseño). Dividida: sus subtareas se registran en `TASKS_POST_MVP.md` (T-014-0, T-014a, T-014a-ui, T-014b1, T-014b2, T-014c y T-014d), con alcance aprobado en D-064 (modificado formalmente por D-086 y precisado por D-089) y decisiones de diseño consolidadas en D-080 a D-090.
+**Estado:** EN PROGRESO (solo diseño). Dividida: sus subtareas se registran en `TASKS_POST_MVP.md` (T-014-0, T-014a, T-014a-ui, T-014b1, T-014b2, T-014c y T-014d), con alcance aprobado en D-064 (modificado formalmente por D-086 y precisado por D-089) y decisiones de diseño consolidadas en D-080 a D-097.
 **Prioridad:** P2  
 **Fase:** 5
 **Dependencia:** T-019 (0.1.0 preservada por el tag `v0.1.0`, D-060). Ya no se exige que 0.1.0 esté publicada en npm para trabajar en `main`; sustituye a la condición anterior de D-059. Antes de escribir código se requiere el modelo de amenazas (SECURITY.md §12) y su desglose en autenticación, RBAC y multitenancy, cada uno con su decisión y sus pruebas negativas. Las capacidades dependen además de la composición de overlays (T-017a y T-017a-ui, completadas), la seguridad base (T-017b) y el arnés de verificación (T-018).
