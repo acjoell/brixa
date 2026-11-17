@@ -23,7 +23,21 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL, URL } from "node:url";
+import { performance } from "node:perf_hooks";
 import { verifyI18n } from "./verify-i18n.js";
+
+const suiteStartTime = performance.now();
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function getElapsedSuite() {
+  return formatDuration(performance.now() - suiteStartTime);
+}
+
+const timeoutSignal = (ms) => globalThis.AbortSignal.timeout(ms);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -32,9 +46,38 @@ const root = path.resolve(here, "..");
 // Utilidades
 // ---------------------------------------------------------------------------
 
-/** Ejecuta un comando sincrónico e imprime la salida heredada sin exponer variables de entorno sensibles. */
-function run(cmd, args, cwd, extraEnv = {}) {
-  console.log(`\n$ ${cmd} ${args.join(" ")}  (cwd: ${cwd})`);
+/** Timeout por defecto según el comando y sus argumentos para evitar bloqueos indefinidos. */
+function getDefaultTimeout(cmd, args) {
+  if (cmd === "docker") {
+    return 300_000; // 5 minutos para operaciones de docker (build/run/migrate)
+  }
+  if (cmd === "npm") {
+    const sub = args[0];
+    if (sub === "install" || sub === "ci") {
+      return 300_000; // 5 minutos para instalaciones en Windows CI (NTFS + Defender)
+    }
+    if (sub === "audit") {
+      return 60_000; // 1 minuto para auditoría (llamada remota a registro)
+    }
+    if (sub === "run") {
+      const script = args[1];
+      if (script === "build") return 120_000; // 2 minutos para compilación
+      if (["lint", "typecheck", "format:check", "test", "check:i18n"].includes(script)) {
+        return 60_000; // 1 minuto para comprobaciones estáticas o tests unitarios
+      }
+      if (script?.startsWith("db:")) return 60_000; // 1 minuto para migraciones
+    }
+  }
+  return 120_000; // 2 minutos por defecto
+}
+
+/** Ejecuta un comando sincrónico e imprime la salida heredada con medición de tiempo y timeout. */
+function run(cmd, args, cwd, extraEnv = {}, customTimeoutMs = null) {
+  const timeoutMs = customTimeoutMs ?? getDefaultTimeout(cmd, args);
+  const startTime = performance.now();
+  const label = `${cmd} ${args.join(" ")}`;
+  console.log(`\n$ ${label}  (cwd: ${cwd}) [T+${getElapsedSuite()}]`);
+
   // Excluir NODE_ENV del entorno heredado para que los builds de Vite usen "production".
   // Vite establece NODE_ENV="development" cuando lanza createServer, y si ese valor
   // se propaga a builds hijos, React se incluye en modo desarrollo (~70 kB extra).
@@ -42,7 +85,25 @@ function run(cmd, args, cwd, extraEnv = {}) {
   delete env.NODE_ENV;
   const isWindows = process.platform === "win32";
   const actualCmd = isWindows && cmd === "npm" ? "npm.cmd" : cmd;
-  execFileSync(actualCmd, args, { cwd, stdio: "inherit", env, shell: isWindows });
+
+  try {
+    execFileSync(actualCmd, args, {
+      cwd,
+      stdio: "inherit",
+      env,
+      shell: isWindows,
+      timeout: timeoutMs,
+    });
+    const duration = performance.now() - startTime;
+    console.log(`✔ ${label} (${formatDuration(duration)})`);
+  } catch (err) {
+    const duration = performance.now() - startTime;
+    const isTimeout = err.code === "ETIMEDOUT" || err.signal === "SIGTERM" || duration >= timeoutMs;
+    console.error(
+      `✖ Falló "${label}" tras ${formatDuration(duration)}${isTimeout ? ` (TIMEOUT alcanzado: ${formatDuration(timeoutMs)})` : ""} (T+${getElapsedSuite()})`,
+    );
+    throw err;
+  }
 }
 
 /** Cierra un proceso de forma limpia y fuerza el cierre de todo el árbol en Windows si es necesario. */
@@ -65,8 +126,14 @@ async function stopProcess(child) {
 
   await new Promise((resolve) => {
     if (child.exitCode !== null) return resolve();
-    child.once("exit", () => resolve());
-    setTimeout(() => {
+    let timer;
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once("exit", onExit);
+    timer = setTimeout(() => {
+      child.removeListener("exit", onExit);
       try {
         if (process.platform !== "win32") child.kill("SIGKILL");
       } catch {
@@ -248,13 +315,15 @@ async function startViteServer(frontendDir, backendPort, backendLogs = null) {
         await new Promise((r) => setTimeout(r, 200));
         if (resolved) break;
         try {
-          const res = await fetch(`http://127.0.0.1:${vitePort}/`);
+          const res = await fetch(`http://127.0.0.1:${vitePort}/`, {
+            signal: timeoutSignal(1000),
+          });
           if (res.ok) {
             checkReady();
             break;
           }
         } catch {
-          // Aún no listo
+          // Aún no listo o timeout del sondeo puntual
         }
       }
     })();
@@ -266,12 +335,15 @@ async function startViteServer(frontendDir, backendPort, backendLogs = null) {
 /** Comprueba que el servidor backend arranca y responde 200 en /health antes de cerrarlo. */
 async function checkBackendServer(projectDir, entryPoint = path.join("dist", "index.js")) {
   let backend;
+  const httpStart = performance.now();
   try {
     backend = await startBackendServer(projectDir, entryPoint);
     console.log(
       `Servidor backend escuchando en puerto ${backend.port}. Verificando GET /health...`,
     );
-    const res = await fetch(`http://localhost:${backend.port}/health`);
+    const res = await fetch(`http://localhost:${backend.port}/health`, {
+      signal: timeoutSignal(5000),
+    });
     if (res.status !== 200) {
       throw new Error(`Esperado status 200 en /health, recibido ${res.status}`);
     }
@@ -281,7 +353,14 @@ async function checkBackendServer(projectDir, entryPoint = path.join("dist", "in
         `Esperado body { status: "ok" } en /health, recibido ${JSON.stringify(body)}`,
       );
     }
-    console.log("✔ GET /health respondió 200 con status: ok");
+    console.log(
+      `✔ GET /health respondió 200 con status: ok (${formatDuration(performance.now() - httpStart)})`,
+    );
+  } catch (err) {
+    console.error(
+      `✖ Error en verificación HTTP /health tras ${formatDuration(performance.now() - httpStart)}: ${err.message ?? err}`,
+    );
+    throw err;
   } finally {
     if (backend?.child) {
       console.log("Cerrando servidor backend...");
@@ -306,7 +385,7 @@ async function verifySwaggerUiAssets(html, docsUrl) {
   for (const rel of cssMatches) {
     const assetUrl = new URL(rel, docsUrl).href;
     console.log(`Verificando asset CSS: ${assetUrl}...`);
-    const res = await fetch(assetUrl);
+    const res = await fetch(assetUrl, { signal: timeoutSignal(5000) });
     if (res.status !== 200) {
       throw new Error(`Esperado status 200 para ${assetUrl}, recibido ${res.status}`);
     }
@@ -319,7 +398,7 @@ async function verifySwaggerUiAssets(html, docsUrl) {
   for (const rel of jsMatches) {
     const assetUrl = new URL(rel, docsUrl).href;
     console.log(`Verificando asset JS: ${assetUrl}...`);
-    const res = await fetch(assetUrl);
+    const res = await fetch(assetUrl, { signal: timeoutSignal(5000) });
     if (res.status !== 200) {
       throw new Error(`Esperado status 200 para ${assetUrl}, recibido ${res.status}`);
     }
@@ -332,85 +411,100 @@ async function verifySwaggerUiAssets(html, docsUrl) {
 
 /** Comprueba que la documentación de API responde 404 por defecto y 200/301 con ENABLE_API_DOCS=true. */
 async function checkBackendDocs(projectDir, entryPoint = path.join("dist", "index.js")) {
+  const docsStart = performance.now();
   const envExample = path.join(projectDir, ".env.example");
   const envFile = path.join(projectDir, ".env");
 
-  // 1. Sin ENABLE_API_DOCS: verificamos que /docs y /docs/ devuelven 404
-  let backendWithoutDocs;
   try {
-    backendWithoutDocs = await startBackendServer(projectDir, entryPoint);
-    console.log(
-      `Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin ENABLE_API_DOCS)...`,
-    );
-    const res = await fetch(`http://localhost:${backendWithoutDocs.port}/docs`, {
-      redirect: "manual",
-    });
-    if (res.status !== 404) {
-      throw new Error(`Esperado status 404 en /docs sin ENABLE_API_DOCS, recibido ${res.status}`);
-    }
-    const resSlash = await fetch(`http://localhost:${backendWithoutDocs.port}/docs/`, {
-      redirect: "manual",
-    });
-    if (resSlash.status !== 404) {
-      throw new Error(
-        `Esperado status 404 en /docs/ sin ENABLE_API_DOCS, recibido ${resSlash.status}`,
+    // 1. Sin ENABLE_API_DOCS: verificamos que /docs y /docs/ devuelven 404
+    let backendWithoutDocs;
+    try {
+      backendWithoutDocs = await startBackendServer(projectDir, entryPoint);
+      console.log(
+        `Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin ENABLE_API_DOCS)...`,
       );
+      const res = await fetch(`http://localhost:${backendWithoutDocs.port}/docs`, {
+        redirect: "manual",
+        signal: timeoutSignal(5000),
+      });
+      if (res.status !== 404) {
+        throw new Error(`Esperado status 404 en /docs sin ENABLE_API_DOCS, recibido ${res.status}`);
+      }
+      const resSlash = await fetch(`http://localhost:${backendWithoutDocs.port}/docs/`, {
+        redirect: "manual",
+        signal: timeoutSignal(5000),
+      });
+      if (resSlash.status !== 404) {
+        throw new Error(
+          `Esperado status 404 en /docs/ sin ENABLE_API_DOCS, recibido ${resSlash.status}`,
+        );
+      }
+      console.log("✔ GET /docs y /docs/ respondieron 404 sin ENABLE_API_DOCS");
+    } finally {
+      if (backendWithoutDocs?.child) await stopProcess(backendWithoutDocs.child);
     }
-    console.log("✔ GET /docs y /docs/ respondieron 404 sin ENABLE_API_DOCS");
-  } finally {
-    if (backendWithoutDocs?.child) await stopProcess(backendWithoutDocs.child);
-  }
 
-  // 2. Con ENABLE_API_DOCS=true cargado desde .env (copiado desde .env.example)
-  let backendWithDocs;
-  try {
-    let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
-    if (envContent.includes("ENABLE_API_DOCS=")) {
-      envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
-    } else {
-      envContent += "\nENABLE_API_DOCS=true\n";
-    }
-    fs.writeFileSync(envFile, envContent, "utf-8");
+    // 2. Con ENABLE_API_DOCS=true cargado desde .env (copiado desde .env.example)
+    let backendWithDocs;
+    try {
+      let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
+      if (envContent.includes("ENABLE_API_DOCS=")) {
+        envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
+      } else {
+        envContent += "\nENABLE_API_DOCS=true\n";
+      }
+      fs.writeFileSync(envFile, envContent, "utf-8");
 
-    backendWithDocs = await startBackendServer(projectDir, entryPoint);
-    console.log(`Verificando redirección GET http://localhost:${backendWithDocs.port}/docs...`);
-    const resRedirect = await fetch(`http://localhost:${backendWithDocs.port}/docs`, {
-      redirect: "manual",
-    });
-    if (resRedirect.status !== 301) {
-      throw new Error(`Esperado status 301 en /docs, recibido ${resRedirect.status}`);
-    }
-    const location = resRedirect.headers.get("location");
-    if (location !== "docs/") {
-      throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
-    }
-    console.log("✔ GET /docs respondió 301 con Location: docs/");
+      backendWithDocs = await startBackendServer(projectDir, entryPoint);
+      console.log(`Verificando redirección GET http://localhost:${backendWithDocs.port}/docs...`);
+      const resRedirect = await fetch(`http://localhost:${backendWithDocs.port}/docs`, {
+        redirect: "manual",
+        signal: timeoutSignal(5000),
+      });
+      if (resRedirect.status !== 301) {
+        throw new Error(`Esperado status 301 en /docs, recibido ${resRedirect.status}`);
+      }
+      const location = resRedirect.headers.get("location");
+      if (location !== "docs/") {
+        throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
+      }
+      console.log("✔ GET /docs respondió 301 con Location: docs/");
 
-    console.log(`Verificando GET http://localhost:${backendWithDocs.port}/docs/...`);
-    const resHtml = await fetch(`http://localhost:${backendWithDocs.port}/docs/`, {
-      redirect: "manual",
-    });
-    if (resHtml.status !== 200) {
-      throw new Error(`Esperado status 200 directo en /docs/, recibido ${resHtml.status}`);
-    }
-    if (resHtml.headers.get("location")) {
-      throw new Error(
-        `Inesperada redirección en /docs/ con Location: '${resHtml.headers.get("location")}'`,
+      console.log(`Verificando GET http://localhost:${backendWithDocs.port}/docs/...`);
+      const resHtml = await fetch(`http://localhost:${backendWithDocs.port}/docs/`, {
+        redirect: "manual",
+        signal: timeoutSignal(5000),
+      });
+      if (resHtml.status !== 200) {
+        throw new Error(`Esperado status 200 directo en /docs/, recibido ${resHtml.status}`);
+      }
+      if (resHtml.headers.get("location")) {
+        throw new Error(
+          `Inesperada redirección en /docs/ con Location: '${resHtml.headers.get("location")}'`,
+        );
+      }
+      const html = await resHtml.text();
+      if (!html.includes("swagger-ui")) {
+        throw new Error("HTML en /docs/ no contiene 'swagger-ui'");
+      }
+      console.log("✔ GET /docs/ respondió 200 directo con Swagger UI");
+
+      await verifySwaggerUiAssets(html, `http://localhost:${backendWithDocs.port}/docs/`);
+      console.log(
+        "✔ Assets CSS y JS de Swagger UI verificados correctamente (status 200 y Content-Type)",
       );
+    } finally {
+      fs.rmSync(envFile, { force: true });
+      if (backendWithDocs?.child) await stopProcess(backendWithDocs.child);
     }
-    const html = await resHtml.text();
-    if (!html.includes("swagger-ui")) {
-      throw new Error("HTML en /docs/ no contiene 'swagger-ui'");
-    }
-    console.log("✔ GET /docs/ respondió 200 directo con Swagger UI");
-
-    await verifySwaggerUiAssets(html, `http://localhost:${backendWithDocs.port}/docs/`);
     console.log(
-      "✔ Assets CSS y JS de Swagger UI verificados correctamente (status 200 y Content-Type)",
+      `✔ Verificación API docs completada (${formatDuration(performance.now() - docsStart)})`,
     );
-  } finally {
-    fs.rmSync(envFile, { force: true });
-    if (backendWithDocs?.child) await stopProcess(backendWithDocs.child);
+  } catch (err) {
+    console.error(
+      `✖ Error en verificación API docs tras ${formatDuration(performance.now() - docsStart)}: ${err.message ?? err}`,
+    );
+    throw err;
   }
 }
 
@@ -744,7 +838,7 @@ export const testItems = sqliteTable("test_items", {
       console.log("✔ Servicios healthy en Docker");
 
       console.log("Verificando GET http://localhost:8080/...");
-      const resRoot = await fetch("http://localhost:8080/");
+      const resRoot = await fetch("http://localhost:8080/", { signal: timeoutSignal(5000) });
       if (resRoot.status !== 200) {
         throw new Error(
           `Esperado status 200 en http://localhost:8080/, recibido ${resRoot.status}`,
@@ -753,7 +847,9 @@ export const testItems = sqliteTable("test_items", {
       console.log("✔ GET http://localhost:8080/ respondió 200");
 
       console.log("Verificando GET http://localhost:8080/api/health...");
-      const resHealth = await fetch("http://localhost:8080/api/health");
+      const resHealth = await fetch("http://localhost:8080/api/health", {
+        signal: timeoutSignal(5000),
+      });
       if (resHealth.status !== 200) {
         throw new Error(
           `Esperado status 200 en /api/health vía nginx, recibido ${resHealth.status}`,
@@ -768,7 +864,7 @@ export const testItems = sqliteTable("test_items", {
       console.log("Verificando que http://localhost:3000 NO responde desde el host...");
       try {
         const resDirect = await fetch("http://localhost:3000/health", {
-          signal: globalThis.AbortSignal.timeout(1500),
+          signal: timeoutSignal(1500),
         });
         throw new Error(
           `Inseguridad: backend expuso http://localhost:3000/health al host con status ${resDirect.status}`,
@@ -784,6 +880,7 @@ export const testItems = sqliteTable("test_items", {
         console.log("Verificando redirección GET http://localhost:8080/api/docs...");
         const resDocsRedirect = await fetch("http://localhost:8080/api/docs", {
           redirect: "manual",
+          signal: timeoutSignal(5000),
         });
         if (resDocsRedirect.status !== 301) {
           throw new Error(
@@ -801,6 +898,7 @@ export const testItems = sqliteTable("test_items", {
         console.log("Verificando GET http://localhost:8080/api/docs/...");
         const resDocs = await fetch("http://localhost:8080/api/docs/", {
           redirect: "manual",
+          signal: timeoutSignal(5000),
         });
         if (resDocs.status !== 200) {
           throw new Error(
@@ -961,7 +1059,7 @@ export const testItems = sqliteTable("test_items", {
     console.log("✔ Backend healthy en Docker");
 
     console.log("Verificando GET http://localhost:3000/health...");
-    const res = await fetch("http://localhost:3000/health");
+    const res = await fetch("http://localhost:3000/health", { signal: timeoutSignal(5000) });
     if (res.status !== 200) {
       throw new Error(`Esperado status 200 en /health, recibido ${res.status}`);
     }
@@ -1059,7 +1157,8 @@ async function verifyVariant(variant, step, total, pgContext) {
     i18n = false,
   } = variant;
   const label = getVariantLabel(variant);
-  console.log(`\n=== ${step}/${total}  Generando proyecto ${label} ===`);
+  console.log(`\n=== ${step}/${total}  Generando proyecto ${label} === [T+${getElapsedSuite()}]`);
+  const variantStartTime = performance.now();
 
   const tmpRoot = fs.realpathSync.native(os.tmpdir());
   const tmpBase = fs.mkdtempSync(path.join(tmpRoot, `brixa-verify-${label.replace(/\+/g, "-")}-`));
@@ -1077,7 +1176,10 @@ async function verifyVariant(variant, step, total, pgContext) {
         return;
       }
       await verifyDockerVariant(projectDir, modality, language, database, label, apiDocs);
-      console.log(`\n✔ ${label} verificado correctamente`);
+      const variantDuration = performance.now() - variantStartTime;
+      console.log(
+        `\n✔ ${label} verificado correctamente (${formatDuration(variantDuration)}, acumulado: ${getElapsedSuite()})`,
+      );
       return;
     }
 
@@ -1139,6 +1241,7 @@ async function verifyVariant(variant, step, total, pgContext) {
           createdEnv = true;
         }
 
+        const proxyStart = performance.now();
         const backend = await startBackendServer(backendDir, entryPoint);
         backendChild = backend.child;
 
@@ -1146,7 +1249,9 @@ async function verifyVariant(variant, step, total, pgContext) {
         viteChild = vite.child;
 
         console.log(`Vite escuchando en puerto ${vite.port}. Verificando GET /api/health...`);
-        const res = await fetch(`http://127.0.0.1:${vite.port}/api/health`);
+        const res = await fetch(`http://127.0.0.1:${vite.port}/api/health`, {
+          signal: timeoutSignal(5000),
+        });
         if (res.status !== 200) {
           throw new Error(
             `Esperado status 200 en /api/health vía proxy de Vite, recibido ${res.status}`,
@@ -1164,6 +1269,7 @@ async function verifyVariant(variant, step, total, pgContext) {
           console.log(`Verificando redirección GET http://127.0.0.1:${vite.port}/api/docs...`);
           const resDocsRedirect = await fetch(`http://127.0.0.1:${vite.port}/api/docs`, {
             redirect: "manual",
+            signal: timeoutSignal(5000),
           });
           if (resDocsRedirect.status !== 301) {
             throw new Error(
@@ -1179,6 +1285,7 @@ async function verifyVariant(variant, step, total, pgContext) {
           console.log(`Verificando GET http://127.0.0.1:${vite.port}/api/docs/...`);
           const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`, {
             redirect: "manual",
+            signal: timeoutSignal(5000),
           });
           if (resDocs.status !== 200) {
             throw new Error(
@@ -1201,6 +1308,9 @@ async function verifyVariant(variant, step, total, pgContext) {
             "✔ Assets CSS y JS de Swagger UI verificados correctamente vía Vite proxy (status 200 y Content-Type)",
           );
         }
+        console.log(
+          `✔ Verificación proxy Vite completada (${formatDuration(performance.now() - proxyStart)})`,
+        );
       } finally {
         if (createdEnv) {
           fs.rmSync(envFile, { force: true });
@@ -1211,7 +1321,11 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       if (i18n) {
+        const i18nStart = performance.now();
         await verifyI18n(frontendDir, language);
+        console.log(
+          `✔ Verificación i18n completada (${formatDuration(performance.now() - i18nStart)})`,
+        );
       }
     } else {
       if (modality === "backend" && !hasDb) {
@@ -1226,7 +1340,11 @@ async function verifyVariant(variant, step, total, pgContext) {
       run("npm", ["run", "lint"], projectDir);
 
       if (modality === "frontend" && i18n) {
+        const i18nStart = performance.now();
         await verifyI18n(projectDir, language);
+        console.log(
+          `✔ Verificación i18n completada (${formatDuration(performance.now() - i18nStart)})`,
+        );
       }
 
       if (modality === "backend") {
@@ -1252,25 +1370,39 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
     }
 
+    const variantDuration = performance.now() - variantStartTime;
     if (hasPostgres && !pgContext.available) {
-      console.log(`\n⚠ ${label}: NO VERIFICADO: PostgreSQL (código y build verificados sin BD)`);
+      console.log(
+        `\n⚠ ${label}: NO VERIFICADO: PostgreSQL (${formatDuration(variantDuration)}, acumulado: ${getElapsedSuite()})`,
+      );
     } else {
-      console.log(`\n✔ ${label} verificado correctamente`);
+      console.log(
+        `\n✔ ${label} verificado correctamente (${formatDuration(variantDuration)}, acumulado: ${getElapsedSuite()})`,
+      );
     }
+  } catch (err) {
+    const variantDuration = performance.now() - variantStartTime;
+    console.error(
+      `\n✖ ${label} falló tras ${formatDuration(variantDuration)} (acumulado: ${getElapsedSuite()}): ${err.message ?? err}`,
+    );
+    throw err;
   } finally {
+    const cleanStart = performance.now();
     try {
       console.log(`\nLimpiando ${tmpBase} …`);
       fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+      console.log(`✔ Limpieza completada (${formatDuration(performance.now() - cleanStart)})`);
     } catch (error) {
-      console.warn(`Aviso: no se pudo limpiar ${tmpBase}: ${error.message}`);
+      console.warn(
+        `Aviso: no se pudo limpiar ${tmpBase} tras ${formatDuration(performance.now() - cleanStart)}: ${error.message}`,
+      );
     }
   }
 }
 
 /** Verifica integración con PostgreSQL: schema, db:generate, db:migrate, existencia de tabla y tests. */
 async function verifyDatabaseIntegration(backendDir, language, pgContext, variantLabel) {
-  // 0. Comprobar auditoría de seguridad de dependencias (falla si hay avisos >= moderate)
-  run("npm", ["audit", "--audit-level=moderate"], backendDir);
+  // Nota: la auditoría npm ya fue realizada inmediatamente tras la instalación en verifyVariant.
 
   if (!pgContext.available || !pgContext.databaseUrl) {
     console.log("\n========================================================");
@@ -1344,8 +1476,7 @@ await client.end();
 
 /** Verifica integración con SQLite: schema, db:generate, db:migrate (incluso con data/ borrada), existencia de tabla y tests. */
 async function verifySqliteIntegration(backendDir, language) {
-  // 0. Comprobar auditoría de seguridad de dependencias (falla si hay avisos >= moderate)
-  run("npm", ["audit", "--audit-level=moderate"], backendDir);
+  // Nota: la auditoría npm ya fue realizada inmediatamente tras la instalación en verifyVariant.
 
   const databaseUrl = "file:./data/app.db";
 
@@ -1471,7 +1602,7 @@ async function main() {
   }
 
   const total = variantsToRun.length + 2; // 1 build + N variantes + 1 resumen
-  console.log(`=== 1/${total}  npm run build ===`);
+  console.log(`=== 1/${total}  npm run build === [T+${getElapsedSuite()}]`);
   run("npm", ["run", "build"], root);
 
   // Comprobar que VERIFIED_VARIANTS de dist/ coincide exactamente con VARIANTS del arnés.
@@ -1511,12 +1642,15 @@ async function main() {
     await pgContext.stop();
   }
 
+  const totalElapsed = performance.now() - suiteStartTime;
   if (!pgContext.available) {
     console.log(
-      `\n=== ${total}/${total}  ⚠ verify:generated completado con advertencias (PostgreSQL: NO VERIFICADO) ===`,
+      `\n=== ${total}/${total}  ⚠ verify:generated completado con advertencias (PostgreSQL: NO VERIFICADO) en ${formatDuration(totalElapsed)} ===`,
     );
   } else {
-    console.log(`\n=== ${total}/${total}  ✔ verify:generated completado con éxito ===`);
+    console.log(
+      `\n=== ${total}/${total}  ✔ verify:generated completado con éxito en ${formatDuration(totalElapsed)} ===`,
+    );
   }
 }
 
@@ -1525,7 +1659,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    console.error("\n✖ verify:generated falló:", err.message ?? err);
+    console.error(`\n✖ verify:generated falló tras ${getElapsedSuite()}:`, err.message ?? err);
     process.exit(1);
   });
 }
