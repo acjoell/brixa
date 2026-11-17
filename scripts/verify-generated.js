@@ -755,9 +755,9 @@ async function verifyDockerVariant(
       fs.writeFileSync(envFile, envLines.join("\n") + "\n", "utf-8");
     }
 
-    run("npm", ["install"], backendDir);
+    run("npm", ["install", "--no-audit"], backendDir);
     run("npm", ["audit", "--audit-level=moderate"], backendDir);
-    run("npm", ["install"], frontendDir);
+    run("npm", ["install", "--no-audit"], frontendDir);
     run("npm", ["audit", "--audit-level=moderate"], frontendDir);
 
     if (database === "postgres") {
@@ -992,7 +992,7 @@ export const testItems = sqliteTable("test_items", {
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
-  run("npm", ["install"], projectDir);
+  run("npm", ["install", "--no-audit"], projectDir);
   run("npm", ["audit", "--audit-level=moderate"], projectDir);
 
   if (database === "postgres") {
@@ -1130,7 +1130,7 @@ export const testItems = sqliteTable("test_items", {
 // Verificación de una variante
 // ---------------------------------------------------------------------------
 
-function getVariantLabel(variant) {
+export function getVariantLabel(variant) {
   const {
     modality,
     language,
@@ -1196,13 +1196,13 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       // Frontend: install, audit, build, lint
-      run("npm", ["install"], frontendDir);
+      run("npm", ["install", "--no-audit"], frontendDir);
       run("npm", ["audit", "--audit-level=moderate"], frontendDir);
       run("npm", ["run", "build"], frontendDir);
       run("npm", ["run", "lint"], frontendDir);
 
       // Backend: install, audit, build (si TS), lint, typecheck (si TS), test
-      run("npm", ["install"], backendDir);
+      run("npm", ["install", "--no-audit"], backendDir);
       run("npm", ["audit", "--audit-level=moderate"], backendDir);
       if (language === "ts") {
         run("npm", ["run", "build"], backendDir);
@@ -1332,7 +1332,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         verifyNoDatabaseArtifacts(projectDir);
       }
 
-      run("npm", ["install"], projectDir);
+      run("npm", ["install", "--no-audit"], projectDir);
       run("npm", ["audit", "--audit-level=moderate"], projectDir);
       if (modality === "frontend" || language === "ts") {
         run("npm", ["run", "build"], projectDir);
@@ -1540,7 +1540,7 @@ client.close();
 // Script principal
 // ---------------------------------------------------------------------------
 
-const VARIANTS = [
+export const VARIANTS = [
   { modality: "frontend", language: "ts", database: "none" },
   { modality: "frontend", language: "js", database: "none" },
   { modality: "backend", language: "ts", database: "none" },
@@ -1575,6 +1575,68 @@ const VARIANTS = [
   { modality: "fullstack", language: "js", database: "sqlite", docker: false, i18n: true },
 ];
 
+export function getPortableVariants(variants = VARIANTS) {
+  return variants.filter((v) => !v.docker && v.database !== "postgres");
+}
+
+export const PORTABLE_PARTITIONS = Object.freeze({
+  A: Object.freeze([
+    "frontend+ts",
+    "frontend+js",
+    "backend+js",
+    "backend+ts+sqlite",
+    "fullstack+js+sqlite",
+    "backend+ts+docs",
+    "backend+js+docs",
+    "fullstack+js+sqlite+docs",
+  ]),
+  B: Object.freeze([
+    "backend+ts",
+    "fullstack+ts",
+    "fullstack+js",
+    "backend+js+sqlite",
+    "fullstack+ts+sqlite",
+    "frontend+ts+i18n",
+    "fullstack+js+sqlite+i18n",
+  ]),
+});
+
+export function validatePortablePartitions(portableVariants, partitions = PORTABLE_PARTITIONS) {
+  if (!partitions || typeof partitions !== "object") {
+    throw new Error("Particiones no definidas o con formato inválido.");
+  }
+  const partitionKeys = Object.keys(partitions);
+  if (partitionKeys.length === 0) {
+    throw new Error("No hay particiones definidas.");
+  }
+
+  const portableLabels = new Set(portableVariants.map(getVariantLabel));
+  const seen = new Set();
+
+  for (const key of partitionKeys) {
+    const list = partitions[key];
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error(`Partición '${key}' está vacía o no es un array.`);
+    }
+    for (const label of list) {
+      if (!portableLabels.has(label)) {
+        throw new Error(`Variante desconocida o no portable '${label}' en partición '${key}'.`);
+      }
+      if (seen.has(label)) {
+        throw new Error(
+          `Variante duplicada '${label}' presente en más de una partición (intersección no vacía).`,
+        );
+      }
+      seen.add(label);
+    }
+  }
+
+  const missing = [...portableLabels].filter((label) => !seen.has(label));
+  if (missing.length > 0) {
+    throw new Error(`Variantes portables omitidas en las particiones: ${missing.join(", ")}`);
+  }
+}
+
 async function main() {
   const scope = process.env.VERIFY_SCOPE || "full";
   if (scope !== "portable" && scope !== "full") {
@@ -1582,23 +1644,95 @@ async function main() {
     process.exit(1);
   }
 
-  const filterArgs = process.argv.slice(2);
-  let variantsToRun =
-    filterArgs.length > 0
-      ? VARIANTS.filter((v) => filterArgs.includes(getVariantLabel(v)))
-      : VARIANTS;
+  // Parseo de argumentos de línea de comandos y variables de entorno para partición
+  const rawArgs = process.argv.slice(2);
+  let cliPartition = null;
+  const filterArgs = [];
 
-  if (scope === "portable") {
-    variantsToRun = variantsToRun.filter((v) => !v.docker && v.database !== "postgres");
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    if (arg.startsWith("--partition=")) {
+      cliPartition = arg.slice("--partition=".length).trim();
+    } else if (arg === "--partition" || arg === "-p") {
+      i++;
+      if (i < rawArgs.length) {
+        cliPartition = rawArgs[i].trim();
+      } else {
+        console.error(
+          "Falta el valor para el argumento --partition. Valores permitidos: 'A' o 'B'.",
+        );
+        process.exit(1);
+      }
+    } else {
+      filterArgs.push(arg);
+    }
+  }
+
+  const envPartition = process.env.VERIFY_PARTITION?.trim() || null;
+  if (cliPartition && envPartition && cliPartition !== envPartition) {
+    console.error(
+      `Conflicto entre argumento --partition='${cliPartition}' y variable VERIFY_PARTITION='${envPartition}'.`,
+    );
+    process.exit(1);
+  }
+
+  const partition = cliPartition || envPartition;
+
+  // Validación estricta del parámetro de partición
+  if (partition !== null) {
+    if (partition !== "A" && partition !== "B") {
+      console.error(`VERIFY_PARTITION inválido: '${partition}'. Valores permitidos: 'A' o 'B'.`);
+      process.exit(1);
+    }
+    if (scope !== "portable") {
+      console.error(
+        `VERIFY_PARTITION solo es válido con VERIFY_SCOPE='portable' (actual: '${scope}').`,
+      );
+      process.exit(1);
+    }
+    if (filterArgs.length > 0) {
+      console.error(
+        `No se puede combinar selección manual de variantes (${filterArgs.join(", ")}) con partición '${partition}'.`,
+      );
+      process.exit(1);
+    }
+  }
+
+  // Validación automatizada de las particiones portables en cada ejecución
+  try {
+    validatePortablePartitions(getPortableVariants());
+  } catch (err) {
+    console.error(`✖ Error de validación de particiones portables: ${err.message}`);
+    process.exit(1);
+  }
+
+  let variantsToRun;
+  if (filterArgs.length > 0) {
+    variantsToRun = VARIANTS.filter((v) => filterArgs.includes(getVariantLabel(v)));
+  } else if (partition) {
+    const partitionLabels = new Set(PORTABLE_PARTITIONS[partition]);
+    variantsToRun = getPortableVariants().filter((v) => partitionLabels.has(getVariantLabel(v)));
+  } else {
+    variantsToRun = VARIANTS;
+  }
+
+  if (scope === "portable" && !partition) {
+    variantsToRun = getPortableVariants(variantsToRun);
   }
 
   if (variantsToRun.length === 0) {
     console.error(
       filterArgs.length > 0
         ? `Ninguna variante coincide con: ${filterArgs.join(", ")} (ámbito: ${scope})`
-        : `Ninguna variante coincide con los criterios (ámbito: ${scope})`,
+        : `Ninguna variante coincide con los criterios (ámbito: ${scope}${partition ? `, partición: ${partition}` : ""})`,
     );
     process.exit(1);
+  }
+
+  if (partition) {
+    console.log(
+      `Partición portable activa: Grupo ${partition} (${variantsToRun.length} variantes)`,
+    );
   }
 
   const total = variantsToRun.length + 2; // 1 build + N variantes + 1 resumen
