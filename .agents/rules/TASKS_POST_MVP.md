@@ -56,25 +56,28 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-021 | EN PROGRESO | T-019 (parcialmente T-020 para cifras) |
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | COMPLETADA | — |
-| INV-08 | PENDIENTE | T-020 (versiones resueltas), decisión P-013 |
-| T-014-0 | BLOQUEADA | Decisiones de arquitectura RLS consolidadas en D-094 a D-097 tras INV-04a; bloqueada por INV-05b / INV-08 (P-013), especificación temporal de sesiones, límites de Argon2id y modelo de amenazas completo (P-009, P-010 y P-011 resueltas en D-080 a D-093) |
+| INV-08 | COMPLETADA | Piloto técnico realizado; decisión P-013 aprobada en D-098 (límites técnicos en Docker y PostgreSQL real pendientes en etapas de integración) |
+| T-023 | PENDIENTE | Decisión D-098 (INV-08 completada); requisito previo a la implementación de Auth/RBAC en ambas variantes (T-014a, T-014b1) |
+| T-014-0 | PENDIENTE (DISEÑO) | Decisiones consolidadas en D-080 a D-098 (P-013 aprobada en D-098); pendiente de especificación temporal de sesiones (D-088), límites exactos de Argon2id (D-092/D-093) y modelo de amenazas completo (no bloquea el diseño la implementación del derivador) |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | PARCIAL (configuración Zod y contrato de errores completados; D-070, D-071) | T-017a, INV-02 |
 | T-018 | BLOQUEADA | T-017b, INV-06 |
-| T-014a | BLOQUEADA | T-014-0, T-017b, T-018 (composición backend requerida ya disponible vía D-069; P-009, P-010 y P-011 consolidadas en D-080 a D-093) |
+| T-014a | BLOQUEADA | T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend requerida ya disponible vía D-069; P-009, P-010 y P-011 consolidadas en D-080 a D-093) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
-| T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018 (composición backend requerida ya disponible vía D-069) |
+| T-014b1 | BLOQUEADA | T-014a, T-014-0, T-018, T-023 (composición backend requerida ya disponible vía D-069) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
 | T-014c | BLOQUEADA | T-014a, T-014-0, T-018; decisiones de arquitectura RLS consolidadas en D-094 a D-097 (comprobación de sintaxis Drizzle Kit pendiente en implementación) |
 | T-014d | BLOQUEADA | T-014b1, T-014c |
 
 **Orden de ejecución propuesto (actualizado):**
 
-T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 con la evidencia de T-020 e INV-08 (INV-07 completada y P-009 resuelta en D-091 a D-093) → T-017a → T-017a-ui → T-017b → T-018 → T-014-0 (puede adelantarse: es diseño sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
+T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
 
 - T-014c y T-014b1 no dependen entre sí. El orden lineal es de conveniencia, no una restricción técnica.
-- La decisión de estrategia JavaScript/TypeScript (INV-05b) debe tomarse **antes** de T-017a: si JavaScript se deriva de TypeScript, la composición se implementa una sola vez.
+- T-017a y T-017a-ui ya están completadas; la incorporación de T-023 no altera ni reabre la composición de overlays existente, sino que se integra con el mecanismo existente.
+- La implementación de T-023 debe completarse y verificarse (`verify:sync` en CI) antes de implementar los módulos Auth y RBAC (T-014a, T-014b1) en ambas variantes.
+- T-014-0 es una tarea de diseño arquitectónico sin código; su avance no se detiene por la implementación de T-023, pero su cierre definitivo requiere completar el modelo integral de amenazas y las especificaciones pendientes.
 - **Diferencia con la propuesta v3:** la v3 ordena el endurecimiento del backend (redacción, Zod, Nginx) antes de las decisiones de composición. Este archivo mantiene composición antes de seguridad base porque la composición actual reemplaza `app`, `index` y `tsconfig` completos [INSP]: añadir Zod o redacción antes obligaría a repetir el cambio en cada overlay que reemplaza esos archivos. Las partes que no tocan archivos compartidos (por ejemplo, extraer `redact` de los cuatro overlays de base de datos o endurecer `nginx.conf`) podrían adelantarse. Es una decisión pendiente (cuestión abierta 8).
 
 ---
@@ -88,7 +91,7 @@ Cada ficha indica qué pregunta resuelve, qué condiciona, qué evidencia debe e
 | ID | Pregunta | Condiciona | Evidencia que debe entregar | Ejecución temporal | Decisión que permite |
 |---|---|---|---|---|---|
 | INV-05a | ¿Qué mecanismo mínimo permite que varias capacidades modifiquen los mismos archivos del backend y del frontend? | T-017a, T-017a-ui | Inventario real de overlays y archivos compartidos; prototipos por archivo con casos negativos; coste | Sí | Estrategia de composición por archivo |
-| INV-05b | ¿Cómo se mantienen JavaScript y TypeScript con el volumen futuro sin reducir JavaScript? | T-017a, T-014-0 | Métricas de duplicación; comparación de dos o tres enfoques sobre módulos reales con diffs | Sí | Estrategia JS/TS |
+| INV-05b | ¿Cómo se mantienen JavaScript y TypeScript con el volumen futuro sin reducir JavaScript? | T-017a, T-014-0 | Métricas de duplicación; comparación de dos o tres enfoques sobre módulos reales con diffs | Sí | Estrategia JS/TS (resuelta en D-098 tras INV-08) |
 | INV-04a | ¿Se puede garantizar aislamiento con RLS, roles y contexto por transacción en el stack fijado? | T-014-0, T-014c | Pruebas negativas reproducibles en PostgreSQL; soporte de Drizzle; fugas indirectas; consulta de auditoría | Sí (PostgreSQL) | Modelo de roles de base de datos y contexto por transacción |
 | INV-04b | ¿Qué modelo de identidad y organización conviene y cómo viaja el contexto del actor? | T-014-0, T-014b1, T-014c | Esquemas comparados, pruebas de inicio de sesión y cambio de organización, comparación de paso explícito frente a `AsyncLocalStorage`, catálogo de permisos | Sí (PostgreSQL) | Modelo de identidad, forma del contexto, catálogo persistido o no |
 | INV-01 | ¿Qué hash resiste carga real sin agotar memoria? | T-014a | Disponibilidad por versión de Node, parámetros de OWASP citados, mediciones con servidor real y límites de contenedor | Sí | Algoritmo y parámetros |
@@ -96,14 +99,15 @@ Cada ficha indica qué pregunta resuelve, qué condiciona, qué evidencia debe e
 | INV-02 | ¿Qué Zod, cómo validar y dónde guardar, qué cabeceras y CORS, y qué almacén de abuso es sostenible? | T-017b, T-014a | Pruebas con Express 5, errores reales de Zod, cabeceras y CORS, concurrencia y contención de contadores | Sí | Versión de Zod, política de propiedades, cabeceras, almacén de contadores |
 | INV-06 | ¿Cómo se construye un arnés de mutaciones sostenible y cómo se prueba el frontend? | T-018, T-014a-ui | Análisis del arnés actual, prototipo de mutaciones, presupuesto de CI, opciones de pruebas de componentes | Sí | Diseño de `verify:security`, nombres de scripts, pruebas del frontend |
 | INV-07 | ¿`crypto.argon2` es estable en cada versión del rango de Node admitido? ¿Qué formato PHC produce o consume la alternativa externa? | T-014a | Páginas oficiales de Node por versión (con URL y fecha), especificación PHC, salida real de la librería candidata | Ligera | Hash: API nativa con `engines` propio o librería externa |
-| INV-08 | ¿Se puede derivar JavaScript de TypeScript con diffs legibles y sin dependencias frágiles? | T-017a | Piloto sobre un overlay (por ejemplo base de datos), comparación contra el JavaScript existente, `check:sync`, lint del JavaScript derivado | Sí | Estrategia JS/TS |
+| INV-08 | ¿Se puede derivar JavaScript de TypeScript con diffs legibles y sin dependencias frágiles? | T-023, T-014a | Piloto sobre un overlay (por ejemplo base de datos), comparación contra el JavaScript existente, `check:sync`, lint del JavaScript derivado | Sí | Completada (D-098) |
 
 ### Seguimiento tras las investigaciones ejecutadas
 
 | ID | Qué queda abierto |
 |---|---|
 | INV-05a | Compose: fusión estructurada o composición nativa (sin versión mínima de Compose verificada). OpenAPI: el test actual depende de `app.router.stack` de Express 5.3.0 y la prueba de subrouters sigue pendiente (T-020, prueba 4). El informe usó Express 4 en parte de sus pruebas: esos resultados no aplican. Su propuesta de `en.json` siempre presente contradice D-052 y no se adopta por defecto |
-| INV-05b | Piloto (INV-08). `ts-blank-space` 0.6 exige TypeScript 5.1–5.7 y el CLI usa 6.0.3. El postprocesado de imports por expresiones regulares es frágil; evaluar AST. Prueba hecha con Drizzle 0.45.1 (la plantilla usa 0.45.4) |
+| INV-05b | Resuelta formalmente mediante D-098 tras su complemento e INV-08. Se aprueba la estrategia de híbrido versionado con derivación determinista mediante Babel/AST |
+| INV-08 | Completada. Piloto técnico realizado sobre overlays y código aplicativo demostrando derivación limpia por AST con Babel, preservando comentarios, JSX, marcadores de overlays e imports (disciplina `import type`). Límites conocidos: el piloto no prueba compatibilidad integral con Docker ni con PostgreSQL real (pendientes en la verificación de implementación). La herramienta de derivación y `verify:sync` se implementarán en T-023 antes de codificar Auth/RBAC |
 | INV-04a | Decisiones arquitectónicas aprobadas y consolidadas en D-094 a D-097: roles `app_exec`/`table_owner` con credenciales separadas (D-094), contexto organizacional transaccional mediante `set_config` local sin ALS (D-095), políticas RLS, clasificación de tablas y FKs compuestas (D-096), y verificación estructural, benchmarks en laboratorio y auditoría de seguridad y acciones (D-097). Pendiente de comprobación técnica en implementación: soporte de sintaxis de políticas RLS en Drizzle 0.45.x y Drizzle Kit 0.31.x |
 | INV-04b | Corregir al adoptarlo: no usar `is_active` universal; «membresía» pasa a «concesión de acceso» (D-063); las políticas RLS necesitan `NULLIF(...)::uuid` (INV-04a). Falta el diagrama de flujo del informe |
 | INV-01 | Cerrada mediante INV-07 y decisiones D-091 a D-093 (Argon2id con `@node-rs/argon2` 2.2.2, formato PHC estándar con Base64 sin padding, rehash y controles defensivos). Benchmarks originales considerados definitivos para v1 |
@@ -112,7 +116,7 @@ Cada ficha indica qué pregunta resuelve, qué condiciona, qué evidencia debe e
 | INV-02 | Versión de Zod sin fuente registrada. La fuga de credenciales de `@libsql/client` depende de qué URLs acepta el cliente de la plantilla (T-020, prueba 3). Las versiones de `pg` y `@libsql/client` de las plantillas coinciden con las usadas en el anexo |
 | INV-06 | Decisión de D-062 (caché compartida, instalaciones independientes, symlinks aplazados). La reutilización por symlink y el motor de mutaciones están sin verificar en Windows y macOS |
 
-Orden recomendado para las investigaciones restantes: INV-08 (INV-07 completada). Las demás ya están ejecutadas.
+Orden recomendado para las investigaciones restantes: Todas las investigaciones clave (INV-01 a INV-08) están completadas o resueltas con decisiones aprobadas.
 
 ---
 
@@ -261,11 +265,45 @@ Notas:
 
 ---
 
+### T-023 — Derivador JavaScript/TypeScript y verificación de sincronización (verify:sync)
+
+**Estado:** PENDIENTE
+**Aprobación:** Aprobado en alcance y arquitectura (D-098 tras INV-05b, su complemento e INV-08).
+**Dependencias:** D-098. Requisito previo obligatorio para la implementación de módulos de Auth y RBAC (T-014a, T-014b1).
+
+**Objetivo:** proporcionar la herramienta de derivación automática TypeScript → JavaScript basada en AST/Babel con formateo determinista, junto con el comando `verify:sync` para verificar en CI y localmente la sincronización exacta y la paridad lógica entre ambas variantes.
+
+**Alcance:**
+- Implementación de la herramienta/script de derivación explícito en el repositorio para generar y actualizar los archivos JavaScript versionados a partir de las fuentes TypeScript.
+- Derivación mediante transformaciones de AST con Babel y formateo determinista, descartando transformaciones estructurales mediante expresiones regulares frágiles.
+- Preservación íntegra de comentarios, sintaxis JSX, semántica de ejecución, marcadores de inserción de overlays (`// @@INSERT:...@@`) e imports correctos.
+- Adopción estricta de la disciplina de `import type` en TypeScript para asegurar la elisión limpia de tipos sin dejar importaciones vacías o huérfanas en JavaScript.
+- Exclusión explícita de archivos mantenidos manualmente por divergencias legítimas entre lenguajes: `package.json`, Dockerfiles, configuraciones de ESLint (`eslint.config.js`), configuraciones de Drizzle (`drizzle.config.{js,ts}`) y archivos exclusivos de TypeScript (`tsconfig.json`).
+- Tratamiento explícito de excepciones relacionadas con cadenas literales y nombres de archivos o extensiones (p. ej. rutas a módulos `.js` vs `.ts` en configuraciones o migradores).
+- Implementación del comando `verify:sync` (solo lectura) que compare byte a byte o a nivel de contenido la derivación esperada frente a los archivos JavaScript versionados en Git.
+- Integración de `verify:sync` en la matriz de CI para bloquear pull requests con discrepancias de sincronización o ediciones manuales directas en JavaScript.
+- Integración con el sistema existente de composición de overlays (T-017a y T-017a-ui ya completados), sin modificar ni reconstruir los mecanismos existentes.
+- Verificaciones de calidad requeridas: `typecheck` obligatorio en TypeScript, `eslint` y ejecución de tests en ambas variantes.
+
+**Criterios de aceptación:**
+- `verify:sync` finaliza con éxito cuando todos los archivos JavaScript coinciden exactamente con la derivación desde sus fuentes TypeScript.
+- `verify:sync` falla con error explícito ante cualquier diferencia de contenido, import inválido o archivo derivado desactualizado.
+- Los archivos JavaScript derivados permanecen versionados en Git y superan `eslint` y las pruebas de las plantillas.
+- El CLI mantiene su comportamiento de copia de plantillas preconstruidas desde disco, sin ejecutar Babel ni TypeScript en tiempo de generación.
+- Los proyectos JavaScript generados no incorporan dependencias adicionales de compilación ni librerías asociadas al derivador.
+- Paridad funcional completa entre variantes verificada mediante el arnés existente (`verify:generated`).
+
+**Límites conocidos y pendientes:**
+- El piloto técnico INV-08 validó la derivación sobre overlays y código aplicativo; no presupone la comprobación integral en entornos Docker ni sobre bases de datos PostgreSQL reales (verificaciones que continúan pendientes en sus respectivas etapas).
+- La integración de T-023 debe completarse y verificarse antes de comenzar la codificación de las plantillas de Auth y RBAC (T-014a, T-014b1).
+
+---
+
 ### T-014-0 — Diseño del modelo de identidad, organización y contexto
 
-**Estado:** BLOQUEADA (faltan decisiones técnicas: estrategia JS/TS / INV-08 / P-013, especificación de parámetros temporales de sesión, límites defensivos exactos de Argon2id, comprobación de soporte de sintaxis RLS en Drizzle Kit fijado, y el modelo de amenazas completo. P-009, P-010, P-011 y arquitectura RLS/multitenancy/auditoría consolidadas en D-080 a D-097)
+**Estado:** PENDIENTE (DISEÑO) (faltan especificación de parámetros temporales de sesión, límites defensivos exactos de Argon2id, comprobación de soporte de sintaxis RLS en Drizzle Kit fijado y el modelo de amenazas completo; P-009, P-010, P-011, arquitectura RLS/multitenancy/auditoría y estrategia JS/TS P-013 consolidadas en D-080 a D-098)
 **Aprobación:** Aprobado (alcance como tarea de diseño previa a las capacidades). Su contenido depende de evidencia restante.
-**Dependencias:** INV-05b / INV-08 (P-013) y modelo de amenazas completo. P-009, P-010, P-011 y RLS consolidadas (D-080 a D-097 tras INV-01, INV-03, INV-04a e INV-07).
+**Dependencias:** Modelo de amenazas completo, especificaciones temporales (D-088) y límites defensivos de Argon2id (D-092/D-093). P-009, P-010, P-011, RLS y P-013 consolidadas (D-080 a D-098 tras INV-01, INV-03, INV-04a, INV-05b, INV-07 e INV-08). Nota: la implementación de T-023 es un prerrequisito para las tareas de código (T-014a, T-014b1), no una prohibición para continuar el diseño arquitectónico de esta tarea.
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
@@ -286,9 +324,10 @@ Notas:
 - **Contexto organizacional transaccional y pooling (D-095):** organización activa validada por petición contra la BD comprobando concesión vigente (D-080) sin confiar en el cliente; contexto fijado mediante `set_config('app.current_organization_id', ?, true)` con `is_local = true` en transacciones Drizzle (`tx`); una organización por transacción; propagación estrictamente explícita de `tx` sin `AsyncLocalStorage`; denegación por defecto (cero filas); operaciones globales desacopladas de las de tenant; agregaciones multiorganización legítimas mediante consultas autorizadas e independientes sin bypass global de RLS; compatibilidad nativa con pooling por transacción; limitación documentada: SQL arbitrario puede alterar GUC (RLS no sustituye la prevención de inyección SQL).
 - **Políticas RLS, clasificación e integridad relacional (D-096):** clasificación explícita entre tablas globales y organizacionales; entidades organizacionales con `organization_id` obligatorio y `FORCE ROW LEVEL SECURITY`; políticas de lectura (`USING`) y escritura (`WITH CHECK`) con barrera restrictiva (prohibido `USING (true)`); manejo seguro de contexto ausente/vacío con `NULLIF(..., '')::uuid`; PK simples por defecto; FK compuestas con `organization_id` para aislar relaciones organizacionales; restricciones UNIQUE por organización; restricción de `TRUNCATE`, `COPY FROM`, vistas con `security_invoker = true` y `SECURITY DEFINER` acotado; autorización efectiva y RBAC en Express, aislamiento de filas en PostgreSQL; y extensibilidad modular sin desactivar RLS.
 - **Verificación estructural, rendimiento y auditoría de seguridad y acciones (D-097):** auditoría estructural automática de catálogos PG (`pg_tables`, `pg_roles`, `pg_policies`) y pruebas de concurrencia que bloquean CI ante fallos críticos, con paridad JS/TS y sin comprobaciones pesadas en peticiones HTTP; benchmarks de rendimiento en laboratorio aislado con `EXPLAIN (ANALYZE, BUFFERS)` y métricas p50/p95 sin variante pública multitenant sin RLS; auditoría operativa centralizada correlacionada por `requestId` sin datos sensibles ni SIEM en v1; auditoría de acciones de negocio transversal para Auth append-only en la misma transacción, sin permisos UPDATE/DELETE para `app_exec`, con identidad inmutable de `ActorContext` y acceso acotado por ámbito; y requisito obligatorio de dos niveles de documentación para desarrolladores (guía práctica breve y referencia técnica).
+- **Estrategia JavaScript/TypeScript: Híbrido versionado (D-098):** TypeScript como fuente de verdad para el código aplicativo y pruebas de plantillas, derivando automáticamente JavaScript mediante AST/Babel con formateo determinista y manteniendo los archivos derivados versionados en Git. Mantenimiento manual acotado a archivos estructuralmente divergentes (`package.json`, Dockerfiles, ESLint, Drizzle config, `tsconfig.json`). Disciplina estricta de `import type`. Verificación determinista en CI con `verify:sync`. Prerrequisito de implementación (T-023) antes de codificar Auth/RBAC.
 - **Criterio de extensibilidad modular (aprobado):** Las capacidades Auth, RBAC y multitenancy deben permitir incorporar módulos de negocio, permisos nuevos y validaciones adicionales sin modificar sus mecanismos internos. No implica implementar un motor ABAC/ReBAC ni actualizaciones automáticas de overlays después de generar un proyecto.
 - **Propuesta de backlog (sin implementación aprobada):** generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
-- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); comprobación de sintaxis de políticas RLS en el Drizzle Kit fijado (T-014c); límites numéricos defensivos exactos para parámetros PHC y compatibilidad con rehash, capacidad y saturación del limitador de concurrencia y pruebas en Docker / sin dependencias opcionales (pendientes técnicos de D-092 y D-093); estrategia JavaScript/TypeScript (INV-05b / INV-08 / P-013); duraciones predeterminadas de expiración, periodicidad de rotación y frecuencia de actualización de actividad (D-088); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza.
+- **Pendientes técnicos por resolver:** forma única o variante del esquema con y sin RBAC/multitenancy (multiplicación de archivos de esquema); comprobación de sintaxis de políticas RLS en el Drizzle Kit fijado (T-014c); límites numéricos defensivos exactos para parámetros PHC y compatibilidad con rehash, capacidad y saturación del limitador de concurrencia y pruebas en Docker / sin dependencias opcionales (pendientes técnicos de D-092 y D-093); duraciones predeterminadas de expiración, periodicidad de rotación y frecuencia de actualización de actividad (D-088); invitaciones y reglas de delegación; y actualización del modelo de amenazas asignando un control y prueba negativa a cada amenaza (estrategia JS/TS aprobada en D-098; implementación pendiente en T-023).
 
 **Áreas afectadas:** ninguna de código. Producto: documento de diseño y propuestas de decisión.
 
@@ -442,9 +481,9 @@ Notas:
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** BLOQUEADA (por T-014-0, T-017b y T-018)
+**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 y T-023)
 **Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión pendientes.
-**Dependencias:** T-014-0, T-017b y T-018. Decisiones de diseño consolidadas en D-080 a D-093. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069).
+**Dependencias:** T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync en verde antes de implementar plantillas de Auth en ambas variantes). Decisiones de diseño consolidadas en D-080 a D-098. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069, D-077, D-078).
 
 **Objetivo:** cuentas y credenciales funcionales y verificadas, con una modalidad elegida por proyecto.
 
@@ -519,9 +558,9 @@ Notas:
 
 ### T-014b1 — Motor RBAC, API administrativa y auditoría mínima
 
-**Estado:** BLOQUEADA (por T-014a, T-014-0 y T-018)
+**Estado:** BLOQUEADA (por T-014a, T-014-0, T-018 y T-023)
 **Aprobación:** Aprobado (alcance).
-**Dependencias:** T-014a, T-014-0, T-018.
+**Dependencias:** T-014a, T-014-0, T-018 y T-023.
 
 **Objetivo:** autorización efectiva en el servidor, administrable sin interfaz.
 
@@ -701,7 +740,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 11. **Reproducibilidad de las plantillas** (P-008) tras las versiones resueltas de T-020.
 12. **Protección de tags `v*`** en el repositorio (cambio de configuración no autorizado en T-019).
 
-Dependen de evidencia (no se deciden antes): parámetros temporales de inactividad/límite absoluto y rotación de identificadores de sesión (D-088), versión de Zod, almacén de contadores de abuso, estrategia JS/TS (INV-08 / P-013), comprobación de soporte de sintaxis RLS en Drizzle Kit fijado (T-014c), límites defensivos exactos y capacidad del limitador para Argon2id (pendientes técnicos de D-092 y D-093), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy (credenciales opacas, transporte exclusivo de cookies en fullstack, CSRF y React Router resueltos por D-087 a D-090; hash de contraseñas resuelto por D-091 a D-093 tras INV-07; RLS, contexto transaccional, verificación estructural, benchmarks y auditorías resueltos por D-094 a D-097 tras INV-04a).
+Dependen de evidencia (no se deciden antes): parámetros temporales de inactividad/límite absoluto y rotación de identificadores de sesión (D-088), versión de Zod, almacén de contadores de abuso, comprobación de soporte de sintaxis RLS en Drizzle Kit fijado (T-014c), límites defensivos exactos y capacidad del limitador para Argon2id (pendientes técnicos de D-092 y D-093), invitaciones a organizaciones y reglas de delegación, y forma del esquema con y sin RBAC y multitenancy (credenciales opacas, transporte exclusivo de cookies en fullstack, CSRF y React Router resueltos por D-087 a D-090; hash de contraseñas resuelto por D-091 a D-093 tras INV-07; RLS, contexto transaccional, verificación estructural, benchmarks y auditorías resueltos por D-094 a D-097 tras INV-04a; estrategia JS/TS resuelta por D-098 tras INV-08 con implementación pendiente en T-023).
 
 ## 12. Regla de actualización
 
@@ -720,11 +759,11 @@ Al completar una tarea: actualizar su estado y su aprobación, registrar las ver
 | TP-07 (Nginx y `trust proxy`) | T-017b | Verificar contra el archivo actual |
 | TP-08 (reproducibilidad) | P-008 | Decisión; se informa con T-020 |
 | TP-09 (Argon2 y PHC) | INV-07 | COMPLETADA (resuelta P-009 en D-091 a D-093) |
-| TP-10 (piloto TS→JS) | INV-08 | |
+| TP-10 (piloto TS→JS) | INV-08 / T-023 | Piloto completado en INV-08; decisión P-013 aprobada en D-098; tarea de implementación T-023 creada |
 | TP-11 (composición) | T-017a y T-017a-ui | |
 | TP-12 (OpenAPI y Express 5.3.0) | T-020, prueba 4 | Diseño posterior dentro de T-017a |
 | TP-13 (modelo de amenazas) | T-014-0 | |
 | TP-14 (cobertura por pares) | T-020, prueba 6; T-018 | Convertida en control automático en T-018 |
 | TP-15 (auth, RBAC, multi-org) | T-014a a T-014d | |
 | (no figuraba en la v3) | T-018 | Aprobada en alcance el 2026-11-04; infraestructura de `verify:security` |
-| DP-04 … DP-17 | P-014, P-015, P-008, P-012, P-013, P-009, P-010, P-011, P-017, P-016 | Ver `DECISIONS.md` |
+| DP-04 … DP-17 | P-014, P-015, P-008, P-012, P-013 (D-098), P-009, P-010, P-011, P-017, P-016 | Ver `DECISIONS.md` |

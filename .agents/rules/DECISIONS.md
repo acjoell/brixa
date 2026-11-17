@@ -301,9 +301,9 @@ Estado real (inspección): copia recursiva; overlays que reemplazan archivos com
 
 ### P-013 — Estrategia JavaScript/TypeScript
 
-**Estado:** Pendiente (INV-05b).
+**Estado:** Confirmada (resuelta en D-098 tras INV-05b, su complemento e INV-08; implementación técnica pendiente en T-023).
 
-Alternativas: plantillas separadas, TypeScript como fuente con JavaScript derivado y versionado, JSDoc. `ts-blank-space` 0.6 exige TypeScript 5.1–5.7 y el CLI usa 6.0.3. El postprocesado de imports por expresiones regulares es frágil; se prefiere evaluar una transformación por AST. Se necesita un piloto (INV-08).
+Aprobada la estrategia de híbrido versionado con TypeScript como fuente de verdad y JavaScript derivado automáticamente mediante Babel y transformaciones AST con formateo determinista, versionado en Git y verificado con `verify:sync` en CI. El CLI continúa copiando plantillas preconstruidas sin dependencias adicionales en los proyectos generados. Mantenimiento manual acotado a archivos con divergencias estructurales legítimas (`package.json`, Dockerfiles, ESLint, Drizzle config, `tsconfig.json`).
 
 ### P-014 — Seguridad base del backend: errores, cabeceras, CORS y contadores
 
@@ -1013,7 +1013,9 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Nota de consolidación de decisiones RLS (D-094 a D-097):** Las cuatro decisiones arquitectónicas de PostgreSQL RLS (roles y privilegios separados, contexto transaccional, políticas e integridad, y verificación con auditoría operativa y de acciones) quedan fijadas en D-094 a D-097 tras INV-04a.
 
-**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, estrategia JS/TS (P-013 / INV-08), comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093; RLS y auditorías resueltas por D-094 a D-097).
+**Nota de aprobación de estrategia JS/TS (D-098):** La estrategia JavaScript/TypeScript queda aprobada formalmente como híbrido versionado con TypeScript como fuente de verdad y derivación determinista mediante Babel/AST (D-098 tras INV-05b e INV-08); la implementación del derivador y su comando de verificación (`verify:sync`) permanece pendiente en T-023 como requisito previo a la codificación de las plantillas de Auth y RBAC.
+
+**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093; RLS y auditorías resueltas por D-094 a D-097; estrategia JS/TS resuelta en D-098 con implementación en T-023).
 
 ---
 
@@ -1702,6 +1704,46 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-098 — Estrategia JavaScript/TypeScript: Híbrido versionado con derivación determinista desde TypeScript
+
+**Estado:** Confirmada (2026-11-16; fundamentada en INV-05b, su complemento e INV-08; implementación pendiente en T-023).
+
+**Contexto:** Mantener de forma manual plantillas duplicadas completas en JavaScript y TypeScript genera costes crecientes de sincronización y riesgo de discrepancias lógicas a medida que se incorporan capacidades complejas (Auth, RBAC, multitenancy). Era necesario definir un modelo que redujera la duplicación manteniendo las garantías de legibilidad, calidad y paridad funcional de ambas variantes, sin penalizar a los proyectos generados ni añadir sobrecarga de compilación al CLI.
+
+**Decisión:**
+- **Modelo aprobado: Híbrido versionado.**
+  - **TypeScript como fuente de verdad:** el código aplicativo y las pruebas de las plantillas se implementan y evolucionan en TypeScript.
+  - **Derivación automática a JavaScript:** los archivos JavaScript correspondientes se derivan automáticamente desde las fuentes TypeScript.
+  - **Archivos JavaScript versionados:** los archivos JavaScript derivados permanecen versionados en Git en el repositorio de Brixa.
+  - **Transformación AST con Babel:** la eliminación de tipos y transformaciones se realiza mediante Babel y transformaciones sobre el AST con formateo determinista, descartando transformaciones estructurales mediante expresiones regulares frágiles.
+  - **Preservación de artefactos y semántica:** la derivación conserva comentarios, JSX, semántica original, marcadores de inserción de overlays (p. ej. `// @@INSERT:...@@`) e imports correctos.
+  - **Disciplina de `import type`:** uso obligatorio de `import type` en TypeScript para importaciones utilizadas exclusivamente como tipos, asegurando su elisión limpia sin dejar imports vacíos o huérfanos en JavaScript.
+  - **Mantenimiento manual acotado:** se mantienen manualmente los archivos con diferencias legítimas y estructurales entre lenguajes: `package.json`, Dockerfiles, configuraciones de ESLint (`eslint.config.js`), configuraciones de Drizzle (`drizzle.config.js` vs `drizzle.config.ts`) y archivos exclusivos de TypeScript (como `tsconfig.json`).
+  - **Tratamiento explícito de excepciones:** gestión específica de cadenas literales y referencias a nombres de archivo o extensiones (p. ej. rutas a módulos `.js` vs `.ts` en configuraciones o migradores).
+  - **CLI desacoplado del derivador:** el CLI continuará copiando plantillas preconstruidas desde disco; no ejecuta Babel ni TypeScript durante la generación del proyecto. El tiempo de generación permanece inalterado.
+  - **Cero dependencias adicionales:** los proyectos JavaScript generados no incorporan dependencias adicionales por este mecanismo.
+  - **Paridad y garantías idénticas:** se mantienen intactas todas las garantías de seguridad y paridad funcional en ambas variantes (JavaScript y TypeScript), especialmente para Auth, RBAC y multitenancy.
+
+- **Requisitos de sincronización y validación (a implementar en T-023):**
+  - **Comando de derivación explícito:** script/herramienta en el repositorio para actualizar los archivos JavaScript derivados.
+  - **Comando `verify:sync` (solo lectura):** comprobación determinista que compare la derivación esperada con los archivos JavaScript versionados, verificando contenido y detectando cualquier modificación de lógica interna.
+  - **Integración de `verify:sync` en CI:** bloqueo automático de pull requests si se detecta desincronización entre TypeScript y JavaScript.
+  - **Verificaciones obligatorias:**
+    - `typecheck` obligatorio de las fuentes TypeScript.
+    - `eslint` y ejecución de pruebas en ambas variantes generadas (JavaScript y TypeScript).
+    - Verificación de combinaciones y overlays mediante el arnés existente de Brixa (`verify:generated`).
+    - Fallo explícito ante imports inválidos, diferencias de sincronización o archivos derivados incorrectos.
+
+**Límites conocidos y pendientes:**
+- El piloto técnico INV-08 validó la viabilidad de la derivación sobre overlays y código aplicativo; no presupone la comprobación integral en Docker ni sobre bases de datos PostgreSQL reales (verificaciones que continúan pendientes en sus respectivas etapas).
+- El derivador, el comando `verify:sync` y las verificaciones en CI no están implementados todavía; su construcción e integración constituyen un prerrequisito obligatorio antes de implementar los módulos Auth y RBAC.
+
+**Motivo:** Las investigaciones INV-05b e INV-08 demostraron que la derivación por AST/Babel proporciona diffs limpios, conserva fidelidad con el código original, elimina la duplicación manual y garantiza paridad estricta entre variantes sin añadir latencia de generación al CLI ni dependencias a los proyectos generados.
+
+**Consecuencias:** Se formaliza la tarea T-023 para implementar el derivador y `verify:sync`, la cual debe completarse y verificarse antes de abordar la codificación de las plantillas de Auth y RBAC.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.
@@ -1720,7 +1762,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; P-011, resuelta en D-080 a D-086; y RLS/multitenancy/auditorías resueltas en D-094 a D-097 tras INV-04a). Permanecen abiertas las relativas a estrategia JS/TS (P-013 / INV-05b / INV-08), comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), modelo integral de amenazas, invitaciones y reglas de delegación.
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090; P-011, resuelta en D-080 a D-086; RLS/multitenancy/auditorías resueltas en D-094 a D-097 tras INV-04a; y estrategia JS/TS P-013 resuelta en D-098 tras INV-05b e INV-08 con implementación pendiente en T-023). Permanecen abiertas las relativas a comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), especificación de parámetros temporales de sesión (duraciones, rotación y frecuencia de actualización), límites defensivos exactos y capacidad del limitador de concurrencia para Argon2id (pendientes técnicos de D-092 y D-093), modelo integral de amenazas, invitaciones y reglas de delegación.
 - Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).
