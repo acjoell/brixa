@@ -103,11 +103,27 @@ it("proyecta exactamente SV-1 a SV-7 y filtra portable sin añadir capacidades",
     ["backend", "js", "postgres", false],
     ["backend", "ts", "sqlite", false],
     ["backend", "ts", "sqlite", true],
-    ["fullstack", "js", "postgres", false],
+    ["fullstack", "js", "postgres", true],
     ["fullstack", "ts", "postgres", false],
     ["fullstack", "js", "sqlite", false],
   ]);
   expect(securityVariantsForScope("full")).toEqual(SECURITY_VARIANTS);
+  const sv5 = SECURITY_PROJECTIONS[4];
+  const report = verificationReport(SECURITY_VARIANTS, [sv5], [{ variant: sv5, status: "PASSED" }]);
+  expect(report.languagePairs).toContainEqual({
+    configuration: {
+      modality: "fullstack",
+      database: "postgres",
+      docker: true,
+      apiDocs: false,
+      i18n: false,
+    },
+    ts: "UNDECLARED",
+    js: "PASSED",
+    complete: false,
+    different: true,
+    failed: false,
+  });
   expect(securityVariantsForScope("portable")).toHaveLength(5);
   expect(
     securityVariantsForScope("portable").every((v) => !v.docker && v.database !== "postgres"),

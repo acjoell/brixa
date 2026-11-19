@@ -61,7 +61,7 @@ export const SECURITY_PROJECTIONS = [
   { modality: "backend", language: "js", database: "postgres" },
   { modality: "backend", language: "ts", database: "sqlite" },
   { modality: "backend", language: "ts", database: "sqlite", docker: true },
-  { modality: "fullstack", language: "js", database: "postgres" },
+  { modality: "fullstack", language: "js", database: "postgres", docker: true },
   { modality: "fullstack", language: "ts", database: "postgres" },
   { modality: "fullstack", language: "js", database: "sqlite" },
 ];

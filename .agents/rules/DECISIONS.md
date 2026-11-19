@@ -1041,6 +1041,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Validación local posterior del incremento:** el responsable confirma `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` sin errores. No se localizó un informe persistido por variante para contrastar la ejecución de las siete proyecciones y el piloto. Se conserva pendiente su acreditación detallada y CI remota. T-018 continúa EN PROGRESO.
 
+**Estado vigente de integración (2026-11-19):** T-018 queda IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE tras corregir Docker en SV-5 conforme a §6.3. Tres pruebas focalizadas, tipos, lint y formato aprobados; no se repite la validación integral ni se acredita ejecución real de SV-5 corregida. La integración en main está autorizada sin esperar CI; no equivale a aceptación definitiva. Se conserva pendiente la evidencia detallada por variante y la actualización de la lista acreditada. D-052 mantiene abierta la asignación de N1–N7, sin reabrir T-013d ni inventar aprobación para T-013e o T-018.
+
 ### D-066 — Versiones exactas y cadencia de actualización
 
 **Estado:** Confirmada (2026-11-08).

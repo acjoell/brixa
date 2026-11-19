@@ -59,7 +59,7 @@ it.each([false, true])(
       ).toEqual(SECURITY_VARIANTS.map((v) => ({ database: "none", docker: false, ...v })));
       expect(postgres).toHaveBeenCalledTimes(4);
       expect(sqlite).toHaveBeenCalledTimes(3);
-      expect(docker).toHaveBeenCalledTimes(2);
+      expect(docker).toHaveBeenCalledTimes(3);
       expect(docker.mock.calls.every((args) => args[6] === true)).toBe(true);
       expect(mutate).toHaveBeenCalledTimes(30);
       expect(command.mock.calls.filter(([, args]) => args[0] === "install")).toHaveLength(10);

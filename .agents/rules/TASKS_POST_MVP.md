@@ -62,7 +62,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
-| T-018 | EN PROGRESO; piloto validado, requisitos residuales implementados con pruebas focalizadas | Validación integral y CI del incremento residual, asignación de i18n pendiente |
+| T-018 | IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE | Evidencia por variante y CI, asignación de i18n pendiente |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -458,7 +458,9 @@ Notas:
 
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** EN PROGRESO (incremento residual con validación integral local confirmada por el responsable, pendiente de CI y acreditación por variante)
+**Estado:** IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE. No equivale a aceptación definitiva.
+
+**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. La última CI remota sigue pendiente de conclusión y no se espera para integrar, por autorización expresa del responsable. Permanecen pendientes el informe real por variante, la acreditación de proyecciones en la lista y la aceptación definitiva. D-052 conserva abierta la asignación de N1–N7: T-013d cerró con alcance reducido, y no se reabre ni se crea T-013e por inferencia. No se asignan nuevos requisitos i18n a T-018. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
