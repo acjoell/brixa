@@ -68,6 +68,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check TS/JS synchronization (PostgreSQL pilot)
+        run: npm run verify:sync
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -140,9 +143,15 @@ jobs:
             echo "run_verify=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify generated projects (portable)
+      - name: Verify generated functionality (portable)
         if: steps.filter.outputs.run_verify == 'true'
-        run: VERIFY_SCOPE=portable npm run verify:generated
+        run: VERIFY_SCOPE=portable npm run verify:generated:functional
+        env:
+          VERIFY_PARTITION: ${{ matrix.partition }}
+
+      - name: Audit generated dependencies (portable, strict)
+        if: ${{ !cancelled() && steps.filter.outputs.run_verify == 'true' }}
+        run: VERIFY_SCOPE=portable npm run verify:generated:audit
         env:
           VERIFY_PARTITION: ${{ matrix.partition }}
 
@@ -168,5 +177,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify generated projects (full)
-        run: VERIFY_SCOPE=full npm run verify:generated
+      - name: Verify generated functionality (full)
+        run: VERIFY_SCOPE=full npm run verify:generated:functional
+
+      - name: Audit generated dependencies (full, strict)
+        if: ${{ !cancelled() }}
+        run: VERIFY_SCOPE=full npm run verify:generated:audit

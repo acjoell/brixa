@@ -8,12 +8,7 @@ import { errorHandler, notFoundHandler } from "./errors.js";
 try {
   process.loadEnvFile();
 } catch (err: unknown) {
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code: string }).code !== "ENOENT"
-  ) {
+  if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
     throw err;
   }
 }

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+
 import { app } from "../src/app.js";
 
 describe("GET /health", () => {

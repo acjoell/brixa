@@ -47,9 +47,16 @@
     "test": "vitest run",
     "verify:generated": "node scripts/verify-generated.js",
     "verify:security": "node scripts/verify-security.js",
-    "verify:all": "npm run verify:generated && npm run verify:security"
+    "verify:all": "npm run verify:generated && npm run verify:security",
+    "verify:generated:functional": "node scripts/verify-generated.js --functional-only",
+    "verify:generated:audit": "node scripts/verify-generated.js --audit-only",
+    "derive:js": "node scripts/derive-postgres.js --write",
+    "check:sync": "node scripts/derive-postgres.js",
+    "verify:sync": "npm run check:sync"
   },
   "devDependencies": {
+    "@babel/core": "7.29.13",
+    "@babel/plugin-transform-typescript": "7.29.9",
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.5",
     "eslint": "10.13.0",

@@ -57,12 +57,12 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | COMPLETADA | — |
 | INV-08 | COMPLETADA | Piloto técnico realizado; decisión P-013 aprobada en D-098 (límites técnicos en Docker y PostgreSQL real pendientes en etapas de integración) |
-| T-023 | PENDIENTE | Decisión D-098 (INV-08 completada); requisito previo a la implementación de Auth/RBAC en ambas variantes (T-014a, T-014b1) |
+| T-023 | COMPLETADA | D-098 implementada y verificada en ambas variantes de lenguaje y en CI |
 | T-014-0 | COMPLETADA (DISEÑO) | Decisiones consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; diseño completado sin código; validaciones técnicas de implementación diferidas a T-014a/c |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
-| T-018 | EN PROGRESO; piloto local validado, cierre e integración CI pendientes | T-017b, INV-06; bloqueo externo de auditoría descrito en la tarea |
+| T-018 | EN PROGRESO; piloto integrado con T-023 y revalidado localmente | T-017b, INV-06; validación integral, CI y alcance residual pendientes |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -267,7 +267,17 @@ Notas:
 
 ### T-023 — Derivador JavaScript/TypeScript y verificación de sincronización (verify:sync)
 
-**Estado:** PENDIENTE
+**Estado:** COMPLETADA. Los 29 pares y cuatro fragmentos están sincronizados. Pasaron 26 pruebas del derivador, la prueba de composición Vite, tipos, lint y formato. El responsable confirmó la validación integral (34/34 pasos, 32 variantes, código 0 en 902,55 s), las auditorías y todos los jobs de CI. [Matriz de aceptación e historial](../../docs/t023-pilot.md).
+
+**Historial previo al cierre.** Los estados pendientes de las siguientes entradas corresponden a la revisión indicada.
+
+**Revalidación (2026-11-19):** npm audit reporta cero vulnerabilidades en Brixa y en las variantes generadas, manteniendo picomatch 4.0.7 y los controles estrictos. La ejecución completa terminó con mensaje de éxito en 1152,19 s, sin omisiones ni errores; su código numérico de shell no se recuperó por el reinicio del servidor. La repetición integral de backend PostgreSQL JS/TS terminó con código 0 en 28,77 s. Los únicos avisos restantes son dos deprecaciones de @esbuild-kit y la notificación de nueva versión de npm, sin actualizaciones aplicadas. No se cambiaron dependencias, lockfiles ni código funcional. Los resultados del 2026-11-17 siguientes se conservan como historial, no como bloqueo vigente.
+
+**Actualización de validación (2026-11-17):** el mismo arnés dispone de modos explícitos funcional y auditoría, conservando el modo integral estricto por defecto. `verify:generated:functional` completó backend y fullstack JS/TS con PostgreSQL, más backend Docker JS/TS (seis variantes). Las auditorías JS/TS independientes y el comando integral conservan código 1 por picomatch. Tipos, lint, formato, sincronización y 172 pruebas locales correctos; sin defectos adicionales del derivador. CI informa funcionamiento y auditoría en pasos separados, sin tolerar errores de seguridad; ejecución remota pendiente. T-023 continúa EN PROGRESO; criterios originales intactos y T-018 independiente.
+**Incremento React main (2026-11-19):** derivación TSX → JSX habilitada con el Babel existente y sincronización compartida, limitada a main.tsx/main.jsx. Preserva JSX para Vite y adapta referencias relativas por AST; el diff de main.jsx es solo de formato. Pasan 16 pruebas focalizadas (cinco nuevas), tipos de Brixa, lint, formato y verify:sync. La CI del piloto previo está verde según confirmación del responsable; el incremento nuevo requiere validación manual/CI. No se ejecutaron instalaciones ni verificaciones integrales, no se añadieron dependencias y T-018 sigue intacta. App/useAppContent y los demás pares de código/pruebas permanecen fuera de este incremento. Véase el informe para los comandos manuales y los límites del lint ligero JSX. T-023 continúa EN PROGRESO.
+
+**Revisión para commit React:** el responsable confirmó sin errores `verify:generated -- frontend+ts frontend+js` y `verify:generated -- frontend+ts+i18n fullstack+js+sqlite+i18n`; no se repitieron. La revisión estática delimita 21 pares de código aplicativo/pruebas y dos configuraciones equivalentes aún sin derivación/sincronización, detallados en docs/t023-pilot.md, además del control de igualdad de cuatro fragmentos api-docs al incorporar ese overlay. Son cobertura de D-098 pendiente; no se exige un resolver universal ni código futuro de Auth/RBAC. CI del incremento pendiente; T-023 sigue EN PROGRESO. No se implementaron nuevas derivaciones durante esta revisión.
+
 **Aprobación:** Aprobado en alcance y arquitectura (D-098 tras INV-05b, su complemento e INV-08).
 **Dependencias:** D-098. Requisito previo obligatorio para la implementación de módulos de Auth y RBAC (T-014a, T-014b1).
 
@@ -296,7 +306,7 @@ Notas:
 - Paridad funcional completa entre variantes verificada mediante el arnés existente (`verify:generated`).
 
 **Límites conocidos y pendientes:**
-- El piloto técnico INV-08 validó la derivación sobre overlays y código aplicativo; no presupone la comprobación integral en entornos Docker ni sobre bases de datos PostgreSQL reales (verificaciones que continúan pendientes en sus respectivas etapas).
+- El piloto INV-08 cubrió overlays y código aplicativo. T-023 verificó posteriormente Docker y PostgreSQL real mediante el arnés integral.
 - La integración de T-023 debe completarse y verificarse antes de comenzar la codificación de las plantillas de Auth y RBAC (T-014a, T-014b1).
 
 ---
@@ -305,7 +315,7 @@ Notas:
 
 **Estado:** COMPLETADA (DISEÑO DOCUMENTAL) (2026-11-17; todas las decisiones estructurales y operativas consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; tarea completada sin código ni modificaciones de plantillas; las verificaciones técnicas de implementación se transfieren a T-014a y T-014c).
 **Aprobación:** Aprobado (arquitectura y decisiones confirmadas por el responsable).
-**Dependencias:** Ninguna pendiente para el diseño. Prerrequisito cumplido para las especificaciones de T-014a, T-014b1 y T-014c. (Nota: la implementación de plantillas de Auth/RBAC continúa bloqueada por T-023 y T-018).
+**Dependencias:** Ninguna pendiente para el diseño. Prerrequisito cumplido para las especificaciones de T-014a, T-014b1 y T-014c. (Nota: la implementación de plantillas de Auth/RBAC continúa condicionada por T-018 tras completarse T-023).
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
@@ -448,7 +458,7 @@ Notas:
 
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** EN PROGRESO (2026-11-17; piloto local validado; cierre e integración CI pendientes, con bloqueo externo de auditoría)
+**Estado:** EN PROGRESO (2026-11-19; piloto integrado con T-023 y validado localmente; validación integral, CI remota y alcance residual pendientes)
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -486,18 +496,34 @@ Notas:
 - **Windows, evidencia de CI reportada:** en la [ejecución 44135365877](https://github.com/acjoell/brixa/actions/runs/44135365877), los cuatro jobs Windows (Node 24/26, A/B) fallaron en `mutation-engine.test.js:278`: se esperaba `SPAWN_ERROR` y se obtuvo `UNPARSEABLE_REPORT`. Con `shell: true`, un comando inexistente falla dentro de un shell que sí arrancó. La corrección local usa Node con un directorio de trabajo inexistente y exige `ENOENT`, provocando un error real de creación de proceso sin mezclar categorías. El test afectado, la suite del motor, las 201 pruebas, lint y formato pasaron después de la corrección; esta permanece sin commit y no está confirmada en Windows CI.
 - **Ubuntu, evidencia reportada y reproducción mínima:** los jobs Node 24 (`134223305256`) y Node 26 (`134223305779`) de esa ejecución fallaron en `verify:generated`, primera variante `frontend+ts`, al ejecutar `npm audit --audit-level=moderate`. No se recuperaron sus logs directamente en esta sesión (`gh` no disponible y consulta web sin acceso a logs). La auditoría JSON de un único frontend TS temporal reprodujo exit 1 y 11 paquetes con severidad alta por el advisory siguiente; su build independiente pasó. No se volvió a ejecutar `verify:generated` completo y no hay evidencia nueva que declare verde la matriz actual. El paso `verify:security` de Ubuntu/Node 24 está después de `verify:generated`: el fallo previo impide acreditar ese piloto en CI.
 
-**Bloqueo externo de auditoría (diagnóstico del 2026-11-17):**
+**Bloqueo externo de auditoría (histórico del 2026-11-17; superado según revalidación de T-023):**
 - [GHSA-fc5q-39xc-vjpf / CVE-2026-112366](https://github.com/advisories/GHSA-fc5q-39xc-vjpf): ReDoS por patrones extglob repetidos controlados por un atacante. El advisory oficial consultado afecta `picomatch <=4.0.7` y declara que no hay versiones corregidas. npm solo publicaba versiones hasta `4.0.7`; no se confirmó parche oficial para este aviso. Esta conclusión está fechada, no garantiza el estado futuro del registro.
 - La reproducción instaló `picomatch@4.0.7`, compartido por `vite@8.3.6`, `tinyglobby@0.2.17` y `fdir@6.5.0`; `typescript-eslint@8.72.1` llega por `typescript-estree → tinyglobby`. Fullstack reutiliza la plantilla frontend. Los 11 hallazgos son paquetes afectados transitivamente por un mismo advisory, no once vulnerabilidades independientes. El tooling del propio Brixa también está afectado mediante Vitest/Vite y typescript-eslint.
 - Exposición demostrada: componente vulnerable instalado en dependencias de desarrollo usadas en lint/build/tests. No se identificó una ruta en las plantillas que entregue patrones glob de usuarios no confiables a picomatch; no se demostró explotación. Sigue existiendo riesgo potencial al procesar código/configuraciones no confiables. La auditoría productiva del frontend temporal (`--omit=dev`, solo diagnóstico) dio cero hallazgos, no se encontró el componente en el bundle inspeccionado y Docker fullstack copia solo `dist/` a Nginx. Esto no demuestra riesgo cero ni sustituye la auditoría completa.
 - Actualizaciones consultadas: Vite `8.3.8` conserva `picomatch ^4.0.7` y typescript-eslint `8.73.0` conserva tinyglobby. No se verificó una actualización compatible que elimine la cadena ni se adoptaron downgrades, forks u overrides. El fallo corresponde a una dependencia externa y al funcionamiento esperado de la auditoría estricta; por sí mismo no demuestra que las pruebas funcionales de Brixa estén corruptas.
 - Se mantiene la política vigente (D-065/D-066): sin excepciones, bypasses, `audit fix --force` ni sustitución del control completo por `--omit=dev`. Las posibles mitigaciones de exposición y una eventual aceptación temporal de riesgo fueron propuestas, no implementadas ni autorizadas; el bloqueo de auditoría permanece.
 
+**Revalidación tras integrar main/T-023 (2026-11-19, Linux Node 24.22.1):**
+- Resolución del manifest por unión de scripts: conserva `verify:security` y `verify:all`, los modos funcional/auditoría y `derive:js`/`check:sync`/`verify:sync`. Dependencias y lockfile de T-023 conservados; metadatos raíz del lockfile y referencias locales/de scripts comprobados. CI conserva sincronización, auditorías estrictas portable/full y el piloto Ubuntu Node 24. No se rebajan controles ni se cambian dependencias.
+- `npm run verify:security`: código 0 en 37,65 s; líneas base 46/46 en backend TS, backend JS y backend de fullstack TS. Las nueve mutaciones (HTTP 500, Origin null y CSP en cada variante) detectadas por la aserción esperada; auditoría estricta de cada backend, lint y build/typecheck TS correctos. Temporales eliminados por el arnés.
+- 100/100 pruebas focalizadas en siete archivos: motor de mutaciones (41), modos, particiones, derivador PostgreSQL/React/inventario y variantes verificadas. Incluyen patrones ausentes/duplicados, supervivencia, fallos ajenos, reportes inválidos, restauración y creación de proceso con cwd inexistente (`ENOENT` → `SPAWN_ERROR`). La corrección Windows ya está versionada en la rama; esta ejecución Linux no acredita Windows.
+- Tipos, lint, formato, build de Brixa y `verify:sync` correctos. No se ejecutaron la suite general, `verify:generated`, `verify:all`, matrices completas ni Docker. La retirada del advisory y el CI verde de T-023 constan en su informe y fueron confirmados por el responsable; no equivalen al CI de este merge.
+
+**Matriz de aceptación revisada:**
+| Criterio | Evidencia / pendiente |
+|---|---|
+| Mutación detectada, sobreviviente, ausente y doble | Piloto 9/9 y controles negativos del motor aprobados |
+| Backend TS, backend JS y fullstack | Tres líneas base y tres mutaciones por variante aprobadas |
+| CI por tipo de cambio y publicación con `verify:all` | Integración estática conservada; CI remota pendiente. D-065 exige `verify:all` antes de publicar; no existe workflow de publicación que automatice esa exigencia |
+| Mutaciones fuera del proyecto generado | Catálogo/motor en `scripts/` de Brixa; el piloto solo modifica copias temporales y restaura originales |
+| Separación de pruebas con BD, cobertura automática por pares | No acreditadas por el piloto; siguen pendientes del alcance original |
+| PostgreSQL e i18n/T-013e | Diferencia documentada: arnés `postgres:17-alpine`, plantillas `postgres:17.4-alpine` (P-015); decisión sobre controles negativos repetibles i18n pendiente |
+
 **Acciones pendientes para el cierre:**
-1. Confirmar la corrección del test de creación de proceso en Windows Node 24/26, A/B, y revisar los resultados completos de la ejecución posterior; conservar los controles de señal, timeout, errores adicionales y reportes inválidos.
-2. Revisar nuevas versiones oficiales/advisory; cuando exista una corrección compatible, evaluar y validar el cambio de dependencias mediante una tarea autorizada, sin debilitar la auditoría. Después, completar la validación global y la integración del piloto en CI, distinguiendo Linux de Windows/macOS.
-3. Revisar los restantes criterios del alcance aprobado que este piloto no acredita: separación de pruebas con BD, informe automático de cobertura por pares, alineación/documentación de la imagen PostgreSQL y resolución de la deuda i18n/T-013e. No se consideran resueltos por las nueve mutaciones.
-4. Continuar T-023 de forma independiente conforme a D-098; registrar por separado sus comprobaciones específicas y cualquier verificación global impedida por este bloqueo. T-018 permanece abierta y los prerrequisitos de Auth/RBAC no se dan por satisfechos.
+1. Ejecutar validación integral del merge y CI remota, confirmando Windows Node 24/26 A/B y el piloto Ubuntu Node 24; conservar señales, timeouts y clasificación estricta.
+2. Resolver el alcance residual de la matriz anterior antes de declarar T-018 completada; no queda resuelto por las nueve mutaciones. El piloto local está preparado para validación integral, pero no están satisfechos todos los criterios locales del alcance original.
+3. Comandos manuales mínimos: `npm test`, `npm run verify:sync`, `VERIFY_SCOPE=full npm run verify:all` (requiere Docker/PostgreSQL y acceso npm). Ejecutar además el workflow CI por `workflow_dispatch` sobre la rama integrada, incluido `verify-full`, y revisar todos los jobs. No basta el modo funcional sin auditoría.
+4. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
 
 **Riesgos:** mutaciones frágiles frente a cambios de plantilla; coste de minutos de CI. Advertencia DEP0190 en Windows (`shell: true` con argumentos en `execFileSync`): deuda técnica del arnés (`scripts/verify-generated.js` y `scripts/verify-i18n.js`), a evaluar durante el mantenimiento de la infraestructura de verificación sin alterar el comportamiento de las plantillas generadas ni refactorizar el manejo de procesos en esta etapa.
 
@@ -505,7 +531,7 @@ Notas:
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 y T-023)
+**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018; T-023 completada)
 **Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión pendientes.
 **Dependencias:** T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync en verde antes de implementar plantillas de Auth en ambas variantes). Decisiones de diseño consolidadas en D-080 a D-098. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069, D-077, D-078).
 
@@ -584,7 +610,7 @@ Notas:
 
 ### T-014b1 — Motor RBAC, API administrativa y auditoría mínima
 
-**Estado:** BLOQUEADA (por T-014a, T-014-0, T-018 y T-023)
+**Estado:** BLOQUEADA (por T-014a, T-014-0, T-018; T-023 completada)
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-014a, T-014-0, T-018 y T-023.
 

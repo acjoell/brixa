@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { performance } from "node:perf_hooks";
+
 import express from "express";
 import { z } from "zod";
 import { app } from "../src/app.js";
@@ -181,6 +182,7 @@ describe("Contrato de errores centralizado y validación", () => {
       const res = await fetch(`${testBaseUrl}/error-validation`);
       expect(res.status).toBe(400);
       const body = await res.json();
+
       expect(body).toEqual({
         error: "Bad Request",
         details: [{ path: "email", code: "invalid_type" }],
@@ -285,8 +287,9 @@ describe("Contrato de errores centralizado y validación", () => {
     try {
       parseInput(bodySchema, { username: "ada", extraProp: "secreto123" });
     } catch (err) {
-      expect(err.details).toEqual([{ path: "extraProp", code: "unrecognized_keys" }]);
-      expect(JSON.stringify(err.details)).not.toContain("secreto123");
+      const valErr = err;
+      expect(valErr.details).toEqual([{ path: "extraProp", code: "unrecognized_keys" }]);
+      expect(JSON.stringify(valErr.details)).not.toContain("secreto123");
     }
 
     // 2. query con z.object descarta propiedades desconocidas
