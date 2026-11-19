@@ -5,11 +5,12 @@ import { URL } from "node:url";
 import ts from "typescript";
 import { transformSync } from "@babel/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { derive, syncFrontend } from "./derive-postgres.js";
+import { derive, syncTemplates } from "./derive-postgres.js";
 import { resolveInsertionPoints } from "../src/generator/insertions.ts";
 
 const templates = new URL("../src/templates/", import.meta.url);
 const temporary = [];
+const syncFrontend = (directory, write) => syncTemplates(directory, write, ["react"]);
 afterEach(async () => {
   for (const directory of temporary.splice(0))
     await fs.rm(directory, { recursive: true, force: true });
@@ -18,20 +19,10 @@ afterEach(async () => {
 async function copyMain() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-tsx-"));
   temporary.push(directory);
-  for (const [language, extension] of [
-    ["ts", "tsx"],
-    ["js", "jsx"],
-  ]) {
-    const targetDir = path.join(directory, `frontend-react-${language}`, "src");
-    await fs.mkdir(targetDir, { recursive: true });
-    await fs.copyFile(
-      new URL(`frontend-react-${language}/src/main.${extension}`, templates),
-      path.join(targetDir, `main.${extension}`),
-    );
+  for (const language of ["ts", "js"]) {
+    const base = `frontend-react-${language}`;
+    await fs.cp(new URL(base, templates), path.join(directory, base), { recursive: true });
   }
-  const jsDir = path.join(directory, "frontend-react-js/src");
-  await fs.writeFile(path.join(jsDir, "App.jsx"), "export default function App() { return null; }");
-  await fs.writeFile(path.join(jsDir, "index.css"), "");
   return directory;
 }
 

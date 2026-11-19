@@ -4,7 +4,9 @@ import path from "node:path";
 import { URL, pathToFileURL } from "node:url";
 import ts from "typescript";
 import { afterEach, describe, expect, it } from "vitest";
-import { derive, sync } from "./derive-postgres.js";
+import { derive, syncTemplates } from "./derive-postgres.js";
+
+const sync = (overlay, write) => syncTemplates(path.dirname(overlay), write, ["database-postgres"]);
 
 const temporary = [];
 afterEach(async () => {
@@ -16,10 +18,17 @@ afterEach(async () => {
 async function copyOverlay() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "brixa-sync-"));
   temporary.push(directory);
-  await fs.cp(new URL("../src/templates/database-postgres", import.meta.url), directory, {
+  const overlay = path.join(directory, "database-postgres");
+  await fs.cp(new URL("../src/templates/database-postgres", import.meta.url), overlay, {
     recursive: true,
   });
-  return directory;
+  const backend = path.join(directory, "backend-express-js/src");
+  await fs.mkdir(backend, { recursive: true });
+  await fs.copyFile(
+    new URL("../src/templates/backend-express-js/src/redact.js", import.meta.url),
+    path.join(backend, "redact.js"),
+  );
+  return overlay;
 }
 
 describe("Piloto TS → JS PostgreSQL", () => {

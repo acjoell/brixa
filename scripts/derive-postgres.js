@@ -1,5 +1,6 @@
-/** T-023: database-postgres y main de React; configuraciones divergentes manuales. */
+/** T-023: inventario explícito de pares de plantillas aprobado en D-098. */
 import fs from "node:fs/promises";
+import { isBuiltin } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformAsync } from "@babel/core";
@@ -10,15 +11,85 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 const root = path.resolve(import.meta.dirname, "..");
-export const files = [
-  "src/db/client",
-  "src/db/migrate",
-  "src/db/schema",
-  "tests/db.test",
-  "vitest.config",
+const templates = path.join(root, "src/templates");
+const database = [
+  "src/db/client.ts",
+  "src/db/migrate.ts",
+  "src/db/schema.ts",
+  "tests/db.test.ts",
+  "vitest.config.ts",
 ];
+const groups = {
+  express: {
+    base: "backend-express",
+    files: [
+      "src/app.ts",
+      "src/config.ts",
+      "src/errors.ts",
+      "src/index.ts",
+      "src/redact.ts",
+      "tests/config.test.ts",
+      "tests/cors.test.ts",
+      "tests/errors.test.ts",
+      "tests/health.test.ts",
+    ],
+    modules: ["express", "helmet", "cors", "zod", "vitest"],
+  },
+  react: {
+    base: "frontend-react",
+    files: ["src/main.tsx", "src/App.tsx", "src/useAppContent.tsx", "vite.config.ts"],
+    modules: ["react", "react-dom/client", "@vitejs/plugin-react", "vite"],
+  },
+  "database-postgres": {
+    files: database,
+    modules: [
+      "pg",
+      "drizzle-orm/node-postgres",
+      "drizzle-orm/node-postgres/migrator",
+      "vitest/config",
+    ],
+  },
+  "database-sqlite": {
+    files: database,
+    modules: [
+      "@libsql/client",
+      "drizzle-orm/libsql",
+      "drizzle-orm/libsql/migrator",
+      "vitest/config",
+    ],
+  },
+  "api-docs": {
+    files: ["src/docs/swagger.ts", "src/docs/validate-env.ts", "tests/docs.test.ts"],
+    modules: ["swagger-ui-express"],
+    fragments: ["app.imports", "app.routes", "index.imports", "index.startup"],
+  },
+  i18n: {
+    files: ["src/i18n.ts", "src/components/LanguageSelector.tsx", "src/useAppContent.tsx"],
+    modules: ["i18next", "react-i18next", "i18next-browser-languagedetector"],
+  },
+};
 
-export async function derive(source, filename, references = new Set()) {
+// Nombres públicos estáticos de los módulos del inventario. Los assets y paquetes
+// externos se comprueban en el proyecto generado por Vite/Node.
+function recordBindings(reference, contract) {
+  const { node } = reference;
+  for (const specifier of node.specifiers ?? []) {
+    const imported = specifier.imported ?? specifier.local;
+    if (node.source && imported && specifier.type !== "ImportNamespaceSpecifier") {
+      const name =
+        specifier.type === "ImportDefaultSpecifier" ? "default" : (imported.name ?? imported.value);
+      contract.imports.push([node.source.value, name]);
+    }
+    if (specifier.exported)
+      contract.exports.add(specifier.exported.name ?? specifier.exported.value);
+  }
+  if (node.declaration) {
+    for (const name of Object.keys(reference.get("declaration").getOuterBindingIdentifiers()))
+      contract.exports.add(name);
+  }
+}
+
+export async function derive(source, filename, references = new Set(), contract) {
   const jsx = filename.endsWith(".tsx") || filename.endsWith(".jsx");
   function moduleReference(node) {
     if (jsx && node.value.startsWith(".")) {
@@ -37,13 +108,59 @@ export async function derive(source, filename, references = new Set()) {
     comments: true,
     generatorOpts: { retainLines: true },
     plugins: [
-      [transformTypescript, { onlyRemoveTypeImports: true, isTSX: jsx }],
+      ...(filename.includes(path.sep + "_fragments" + path.sep)
+        ? []
+        : [[transformTypescript, { onlyRemoveTypeImports: true, isTSX: jsx }]]),
       () => ({
+        pre(file) {
+          for (const statement of file.ast.program.body) {
+            if (
+              statement.type === "ImportDeclaration" &&
+              statement.importKind !== "type" &&
+              statement.specifiers.length &&
+              statement.specifiers.every((specifier) => specifier.importKind === "type")
+            ) {
+              throw file.buildCodeFrameError(
+                statement,
+                "Usa import type para una declaración que solo importa tipos",
+              );
+            }
+          }
+        },
         post(file) {
           // Inspeccionar después de eliminar tipos: import type no es una dependencia runtime.
           file.path.traverse({
             "ImportDeclaration|ExportNamedDeclaration|ExportAllDeclaration"(reference) {
-              if (reference.node.source) moduleReference(reference.node.source);
+              const { node } = reference;
+              if (node.source) {
+                moduleReference(node.source);
+                if (
+                  contract?.nodeRuntime &&
+                  node.source.value.endsWith(".json") &&
+                  !node.attributes?.some(
+                    ({ key, value }) => key.name === "type" && value.value === "json",
+                  )
+                ) {
+                  throw reference.buildCodeFrameError(
+                    'El import JSON en Node requiere with { type: "json" }',
+                  );
+                }
+              }
+              if (contract) recordBindings(reference, contract);
+            },
+            ExportDefaultDeclaration() {
+              contract?.exports.add("default");
+            },
+            JSXText({ node, parent }) {
+              // Texto de ayuda visible de la plantilla base (no del overlay i18n).
+              if (
+                filename.endsWith(path.join("frontend-react-ts", "src", "useAppContent.tsx")) &&
+                parent.openingElement?.name.name === "code" &&
+                node.value === "src/App.tsx"
+              ) {
+                node.value = "src/App.jsx";
+                delete node.extra;
+              }
             },
             CallExpression(reference) {
               if (reference.node.callee.type === "Import") {
@@ -70,35 +187,14 @@ export async function derive(source, filename, references = new Set()) {
   });
 }
 
-export async function sync(
-  directory = path.join(root, "src/templates/database-postgres"),
-  write = false,
-) {
-  const eslint = new ESLint({
-    cwd: directory,
-    overrideConfigFile: path.join(root, "src/templates/backend-express-js/eslint.config.js"),
-  });
-  await syncFiles(
-    {
-      sourceDir: path.join(directory, "ts"),
-      targetDir: path.join(directory, "js"),
-      entries: files.map((file) => [`${file}.ts`, `${file}.js`]),
-      extensions: [".js"],
-      fallbackDir: path.join(root, "src/templates/backend-express-js"),
-      eslint,
-    },
-    write,
-  );
-}
-
-export async function syncFrontend(directory = path.join(root, "src/templates"), write = false) {
-  // Lint ligero sin instalar los plugins React de los proyectos generados.
-  const eslint = new ESLint({
+function frontendLint(directory) {
+  // Los plugins React completos se ejecutan en el proyecto generado.
+  return new ESLint({
     cwd: directory,
     overrideConfigFile: true,
     overrideConfig: [
       {
-        files: ["**/*.jsx"],
+        files: ["**/*.{js,jsx}"],
         languageOptions: {
           parser: tseslint.parser,
           parserOptions: { ecmaFeatures: { jsx: true } },
@@ -108,68 +204,131 @@ export async function syncFrontend(directory = path.join(root, "src/templates"),
       },
     ],
   });
-  await syncFiles(
-    {
-      sourceDir: path.join(directory, "frontend-react-ts"),
-      targetDir: path.join(directory, "frontend-react-js"),
-      entries: [["src/main.tsx", "src/main.jsx"]],
-      extensions: [".js", ".jsx", ".css"],
-      eslint,
-    },
-    write,
-  );
 }
 
-async function syncFiles(
-  { sourceDir, targetDir, entries, extensions, fallbackDir, eslint },
-  write,
-) {
-  for (const [sourceFile, targetFile] of entries) {
-    const filename = path.join(sourceDir, sourceFile);
-    const target = path.join(targetDir, targetFile);
-    const references = new Set();
-    const expected = await derive(await fs.readFile(filename, "utf8"), filename, references);
-    for (const reference of references) {
-      if (!reference.startsWith(".")) continue;
-      const resolved = path.resolve(path.dirname(target), reference);
-      const relative = path.relative(targetDir, resolved);
-      if (relative.startsWith("..") || !extensions.includes(path.extname(reference))) {
-        throw new Error(`Referencia local no soportada: ${reference} en ${filename}`);
-      }
-      if (entries.some(([, file]) => path.normalize(file) === relative)) continue;
-      // La composición existente proporciona redact.js desde el backend base.
-      const candidates = [resolved];
-      if (fallbackDir) candidates.push(path.join(fallbackDir, relative));
-      const found = await Promise.all(
-        candidates.map(async (candidate) => {
-          try {
-            return (await fs.stat(candidate)).isFile();
-          } catch (error) {
-            if (error.code === "ENOENT") return false;
-            throw error;
-          }
+async function exists(file) {
+  try {
+    return (await fs.stat(file)).isFile();
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function templateGroup(directory, name) {
+  const group = groups[name];
+  const frontend = name === "react" || name === "i18n";
+  const base = frontend ? groups.react : groups.express;
+  const dir = (language) =>
+    path.join(directory, group.base ? group.base + "-" + language : path.join(name, language));
+  const entries = group.files.map((source) => [source, source.replace(/\.ts(x?)$/, ".js$1")]);
+  for (const fragment of group.fragments ?? []) {
+    entries.push(["_fragments/" + fragment, "_fragments/" + fragment]);
+  }
+  return {
+    entries,
+    sourceDir: dir("ts"),
+    targetDir: dir("js"),
+    nodeRuntime: !frontend,
+    fallback: group.base ? null : path.join(directory, base.base + "-js"),
+    modules: new Set([...base.modules, ...group.modules]),
+    extensions: frontend ? [".jsx", ".js", ".css", ".png", ".svg", ".json"] : [".js", ".json"],
+    eslint: frontend
+      ? frontendLint(directory)
+      : new ESLint({
+          cwd: directory,
+          overrideConfigFile: path.join(templates, "backend-express-js/eslint.config.js"),
         }),
-      );
-      if (!found.some(Boolean)) {
-        throw new Error(`Referencia local inexistente: ${reference} en ${filename}`);
+  };
+}
+
+async function localModule(reference, parent, group, destinations, filename) {
+  const resolved = path.resolve(parent, reference);
+  const relative = path.relative(group.targetDir, resolved);
+  if (relative.startsWith("..") || !group.extensions.includes(path.extname(reference))) {
+    throw new Error(`Referencia local no soportada: ${reference} en ${filename}`);
+  }
+  const candidates = [resolved];
+  if (group.fallback) candidates.push(path.join(group.fallback, relative));
+  for (const candidate of candidates) {
+    if (destinations.has(candidate) || (await exists(candidate))) return candidate;
+  }
+  throw new Error(`Referencia local inexistente: ${reference} en ${filename}`);
+}
+
+export async function syncTemplates(
+  directory = templates,
+  write = false,
+  names = Object.keys(groups),
+) {
+  const selected = names.map((name) => templateGroup(directory, name));
+  const destinations = new Set(
+    selected.flatMap((group) => group.entries.map(([, file]) => path.join(group.targetDir, file))),
+  );
+  const changes = new Map();
+  const contracts = new Map();
+  const replacements = new Map();
+  const localImports = [];
+  for (const group of selected) {
+    for (const [sourceFile, targetFile] of group.entries) {
+      const filename = path.join(group.sourceDir, sourceFile);
+      const target = path.join(group.targetDir, targetFile);
+      const source = await fs.readFile(filename, "utf8");
+      const fragment = sourceFile.startsWith("_fragments/");
+      const references = new Set();
+      const contract = { exports: new Set(), imports: [], nodeRuntime: group.nodeRuntime };
+      const compiled = await derive(source, filename, references, contract);
+      contracts.set(target, contract);
+      if (group.fallback) {
+        const baseTarget = path.join(group.fallback, targetFile);
+        if (destinations.has(baseTarget)) {
+          // i18n sustituye el hook que importa App en la plantilla base.
+          replacements.set(baseTarget, target);
+        }
+      }
+      // Los fragmentos se insertan en src/app.js o src/index.js y conservan sus bytes.
+      const parent = fragment ? path.join(group.targetDir, "src") : path.dirname(target);
+      for (const reference of references) {
+        if (reference.startsWith(".")) {
+          const moduleFile = await localModule(reference, parent, group, destinations, filename);
+          for (const [specifier, name] of contract.imports) {
+            if (specifier === reference) localImports.push({ moduleFile, name, filename });
+          }
+        } else if (!isBuiltin(reference) && !group.modules.has(reference)) {
+          throw new Error(`Import no soportado: ${reference} en ${filename}`);
+        }
+      }
+      if (!fragment) {
+        const results = await group.eslint.lintText(compiled, { filePath: target });
+        if (results.some((result) => result.errorCount || result.warningCount)) {
+          const formatter = await group.eslint.loadFormatter("stylish");
+          throw new Error(await formatter.format(results));
+        }
+      }
+      const expected = fragment ? source : compiled;
+      if ((await exists(target)) && (await fs.readFile(target, "utf8")) === expected) continue;
+      changes.set(target, expected);
+    }
+  }
+  // Solo contratos de módulos del inventario; Vite gestiona los assets.
+  for (const { moduleFile, name, filename } of localImports) {
+    for (const candidate of [moduleFile, replacements.get(moduleFile)]) {
+      const module = contracts.get(candidate);
+      if (module && !module.exports.has(name)) {
+        throw new Error(
+          `Export inexistente: ${name} en ${candidate} (importado desde ${filename})`,
+        );
       }
     }
-    const results = await eslint.lintText(expected, { filePath: target });
-    if (results.some((result) => result.errorCount > 0 || result.warningCount > 0)) {
-      const formatter = await eslint.loadFormatter("stylish");
-      throw new Error(await formatter.format(results));
-    }
-    if (write) {
-      await fs.writeFile(target, expected);
-    } else {
-      const actual = await fs.readFile(target, "utf8").catch((error) => {
-        if (error.code === "ENOENT") return null;
-        throw error;
-      });
-      if (actual !== expected) {
-        throw new Error(`JavaScript desincronizado: ${target}. Ejecuta npm run derive:js.`);
-      }
-    }
+  }
+  if (!write && changes.size) {
+    throw new Error(
+      `JavaScript desincronizado: ${[...changes.keys()].join(", ")}. Ejecuta npm run derive:js.`,
+    );
+  }
+  for (const [target, expected] of changes) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, expected);
   }
 }
 
@@ -178,7 +337,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (args.length > 1 || (args.length === 1 && args[0] !== "--write")) {
     throw new Error("Uso: node scripts/derive-postgres.js [--write]");
   }
-  await sync(undefined, args[0] === "--write");
-  await syncFrontend(undefined, args[0] === "--write");
-  console.log("database-postgres y React main: sincronización y lint correctos (T-023).");
+  await syncTemplates(undefined, args[0] === "--write");
+  console.log("T-023: plantillas JS/JSX sincronizadas y lint correcto.");
 }
