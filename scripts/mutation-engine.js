@@ -81,10 +81,15 @@ export function restoreFile(filePath, originalBuffer) {
  * @param {string} cmd
  * @param {string[]} args
  * @param {string} cwd
- * @param {{ env?: Record<string, string>, timeoutMs?: number }} options
+ * @param {{ env?: Record<string, string>, timeoutMs?: number, shell?: boolean }} options
  * @returns {Promise<{ exitCode: number | null, signal: string | null, stdout: string, stderr: string, timedOut: boolean, durationMs: number }>}
  */
-export async function executeCommand(cmd, args, cwd, { env = {}, timeoutMs = 60_000 } = {}) {
+export async function executeCommand(
+  cmd,
+  args,
+  cwd,
+  { env = {}, timeoutMs = 60_000, shell = process.platform === "win32" } = {},
+) {
   const isWindows = process.platform === "win32";
   const actualCmd = isWindows && cmd === "npm" ? "npm.cmd" : cmd;
   const childEnv = { ...process.env, ...env };
@@ -100,7 +105,7 @@ export async function executeCommand(cmd, args, cwd, { env = {}, timeoutMs = 60_
     const child = spawn(actualCmd, args, {
       cwd,
       env: childEnv,
-      shell: isWindows,
+      shell,
       detached: !isWindows,
       stdio: ["ignore", "pipe", "pipe"],
     });

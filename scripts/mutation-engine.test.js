@@ -285,25 +285,42 @@ export function testMe() {
     expect(missing.timedOut).toBe(false);
     expect(classify(null, missing).reason).toBe("SPAWN_ERROR");
     const readyFile = path.join(tmpDir, "child-ready");
+    fs.writeFileSync(
+      path.join(tmpDir, "persistent.cjs"),
+      `require("node:fs").writeFileSync("child-ready", String(process.pid));
+       setInterval(() => {}, 1000);
+       setTimeout(() => process.exit(91), 4000);`,
+    );
+    // El marcador persiste hasta afterEach: se puede observar después de close.
+    const running = executeCommand(process.execPath, ["persistent.cjs"], tmpDir, {
+      shell: false,
+      timeoutMs: 1000,
+    });
+    let observationTimer;
     try {
-      const running = executeCommand(
-        process.execPath,
-        [
-          "-e",
-          `require('node:fs').writeFileSync(${JSON.stringify(readyFile)}, 'ready'); setInterval(() => {}, 1000)`,
-        ],
-        tmpDir,
-        { timeoutMs: 1000 },
-      );
-      while (!fs.existsSync(readyFile)) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      const timeout = await Promise.race([
+        running,
+        new Promise((_, reject) => {
+          observationTimer = setTimeout(
+            () => reject(new Error("Venció el límite de observación del hijo")),
+            6000,
+          );
+        }),
+      ]);
+      if (timeout.spawnError) throw timeout.spawnError;
+      if (!fs.existsSync(readyFile)) {
+        throw new Error(
+          `Hijo cerrado sin marcador (exit=${timeout.exitCode}, timedOut=${timeout.timedOut}): ${timeout.stderr}`,
+        );
       }
-      const timeout = await running;
-      expect(fs.readFileSync(readyFile, "utf8")).toBe("ready");
+      expect(timeout.exitCode).not.toBe(91); // El hijo no llegó a su salida de emergencia.
       expect(timeout.timedOut).toBe(true);
       expect(classify(null, timeout).reason).toBe("TIMEOUT");
+      const pid = Number(fs.readFileSync(readyFile, "utf8"));
+      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
     } finally {
-      fs.rmSync(readyFile, { force: true });
+      clearTimeout(observationTimer);
+      await running;
     }
   }, 10_000);
 
