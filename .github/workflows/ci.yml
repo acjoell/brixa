@@ -155,6 +155,10 @@ jobs:
         env:
           VERIFY_PARTITION: ${{ matrix.partition }}
 
+      - name: Verify security harness (pilot)
+        if: steps.filter.outputs.run_verify == 'true' && matrix.os == 'ubuntu-latest' && matrix.node-version == 24 && matrix.partition == ''
+        run: npm run verify:security
+
   verify-full:
     name: Verify Generated Projects (Full Scope with Docker & PostgreSQL)
     runs-on: ubuntu-latest

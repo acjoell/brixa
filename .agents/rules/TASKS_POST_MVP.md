@@ -49,7 +49,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 ## 4. Mapa de dependencias
 
-| Elemento | Estado a 2026-11-07 | Depende de |
+| Elemento | Estado (T-018 actualizado a 2026-11-17) | Depende de |
 |---|---|---|
 | T-019 | COMPLETADA | — |
 | T-020 | PENDIENTE | T-019 |
@@ -62,7 +62,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
-| T-018 | PENDIENTE (desbloqueada por T-017b e INV-06) | T-017b, INV-06 |
+| T-018 | IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE | Evidencia por variante y CI, asignación de i18n pendiente |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -281,6 +281,8 @@ Notas:
 **Aprobación:** Aprobado en alcance y arquitectura (D-098 tras INV-05b, su complemento e INV-08).
 **Dependencias:** D-098. Requisito previo obligatorio para la implementación de módulos de Auth y RBAC (T-014a, T-014b1).
 
+**Continuidad respecto a T-018 (2026-11-17):** T-023 puede continuar de forma independiente; esto no cierra T-018 ni autoriza excepciones de seguridad. Sus verificaciones específicas deben distinguirse de las verificaciones globales (`verify:generated` y `verify:all`), que pueden seguir condicionadas por el bloqueo externo y la integración pendiente descritos en T-018. No se declara paridad integral ni CI satisfactoria mientras falte esa evidencia.
+
 **Objetivo:** proporcionar la herramienta de derivación automática TypeScript → JavaScript basada en AST/Babel con formateo determinista, junto con el comando `verify:sync` para verificar en CI y localmente la sincronización exacta y la paridad lógica entre ambas variantes.
 
 **Alcance:**
@@ -456,7 +458,9 @@ Notas:
 
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** PENDIENTE (desbloqueada tras el cierre de T-017b e INV-06)
+**Estado:** IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE. No equivale a aceptación definitiva.
+
+**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. La última CI remota sigue pendiente de conclusión y no se espera para integrar, por autorización expresa del responsable. Permanecen pendientes el informe real por variante, la acreditación de proyecciones en la lista y la aceptación definitiva. D-052 conserva abierta la asignación de N1–N7: T-013d cerró con alcance reducido, y no se reabre ni se crea T-013e por inferencia. No se asignan nuevos requisitos i18n a T-018. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -476,7 +480,7 @@ Notas:
 
 **Deuda relacionada:** D-052 cita una tarea T-013e que no existe en `TASKS.md` (la inspección y la revisión no la encontraron); los controles negativos de i18n se ejecutaron una vez y no son repetibles. Se decide si se abre T-013e o si T-018 absorbe el trabajo.
 
-**Áreas afectadas:** **[I]** `scripts/verify-generated.js`, `src/verified-variants.ts` y su test; **[L]** `package.json` del CLI (scripts); `.github/workflows/ci.yml`. Nuevos archivos del arnés: por determinar.
+**Áreas afectadas:** **[I]** `scripts/verify-generated.js`, `src/verified-variants.ts` y su test; **[L]** `package.json` del CLI (scripts); `.github/workflows/ci.yml`. Archivos incorporados en `fe41218`: `scripts/mutation-engine.js`, `scripts/mutation-engine.test.js`, `scripts/security-mutations.js` y `scripts/verify-security.js`.
 
 **Criterios de aceptación:**
 - Una mutación deliberada hace fallar `verify:security`; una mutación que no se aplica o se aplica dos veces también falla el arnés.
@@ -487,7 +491,57 @@ Notas:
 **Pruebas positivas:** línea base sin mutación pasa. **Pruebas negativas:** mutación sin efecto, mutación doble y mutación cuyo texto desapareció de la plantilla.
 **Verificaciones:** batería local, `verify:generated` completo y `verify:security` piloto.
 
+**Historial de implementación a 2026-11-17 (incidentes superados):**
+Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada en este apartado describen exclusivamente aquella ejecución. El estado vigente figura en la revisión final de aceptación.
+- **Historial confirmado:** `f5f4a23` incorporó a `verify:generated` límites por comando, medición de tiempos y ajustes de cierre de procesos/servidores; `a9ab244` añadió particiones Windows A/B con pruebas de partición y separó instalación (`--no-audit`) de auditoría explícita (`npm audit --audit-level=moderate`). Se conserva el control estricto; `--no-audit` durante la instalación no lo sustituye. `fe41218a35e7a97be8f2cb8f7f82069d37bfb634` incorporó el piloto de T-018.
+- **Validación local registrada en esta sesión (Linux, Node 24.22.1):** 41 pruebas del motor y 201 pruebas generales aprobadas; lint, formato, tipos, build y `git diff --check` satisfactorios. Una ejecución de `verify:security` completó las tres líneas base (46/46 tests cada una) y las nueve mutaciones en 46,78 s: `http-500-contract`, `cors-origin-null` y `helmet-csp-header` detectadas por la aserción prevista en `backend+ts`, `backend+js` y el backend de `fullstack+ts`. Son resultados locales, no evidencia de una matriz CI completa.
+- **Garantías verificadas localmente:** clasificación estructurada de Vitest; rechazo de causas adicionales, reportes inválidos, señales y timeouts; respaldo antes de escribir, reemplazo mediante temporal y restauración byte a byte; fallos de escritura/restauración clasificados como infraestructura. Control con mutación sin efecto: salida 1. Temporales del piloto eliminados. El patrón CSP se ajustó al mensaje escapado de Vitest sin modificar las pruebas generadas. El antiguo fallo de línea base de un test no se reprodujo ni conserva reporte suficiente para atribuirle una causa.
+- **Windows, evidencia de CI reportada:** en la [ejecución 44135365877](https://github.com/acjoell/brixa/actions/runs/44135365877), los cuatro jobs Windows (Node 24/26, A/B) fallaron en `mutation-engine.test.js:278`: se esperaba `SPAWN_ERROR` y se obtuvo `UNPARSEABLE_REPORT`. Con `shell: true`, un comando inexistente falla dentro de un shell que sí arrancó. La corrección local usa Node con un directorio de trabajo inexistente y exige `ENOENT`, provocando un error real de creación de proceso sin mezclar categorías. El test afectado, la suite del motor, las 201 pruebas, lint y formato pasaron después de la corrección; esta permanece sin commit y no está confirmada en Windows CI.
+- **Ubuntu, evidencia reportada y reproducción mínima:** los jobs Node 24 (`134223305256`) y Node 26 (`134223305779`) de esa ejecución fallaron en `verify:generated`, primera variante `frontend+ts`, al ejecutar `npm audit --audit-level=moderate`. No se recuperaron sus logs directamente en esta sesión (`gh` no disponible y consulta web sin acceso a logs). La auditoría JSON de un único frontend TS temporal reprodujo exit 1 y 11 paquetes con severidad alta por el advisory siguiente; su build independiente pasó. No se volvió a ejecutar `verify:generated` completo y no hay evidencia nueva que declare verde la matriz actual. El paso `verify:security` de Ubuntu/Node 24 está después de `verify:generated`: el fallo previo impide acreditar ese piloto en CI.
+
+**Bloqueo externo de auditoría (histórico del 2026-11-17; superado según revalidación de T-023):**
+- [GHSA-fc5q-39xc-vjpf / CVE-2026-112366](https://github.com/advisories/GHSA-fc5q-39xc-vjpf): ReDoS por patrones extglob repetidos controlados por un atacante. El advisory oficial consultado afecta `picomatch <=4.0.7` y declara que no hay versiones corregidas. npm solo publicaba versiones hasta `4.0.7`; no se confirmó parche oficial para este aviso. Esta conclusión está fechada, no garantiza el estado futuro del registro.
+- La reproducción instaló `picomatch@4.0.7`, compartido por `vite@8.3.6`, `tinyglobby@0.2.17` y `fdir@6.5.0`; `typescript-eslint@8.72.1` llega por `typescript-estree → tinyglobby`. Fullstack reutiliza la plantilla frontend. Los 11 hallazgos son paquetes afectados transitivamente por un mismo advisory, no once vulnerabilidades independientes. El tooling del propio Brixa también está afectado mediante Vitest/Vite y typescript-eslint.
+- Exposición demostrada: componente vulnerable instalado en dependencias de desarrollo usadas en lint/build/tests. No se identificó una ruta en las plantillas que entregue patrones glob de usuarios no confiables a picomatch; no se demostró explotación. Sigue existiendo riesgo potencial al procesar código/configuraciones no confiables. La auditoría productiva del frontend temporal (`--omit=dev`, solo diagnóstico) dio cero hallazgos, no se encontró el componente en el bundle inspeccionado y Docker fullstack copia solo `dist/` a Nginx. Esto no demuestra riesgo cero ni sustituye la auditoría completa.
+- Actualizaciones consultadas: Vite `8.3.8` conserva `picomatch ^4.0.7` y typescript-eslint `8.73.0` conserva tinyglobby. No se verificó una actualización compatible que elimine la cadena ni se adoptaron downgrades, forks u overrides. El fallo corresponde a una dependencia externa y al funcionamiento esperado de la auditoría estricta; por sí mismo no demuestra que las pruebas funcionales de Brixa estén corruptas.
+- Se mantiene la política vigente (D-065/D-066): sin excepciones, bypasses, `audit fix --force` ni sustitución del control completo por `--omit=dev`. Las posibles mitigaciones de exposición y una eventual aceptación temporal de riesgo fueron propuestas, no implementadas ni autorizadas; el bloqueo de auditoría permanecía en aquella ejecución.
+
+**Revalidación tras integrar main/T-023 (2026-11-19, Linux Node 24.22.1):**
+- Resolución del manifest por unión de scripts: conserva `verify:security` y `verify:all`, los modos funcional/auditoría y `derive:js`/`check:sync`/`verify:sync`. Dependencias y lockfile de T-023 conservados; metadatos raíz del lockfile y referencias locales/de scripts comprobados. CI conserva sincronización, auditorías estrictas portable/full y el piloto Ubuntu Node 24. No se rebajan controles ni se cambian dependencias.
+- `npm run verify:security`: código 0 en 37,65 s; líneas base 46/46 en backend TS, backend JS y backend de fullstack TS. Las nueve mutaciones (HTTP 500, Origin null y CSP en cada variante) detectadas por la aserción esperada; auditoría estricta de cada backend, lint y build/typecheck TS correctos. Temporales eliminados por el arnés.
+- 100/100 pruebas focalizadas en siete archivos: motor de mutaciones (41), modos, particiones, derivador PostgreSQL/React/inventario y variantes verificadas. Incluyen patrones ausentes/duplicados, supervivencia, fallos ajenos, reportes inválidos, restauración y creación de proceso con cwd inexistente (`ENOENT` → `SPAWN_ERROR`). La corrección Windows ya está versionada en la rama; esta ejecución Linux no acredita Windows.
+- Tipos, lint, formato, build de Brixa y `verify:sync` correctos. No se ejecutaron la suite general, `verify:generated`, `verify:all`, matrices completas ni Docker. La retirada del advisory y el CI verde de T-023 constan en su informe y fueron confirmados por el responsable; no equivalen al CI de este merge.
+
+**Matriz de aceptación revisada (fuentes originales en Alcance, Criterios de aceptación y §6.3):**
+| Criterio | Evidencia / pendiente |
+|---|---|
+| Mutación detectada, sobreviviente, ausente y doble | Piloto 9/9 y controles negativos del motor aprobados |
+| Backend TS, backend JS y fullstack | Tres líneas base y tres mutaciones por variante aprobadas |
+| CI por tipo de cambio y publicación con `verify:all` | Responsable confirma workflow completo verde, incluidos Windows Node 24/26 A/B y Verify Generated Full Scope con Docker/PostgreSQL. `verify:all` local pasó. D-065 exige `verify:all` antes de publicar; no hay workflow de publicación que automatice esa exigencia |
+| Mutaciones fuera del proyecto generado | Catálogo/motor en `scripts/` de Brixa; el piloto solo modifica copias temporales y restaura originales |
+| Scripts, listas y clasificación (Alcance y D-065) | `package.json` enlaza ambas baterías mediante `verify:all`. `src/verified-variants.ts` contiene ambas listas. `mutation-engine.test.js` comprueba clasificación estricta, restauración y coincidencia del piloto con la lista de seguridad. 41/41 aprobadas |
+| Ejecución en serie e instalaciones independientes (Alcance y D-062) | `verify-security.js` recorre variantes y mutaciones en serie, instala en temporales independientes y elimina cada directorio en `finally`. CI configura caché npm compartida |
+| Mutaciones con BD y proyecciones (§6.3) | Implementadas las siete proyecciones conservando modalidad, lenguaje, BD y Docker. Se mantienen los tres controles HTTP 500/CORS/CSP del piloto. `verify-security.js` reutiliza las verificaciones de BD y Docker sobre el proyecto temporal y evita reinstalar su backend. Pruebas de orquestación con procesos simulados comprueban 10 variantes, 30 mutaciones previstas y limpieza en éxito/fallo. Ejecución real pendiente |
+| Separación de pruebas con BD | Implementados `test:unit` (excluye `tests/db.test.*`) y `test:db` (solo conexión) en los manifests correspondientes. `npm test` conserva ambos grupos. El arnés integral ejecuta ambos scripts con la URL de BD apropiada. Generación focalizada PostgreSQL/SQLite JS/TS y selección real de archivos con Vitest aprobadas sin instalaciones |
+| Cobertura por pares automática | `verification-report.js` calcula 76 combinaciones y 76 pares válidos, 73 pares declarados y los tres huecos de D-053. Ambos arneses emiten tabla JS/TS y JSON con selección, ejecución, resultado, parejas incompletas/fallidas y diferencias de estado. Pruebas focalizadas verifican que el fallo interrumpe y se informa de variantes pendientes. El modo funcional/auditoría queda explícito. La falta de infraestructura obligatoria produce fallo global |
+| Mutaciones de i18n / T-013e | Pendiente. `verify:generated` valida dos variantes i18n, pero no repite controles negativos ni comprueba por mutación que fallen al retirar protecciones; D-052 mantiene abierta la decisión de asignar ese trabajo a T-013e o absorberlo en T-018 |
+| PostgreSQL del arnés y plantillas | Diferencia documentada como permite P-015: arnés `postgres:17-alpine`, plantillas `postgres:17.4-alpine` |
+
+**Validación focalizada del incremento residual:** 42 pruebas aprobadas en cinco archivos (`security-residuals.test.js`, `security-projections.test.js`, `verify-modes.test.js`, `verify-partitions.test.js` y `verified-variants.test.ts`). Incluyen generación temporal de cuatro combinaciones PostgreSQL/SQLite JS/TS sin instalar dependencias, selección real de tests con Vitest, reporte ante fallo o infraestructura ausente y orquestación simulada de las diez variantes. Tipos, ESLint y Prettier correctos. Los nombres `test:unit`/`test:db` se adoptan como elección local porque el informe original INV-06 no está disponible. Los resultados anteriores de 9/9 y CI verde corresponden al piloto, y la validación real de las nuevas proyecciones sigue pendiente.
+
+**Acciones pendientes para el cierre:**
+1. Ejecutar CI portable/full del incremento. El responsable confirma que `npm test`, `npm run verify:sync` y `VERIFY_SCOPE=full npm run verify:all` finalizaron sin errores. No se encontró un log o JSON guardado de esa ejecución en el repositorio. El código selecciona diez variantes y treinta mutaciones en ámbito full, pero la acreditación individual del piloto y las siete proyecciones queda pendiente del informe detallado o CI. Esta revisión no repitió las ejecuciones integrales.
+2. Tras esa validación, incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS`. La lista conserva por ahora las tres variantes del piloto ya validadas, de acuerdo con D-053/D-065.
+3. Resolver la asignación de los controles negativos repetibles de i18n (D-052). Su implementación dentro de T-018 queda condicionada a esa decisión. La revisión anterior los presentó indebidamente como obligación ya asignada a T-018.
+4. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
+5. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
+6. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
+
+**Revisión final de aceptación (2026-11-19; evidencia comunicada por el responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` aprobaron localmente; CI está verde, incluido Windows Node 26 Group A tras corregir la prueba de timeout, y la verificación Full Scope con Docker/PostgreSQL; auditoría de dependencias satisfactoria; nueve mutaciones detectadas y 41/41 pruebas del motor aprobadas. No se repitieron estas ejecuciones durante la revisión documental. Esta evidencia cierra los pendientes de integración/CI y el incidente Windows, pero deja pendientes los requisitos y decisiones de alcance detallados en la matriz; por tanto, T-018 no puede marcarse COMPLETADA todavía.
+
 **Riesgos:** mutaciones frágiles frente a cambios de plantilla; coste de minutos de CI. Advertencia DEP0190 en Windows (`shell: true` con argumentos en `execFileSync`): deuda técnica del arnés (`scripts/verify-generated.js` y `scripts/verify-i18n.js`), a evaluar durante el mantenimiento de la infraestructura de verificación sin alterar el comportamiento de las plantillas generadas ni refactorizar el manejo de procesos en esta etapa.
+
+**Reconciliación final tras `b1e61aa6f910929271419ecae9232ffe99a47022`:** el responsable confirma CI completamente verde en Windows Node 24/26 A/B, Linux y macOS después de publicar la corrección. El fallo de los cuatro jobs Windows de `44565892050` sobre `80082ed` queda como antecedente resuelto. La prueba usa un archivo `.cjs`, `process.execPath` y `shell: false`, observa el cierre y el marcador persistente y exige `timedOut=true`, `TIMEOUT` y PID terminado. La opción `shell` conserva su valor predeterminado anterior. Caso focalizado, 41/41 pruebas y controles estáticos locales aprobados. Se incorpora la confirmación del responsable como evidencia remota, sin atribuirle un identificador de ejecución verde no facilitado. El cierre sigue pendiente de la separación de pruebas con BD, el informe automático por pares y las decisiones de alcance indicadas arriba.
 
 ---
 
@@ -778,7 +832,7 @@ Al completar una tarea: actualizar su estado y su aprobación, registrar las ver
 | TP-11 (composición) | T-017a y T-017a-ui | |
 | TP-12 (OpenAPI y Express 5.3.0) | T-020, prueba 4 | Diseño posterior dentro de T-017a |
 | TP-13 (modelo de amenazas) | T-014-0 | |
-| TP-14 (cobertura por pares) | T-020, prueba 6; T-018 | Convertida en control automático en T-018 |
+| TP-14 (cobertura por pares) | T-020, prueba 6; T-018 | Control automático previsto en T-018, todavía pendiente |
 | TP-15 (auth, RBAC, multi-org) | T-014a a T-014d | |
 | (no figuraba en la v3) | T-018 | Aprobada en alcance el 2026-11-04; infraestructura de `verify:security` |
 | DP-04 … DP-17 | P-014, P-015, P-008, P-012, P-013 (D-098), P-009, P-010, P-011, P-017, P-016 | Ver `DECISIONS.md` |

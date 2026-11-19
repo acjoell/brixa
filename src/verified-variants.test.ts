@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { VERIFIED_VARIANTS, isVerified, variantLabel } from "./verified-variants.js";
+import {
+  VERIFIED_VARIANTS,
+  VERIFIED_SECURITY_VARIANTS,
+  isVerified,
+  isSecurityVerified,
+  variantLabel,
+} from "./verified-variants.js";
 
 describe("VERIFIED_VARIANTS", () => {
   it("tiene exactamente 32 entradas", () => {
@@ -75,5 +81,29 @@ describe("isVerified", () => {
     );
     const firstLabel = variantLabel(first);
     expect(reducedSet.has(firstLabel)).toBe(false);
+  });
+});
+
+describe("VERIFIED_SECURITY_VARIANTS & isSecurityVerified", () => {
+  it("tiene exactamente 3 entradas en el piloto inicial T-018", () => {
+    expect(VERIFIED_SECURITY_VARIANTS.length).toBe(3);
+  });
+
+  it("contiene backend+ts, backend+js y fullstack+ts", () => {
+    const labels = VERIFIED_SECURITY_VARIANTS.map(variantLabel);
+    expect(labels).toEqual(["backend+ts", "backend+js", "fullstack+ts"]);
+  });
+
+  it("isSecurityVerified devuelve true para las 3 variantes piloto", () => {
+    expect(isSecurityVerified({ modality: "backend", language: "ts" })).toBe(true);
+    expect(isSecurityVerified({ modality: "backend", language: "js" })).toBe(true);
+    expect(isSecurityVerified({ modality: "fullstack", language: "ts" })).toBe(true);
+  });
+
+  it("isSecurityVerified devuelve false para variantes fuera del piloto de seguridad", () => {
+    expect(isSecurityVerified({ modality: "frontend", language: "ts" })).toBe(false);
+    expect(isSecurityVerified({ modality: "backend", language: "ts", database: "postgres" })).toBe(
+      false,
+    );
   });
 });

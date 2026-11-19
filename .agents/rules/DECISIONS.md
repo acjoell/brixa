@@ -1027,7 +1027,21 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Motivo:** Ninguna capacidad se considera segura por compilar, generar archivos o pasar `verify:generated`.
 
+**Seguimiento de implementación (2026-11-17):** T-018 continúa en progreso. El piloto local registra 201 pruebas y nueve mutaciones detectadas; la integración CI y el cierre no están acreditados. La ejecución `44135365877` presenta un fallo de portabilidad del test Windows (corrección local pendiente de confirmar en CI) y un bloqueo externo de auditoría por GHSA-fc5q-39xc-vjpf, reproducido en un frontend TS temporal. Se conserva la exigencia de auditoría completa y `verify:all` en verde; no se aprueba excepción ni aceptación de riesgo. Evidencia, límites y acciones pendientes en [T-018](TASKS_POST_MVP.md#t-018--infraestructura-de-verificación-avanzada). Los resultados históricos de D-055 no acreditan el estado verde de esta ejecución.
+
+**Revalidación (2026-11-19):** Integración local con T-023: nueve mutaciones detectadas, tres líneas base 46/46 y auditorías estrictas de los backends aprobadas; 100 pruebas focalizadas y controles estáticos correctos. El bloqueo anterior es histórico (retirada y auditorías de T-023 confirmadas por el responsable). Se conservan sincronización, modos de verificación y auditorías CI de T-023. T-018 sigue EN PROGRESO: faltan validación integral del merge, CI remota (incluido Windows) y alcance residual documentado en su matriz de aceptación; no cambia D-065.
+
+**Actualización de aceptación (2026-11-19; confirmación del responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` pasan localmente; CI completa está verde, incluida Windows Node 26 Group A tras corregir la prueba de timeout, y Verify Generated Full Scope con Docker/PostgreSQL. La auditoría de dependencias es satisfactoria y las nueve mutaciones fueron detectadas. Esto sustituye el pendiente histórico de validación integral/CI y el bloqueo Windows descritos arriba. T-018 continúa EN PROGRESO porque el alcance original aún requiere separar pruebas con BD, informar automáticamente cobertura por pares y resolver la asignación de controles negativos repetibles de i18n conforme a D-052 (ver la matriz de aceptación en `TASKS_POST_MVP.md`). No se modifica ni relaja la exigencia de D-065.
+
+**Confirmación posterior a la corrección de portabilidad:** el responsable confirma CI verde en Windows Node 24/26 A/B, Linux y macOS tras publicar `b1e61aa6f910929271419ecae9232ffe99a47022`. Los incidentes Windows quedan resueltos. La revisión de §6.3 identifica una discrepancia pendiente entre su exigencia de ejecutar proyecciones de variantes y el piloto actual sin BD. La matriz de T-018 recoge esta cuestión y distingue las mutaciones RLS futuras de las protecciones actuales.
+
 ---
+
+**Incremento residual de T-018 (pendiente de validación integral):** se implementan las proyecciones de SV-1 a SV-7 conservando BD y Docker, la separación `test:unit`/`test:db` y el informe automático combinatorio y JS/TS. Los nombres de scripts son una elección local de implementación, dado que el informe original INV-06 no está disponible en el repositorio. `npm test` conserva su cobertura y los modos funcional/auditoría conservan su distinción. El informe marca variantes no ejecutadas y parejas incompletas, y el arnés falla ante una verificación obligatoria fallida o infraestructura ausente. Las proyecciones quedan pendientes de acreditación en la lista de seguridad hasta ejecutar la validación real. D-052 sigue pendiente de asignar los controles negativos de i18n. Evidencia focalizada y comandos de validación en la matriz de T-018.
+
+**Validación local posterior del incremento:** el responsable confirma `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` sin errores. No se localizó un informe persistido por variante para contrastar la ejecución de las siete proyecciones y el piloto. Se conserva pendiente su acreditación detallada y CI remota. T-018 continúa EN PROGRESO.
+
+**Estado vigente de integración (2026-11-19):** T-018 queda IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE tras corregir Docker en SV-5 conforme a §6.3. Tres pruebas focalizadas, tipos, lint y formato aprobados; no se repite la validación integral ni se acredita ejecución real de SV-5 corregida. La integración en main está autorizada sin esperar CI; no equivale a aceptación definitiva. Se conserva pendiente la evidencia detallada por variante y la actualización de la lista acreditada. D-052 mantiene abierta la asignación de N1–N7, sin reabrir T-013d ni inventar aprobación para T-013e o T-018.
 
 ### D-066 — Versiones exactas y cadencia de actualización
 
@@ -1741,6 +1755,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 **Motivo:** Las investigaciones INV-05b e INV-08 demostraron que la derivación por AST/Babel proporciona diffs limpios, conserva fidelidad con el código original, elimina la duplicación manual y garantiza paridad estricta entre variantes sin añadir latencia de generación al CLI ni dependencias a los proyectos generados.
 
 **Consecuencias:** Se formaliza la tarea T-023 para implementar el derivador y `verify:sync`, la cual debe completarse y verificarse antes de abordar la codificación de las plantillas de Auth y RBAC.
+
+**Continuidad de trabajo (2026-11-17):** T-023 puede continuar de forma independiente de la validación pendiente de T-018. Sus resultados específicos no sustituyen las verificaciones globales, que pueden seguir condicionadas por el bloqueo de auditoría y la integración CI de T-018. Esta continuidad no cierra T-018, no reduce sus controles ni elimina los prerrequisitos de Auth/RBAC.
 
 ---
 

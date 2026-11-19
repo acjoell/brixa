@@ -76,7 +76,8 @@ El CLI permite cualquier combinación de las capacidades soportadas, pero marca 
 ## Limitaciones
 
 - **La versión 0.1.0 no incluye autenticación, RBAC ni multitenancy.** Los proyectos generados no tienen control de acceso: no los despliegues con datos sensibles sin añadirlo.
-- **Compatibilidad verificada en GitHub Actions:** Ubuntu, Windows y macOS con Node.js 24 y 26, para las variantes que no requieren Docker ni PostgreSQL. PostgreSQL y Docker solo se verifican en Linux con Node.js 24, mediante un job de CI que se lanza manualmente. El CLI interactivo y la instalación del paquete en un Windows real no se han probado: la CI verifica el generador y los proyectos generados.
+- **Compatibilidad histórica verificada en GitHub Actions:** Ubuntu, Windows y macOS con Node.js 24 y 26, para las variantes que no requieren Docker ni PostgreSQL. PostgreSQL y Docker solo se verifican en Linux con Node.js 24, mediante un job de CI que se lanza manualmente. El CLI interactivo y la instalación del paquete en un Windows real no se han probado: la CI verifica el generador y los proyectos generados.
+- **Estado de CI al 17/11/2026:** T-018 sigue en implementación. La validación global actual está bloqueada por la auditoría estricta de una vulnerabilidad externa de picomatch (GHSA-fc5q-39xc-vjpf, sin parche oficial confirmado en esa fecha) y queda por confirmar en Windows una corrección local del test de creación de procesos. Los resultados locales satisfactorios no equivalen a una CI completamente verde. Se mantienen los controles sin excepciones; evidencia y pendientes en [T-018](.agents/rules/TASKS_POST_MVP.md#t-018--infraestructura-de-verificación-avanzada).
 - Los proyectos de solo frontend se verifican con compilación y lint, sin arrancar un servidor. En la aplicación completa sí se arranca el servidor de desarrollo de Vite.
 - La plantilla de frontend no incluye pruebas.
 - No hay pruebas automáticas en un navegador real, incluido el selector de idioma.
@@ -105,6 +106,8 @@ npm run verify:generated
 ```bash
 npm run verify:generated -- frontend+ts fullstack+js+sqlite+i18n
 ```
+
+`npm run verify:security` ejecuta el piloto de T-018 (en implementación): genera backends temporales para `backend+ts`, `backend+js` y `fullstack+ts`, instala sus dependencias y exige una línea base verde antes de probar tres mutaciones por variante (HTTP 500, rechazo de `Origin: null` y CSP). Solo una aserción de seguridad esperada cuenta como `MUTATION_DETECTED`; una mutación sobreviviente o un error de infraestructura hacen fallar el comando. Los archivos se restauran byte a byte y los directorios temporales se eliminan. Requiere acceso a npm y puertos HTTP locales; no requiere Docker. La integración en CI y la validación multiplataforma del piloto siguen pendientes de revisión. `npm run verify:all` ejecuta ambas verificaciones en secuencia.
 
 La documentación de diseño, las decisiones y las tareas del proyecto están en `.agents/rules/`.
 

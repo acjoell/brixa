@@ -58,3 +58,5 @@ cp .env.example .env
 - `npm run format:check`: Verifica el formato del código con Prettier.
 - `npm run typecheck`: Valida los tipos TypeScript con `tsc --noEmit`.
 - `npm test`: Ejecuta las pruebas automatizadas con Vitest.
+- `npm run test:unit`: Ejecuta las pruebas rápidas excluyendo `tests/db.test.ts`.
+- Con base de datos, `npm run test:db` ejecuta la prueba de conexión con `DATABASE_URL` configurada. Conserva la omisión existente si esa variable falta. `npm test` incluye ambos grupos.
