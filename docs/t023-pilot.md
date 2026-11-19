@@ -5,22 +5,27 @@ desaparecido tras la retirada oficial del aviso el 2026-11-18. La ejecución
 integral local registra 32 variantes y 47 auditorías estrictas correctas. Los
 resultados del 2026-11-17 se conservan abajo como historial; ya no describen un
 bloqueo vigente. T-023 continúa EN PROGRESO por los criterios restantes.
+El responsable confirmó CI remota verde del piloto committed. El incremento
+React main descrito más abajo tiene comprobaciones ligeras propias y validación
+integral manual confirmada por el responsable; la CI de este incremento está pendiente.
 
 ## Alcance y uso
 
-Piloto limitado a `database-postgres`: `src/db/client`, `src/db/migrate`,
-`src/db/schema`, `tests/db.test` y `vitest.config`. TypeScript es la fuente;
+Cobertura explícita: `database-postgres` (`src/db/client`, `src/db/migrate`,
+`src/db/schema`, `tests/db.test`, `vitest.config`) y el único par React
+`frontend-react-ts/src/main.tsx` → `frontend-react-js/src/main.jsx`. TypeScript es la fuente;
 JavaScript permanece versionado. El generador sigue copiando archivos desde disco.
 
-- `npm run derive:js`: actualiza estos cinco archivos JavaScript.
+- `npm run derive:js`: actualiza estos seis archivos JS/JSX.
 - `npm run check:sync` o `npm run verify:sync`: compara el contenido exacto sin
   escribir, ejecutando también ESLint sobre la derivación esperada con la
-  configuración real del backend JavaScript. Cualquier warning o error falla.
+  configuración real del backend JavaScript y lint ligero de main.jsx.
+  Cualquier warning o error falla.
 - CI ejecuta `verify:sync` en su matriz existente; no certifica otros overlays.
 
 Se mantienen manualmente `package.json`, `drizzle.config.{ts,js}`, Dockerfiles,
 ESLint y archivos exclusivos TS. No se cambia ninguna de estas configuraciones.
-No hay reescrituras de literales: los imports relativos actuales ya usan `.js`,
+En PostgreSQL no hay reescrituras de literales: los imports relativos ya usan `.js`,
 y las referencias de migración no contienen extensiones dependientes del lenguaje.
 El import explícito de `URL` se incorpora a TS para preservar el JS existente.
 Los cinco archivos derivados coinciden byte a byte con el JavaScript anterior.
@@ -38,8 +43,8 @@ antes del formateo para minimizar el diff. No se transforma código mediante reg
 El piloto comprueba la existencia de referencias locales runtime mediante AST
 (imports, reexports e imports dinámicos literales), exige `.js` y contempla los
 archivos del backend base que proporciona la composición. No resuelve de forma
-general los exports nominales ni los subpaths de paquetes externos. No soporta
-JSX/TSX: ahora los rechaza explícitamente; no se amplía a frontend.
+general los exports nominales ni los subpaths de paquetes externos. El incremento
+React habilita TSX/JSX y adapta únicamente referencias de módulos relativas por AST.
 
 ## Prerrequisitos
 
@@ -265,27 +270,120 @@ de ejecutar los comandos. La auditoría estricta del arnés y los pasos de CI
 permanecen intactos. No existe verify:all en esta rama, no se incorporó T-018 y
 no se ejecutó CI remota ni la matriz Windows/macOS/Node 26.
 
+## Incremento mínimo React main: TSX → JSX (2026-11-19)
+
+D-098 exige preservar JSX y usar TypeScript como fuente del código aplicativo.
+Se eligió únicamente `main`: elimina la aserción no nula de `getElementById` y
+adapta `./App.tsx` a `./App.jsx`, manteniendo exactamente su ejecución. El diff
+del main JavaScript anterior es solo de comillas y punto y coma de Prettier.
+
+Babel usa `isTSX` del plugin TypeScript ya instalado. Conserva JSX sin convertirlo
+a llamadas ni añadir imports de jsx-runtime: Vite y @vitejs/plugin-react siguen
+compilándolo con las configuraciones existentes (`react-jsx` en TypeScript).
+La sincronización comparte comparación, lint y validación de referencias con
+PostgreSQL. No se toca el generador, package.json, lockfile, Vite, ESLint de las
+plantillas ni CI; el verify:sync ya integrado cubre automáticamente el nuevo par.
+
+Solo en fuentes JSX/TSX se adaptan imports, reexports e imports dinámicos literales
+relativos terminados en `.tsx`/`.ts` a `.jsx`/`.js`. Los textos JSX, strings de
+aplicación y comentarios quedan intactos. Se valida la existencia de las
+referencias actuales de main (.jsx y .css), sin resolver universalmente módulos.
+App.jsx y useAppContent.jsx siguen manuales; este último tiene además un texto
+visible `src/App.jsx` que difiere de su fuente TSX y requiere tratamiento explícito
+cuando se incorpore. No se han derivado otros archivos frontend u overlays.
+
+Comprobaciones ejecutadas, todas con código 0:
+
+- `npm test -- scripts/derive-react.test.js scripts/derive-postgres.test.js`:
+  16 casos, incluidos cinco nuevos. Cubren fragmentos/JSX, genéricos y tipos
+  borrados, import type, imports/reexports/dynamic import, strings y texto JSX
+  intactos, comentarios/marcadores, determinismo, edición manual, archivo ausente,
+  restauración, fuente modificada, referencia inexistente y lint negativo.
+- Comparación del main real con la salida de TypeScript en modo JSX Preserve,
+  normalizada sintácticamente; no es una prueba de render ni un typecheck React.
+- Prueba focalizada del compositor de inserciones i18n sobre el main derivado,
+  sin generación de proyectos.
+- `typecheck` de Brixa, `lint`, `format:check`, `verify:sync`, `git diff --check`.
+
+El lint ligero JSX usa @eslint/js recommended y el parser TypeScript existente;
+comprueba main.jsx sin instalar paquetes. No sustituye el lint completo del
+proyecto React con react-hooks/react-refresh, cuyos plugins no están instalados
+en Brixa. Tampoco se ejecutó el build/typecheck de la plantilla frontend, que
+requiere sus dependencias React. No hubo instalaciones, nuevas dependencias,
+auditorías omitidas, matrices ni ejecuciones integrales en este incremento.
+
+Validación manual realizada por el responsable, que confirmó ambos comandos sin
+errores (no repetida por el agente en la revisión de commit):
+
+```sh
+npm run verify:generated -- frontend+ts frontend+js
+npm run verify:generated -- frontend+ts+i18n fullstack+js+sqlite+i18n
+```
+
+Estos comandos cubren ambas bases y la inserción de i18n para TS/JS usando
+variantes ya existentes. Incluyen sus auditorías, build, tipos donde corresponden,
+lint React y funcionamiento. No se recibieron logs ni códigos numéricos adicionales;
+la evidencia se atribuye a la confirmación del responsable. La CI verde confirmada
+corresponde al piloto previo; no acredita este diff nuevo. T-023 sigue EN PROGRESO.
+
+## Inventario de cobertura restante para D-098
+
+La inspección estática identifica 31 pares TS/TSX → JS/JSX existentes. Seis están
+cubiertos (cinco de PostgreSQL y React main); dos son Drizzle config, excluidos
+expresamente por D-098. Quedan **23 pares** sin sincronización automática:
+
+| Directorios fuente → destino bajo src/templates/ | Pares manuales pendientes |
+|---|---|
+| backend-express-ts → backend-express-js | src/app, src/config, src/errors, src/index, src/redact; tests/config.test, tests/cors.test, tests/errors.test, tests/health.test (.ts → .js): 9 |
+| frontend-react-ts → frontend-react-js | src/App y src/useAppContent (.tsx → .jsx): 2 |
+| database-sqlite/ts → database-sqlite/js | src/db/client, src/db/migrate, src/db/schema y tests/db.test (.ts → .js): 4 |
+| api-docs/ts → api-docs/js | src/docs/swagger, src/docs/validate-env y tests/docs.test (.ts → .js): 3 |
+| i18n/ts → i18n/js | src/i18n (.ts → .js), src/components/LanguageSelector y src/useAppContent (.tsx → .jsx): 3 |
+| Configuraciones sin divergencia estructural actual | frontend-react-ts/vite.config.ts → frontend-react-js/vite.config.js; database-sqlite/ts/vitest.config.ts → database-sqlite/js/vitest.config.js: 2 |
+
+Los primeros 21 pares son código aplicativo o pruebas y entran directamente en
+el modelo fuente TS de D-098: no son ampliaciones opcionales del producto. Las dos
+configuraciones restantes son equivalentes y no tienen una excepción documentada;
+deben entrar en sincronización o recibir una justificación concreta de divergencia,
+sin asumir una excepción general para cualquier archivo de configuración.
+
+Los cuatro fragmentos api-docs/_fragments/{app.imports,app.routes,index.imports,
+index.startup} están duplicados y son idénticos entre ts/js. Son código de
+composición, sin extensión TS/JS: deben conservar una fuente/control de igualdad
+al incorporar api-docs, sin exigir un nuevo formato o reescritura del compositor.
+También son idénticas las dos copias i18n/{ts,js}/scripts/check-i18n.mjs; ya son
+JavaScript en ambos árboles. D-098 no exige convertirlas artificialmente a TS ni
+deduplicarlas como condición de la derivación TS → JS.
+
+Se mantienen las excepciones aprobadas para package.json, Dockerfiles, ESLint,
+Drizzle config y archivos exclusivamente de tipos/TypeScript, incluido
+frontend-react-ts/src/appContent.types.ts. CSS, assets, HTML, locales JSON,
+openapi.json y documentación no son pares de código TS → JS. Su deduplicación,
+un resolver universal o capacidades futuras de Auth/RBAC no son requisitos de
+cierre de T-023. Sí se exige que los imports de los pares incorporados sean
+válidos, con import type y excepciones explícitas para literales/rutas divergentes.
+
 ## Matriz de aceptación T-023 / D-098 y D-066
 
 | Requisito | Estado | Evidencia / pendiente |
 |---|---|---|
-| Derivación AST determinista, comentarios y marcadores | Cumplido en el piloto | Cinco salidas idénticas, Babel/Prettier y tests |
+| Derivación AST determinista, comentarios y marcadores | Cumplido en la cobertura actual | PostgreSQL y React main; Babel/Prettier y pruebas focalizadas |
 | check:sync / verify:sync solo lectura y detección de deriva | Cumplido en el piloto | Prueba CLI 1 → derive 0 → check 0; tests de archivos ausentes y TS cambiado |
 | Fallo ante imports inválidos | Parcial | Parser y referencias locales cubiertos; resolución general de paquetes y exports nominales pendiente |
-| JS versionado, lint y pruebas de plantillas | Cumplido en el piloto | JS existente en Git; lint y 47 pruebas por backend en cuatro variantes del arnés funcional |
+| JS versionado, lint y pruebas de plantillas | Cumplido en la cobertura actual | PostgreSQL verificado y cuatro variantes React aprobadas manualmente según el responsable |
 | CLI copia preconstruidos; sin Babel en proyectos generados | Cumplido en el piloto | Generación real de ambos proyectos y revisión de manifests; generador intacto |
 | Typecheck TS y paridad funcional PostgreSQL TS/JS | Cumplido localmente | Revalidación integral del 2026-11-19 con auditorías satisfactorias |
-| Paridad completa mediante verify:generated | Completada localmente; CI remota pendiente | Registro de 32/32 variantes y 47/47 auditorías; repetición integral del piloto con salida 0 capturada |
+| Paridad completa mediante verify:generated | Piloto previo y React comprobados; cobertura completa pendiente | Registro previo de 32/32 y 47/47 auditorías; cuatro variantes React confirmadas por el responsable; nuevos pares aún no incorporados |
 | PostgreSQL vía Docker | Cumplido localmente | BD real, imágenes y Compose backend/fullstack JS/TS, incluida documentación de API |
-| JSX/TSX preservado | Pendiente explícito | Rechazado con error y tests; fuera de este piloto |
-| Integración de verify:sync en CI | Implementada, ejecución remota pendiente | Paso en matriz existente; ejecución local correcta |
-| Alcance completo T-023 / integración posterior con T-018 | Pendiente | Solo database-postgres; no se importó T-018 ni se expandió el piloto |
+| JSX/TSX preservado | Cumplido en main/fixtures y variantes manuales comprobadas | JSX conservado e imports adaptados por AST; pendiente aplicar la capacidad a los pares TSX del inventario |
+| Integración de verify:sync en CI | CI verde del piloto confirmada por responsable | Nuevo par incluido por el mismo comando; CI del incremento pendiente |
+| Alcance completo T-023 / integración posterior con T-018 | Pendiente | 21 pares aplicativos/pruebas y dos configuraciones del inventario aún manuales; controlar fragmentos api-docs al incorporarlos; T-018 intacta |
 | D-066: versiones directas exactas | Cumplido en componentes revisados | 8/14 dependencias en backend JS/TS y 3/4 en overlay JS/TS; ningún rango directo |
 | D-066: imágenes exactas y sin lockfile generado por CLI | Cumplido en plantillas revisadas | node:24.22.1-slim y postgres:17.4-alpine; ambas generaciones inicialmente sin lockfile |
 | D-066: revisión de seguridad y validación antes de adoptar actualizaciones | Sin bloqueo externo de auditoría vigente | Auditorías y ejecución integral local satisfactorias; ninguna dependencia actualizada |
 
 **Recomendación:** mantener T-023 **EN PROGRESO**. El bloqueo externo de picomatch
 ha desaparecido y la validación integral local ya tiene evidencia positiva sin
-exenciones. Siguen pendientes CI remota y los criterios de la tarea completa que
-exceden el piloto PostgreSQL, incluidos JSX/TSX y la cobertura de imports al
-ampliar el alcance. No se declara cerrada T-023 ni se desbloquea Auth/RBAC.
+exenciones. JSX/TSX ya tiene un caso real mínimo validado también manualmente;
+faltan CI del incremento y la cobertura del inventario con sus imports y pruebas
+negativas de sincronización. No se declara cerrada T-023 ni se desbloquea Auth/RBAC.

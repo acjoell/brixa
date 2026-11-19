@@ -109,11 +109,11 @@ export const lazy = async (): Promise<number> => (await import("./dependency.mjs
   });
 
   it.each(["fixture.tsx", "fixture.jsx"])(
-    "declara JSX/TSX fuera del piloto: %s",
+    "preserva JSX sin compilarlo para Vite: %s",
     async (filename) => {
-      await expect(derive("export const View = () => <div />;", filename)).rejects.toThrow(
-        "JSX/TSX fuera del alcance",
-      );
+      const result = await derive("export const View = () => <div />;", filename);
+      expect(result).toContain("<div />");
+      expect(result).not.toContain("React.createElement");
     },
   );
 });
