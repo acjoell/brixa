@@ -57,7 +57,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | COMPLETADA | — |
 | INV-08 | COMPLETADA | Piloto técnico realizado; decisión P-013 aprobada en D-098 (límites técnicos en Docker y PostgreSQL real pendientes en etapas de integración) |
-| T-023 | PENDIENTE | Decisión D-098 (INV-08 completada); requisito previo a la implementación de Auth/RBAC en ambas variantes (T-014a, T-014b1) |
+| T-023 | COMPLETADA | D-098 implementada y verificada en ambas variantes de lenguaje y en CI |
 | T-014-0 | COMPLETADA (DISEÑO) | Decisiones consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; diseño completado sin código; validaciones técnicas de implementación diferidas a T-014a/c |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
@@ -267,7 +267,17 @@ Notas:
 
 ### T-023 — Derivador JavaScript/TypeScript y verificación de sincronización (verify:sync)
 
-**Estado:** PENDIENTE
+**Estado:** COMPLETADA. Los 29 pares y cuatro fragmentos están sincronizados. Pasaron 26 pruebas del derivador, la prueba de composición Vite, tipos, lint y formato. El responsable confirmó la validación integral (34/34 pasos, 32 variantes, código 0 en 902,55 s), las auditorías y todos los jobs de CI. [Matriz de aceptación e historial](../../docs/t023-pilot.md).
+
+**Historial previo al cierre.** Los estados pendientes de las siguientes entradas corresponden a la revisión indicada.
+
+**Revalidación (2026-11-19):** npm audit reporta cero vulnerabilidades en Brixa y en las variantes generadas, manteniendo picomatch 4.0.7 y los controles estrictos. La ejecución completa terminó con mensaje de éxito en 1152,19 s, sin omisiones ni errores; su código numérico de shell no se recuperó por el reinicio del servidor. La repetición integral de backend PostgreSQL JS/TS terminó con código 0 en 28,77 s. Los únicos avisos restantes son dos deprecaciones de @esbuild-kit y la notificación de nueva versión de npm, sin actualizaciones aplicadas. No se cambiaron dependencias, lockfiles ni código funcional. Los resultados del 2026-11-17 siguientes se conservan como historial, no como bloqueo vigente.
+
+**Actualización de validación (2026-11-17):** el mismo arnés dispone de modos explícitos funcional y auditoría, conservando el modo integral estricto por defecto. `verify:generated:functional` completó backend y fullstack JS/TS con PostgreSQL, más backend Docker JS/TS (seis variantes). Las auditorías JS/TS independientes y el comando integral conservan código 1 por picomatch. Tipos, lint, formato, sincronización y 172 pruebas locales correctos; sin defectos adicionales del derivador. CI informa funcionamiento y auditoría en pasos separados, sin tolerar errores de seguridad; ejecución remota pendiente. T-023 continúa EN PROGRESO; criterios originales intactos y T-018 independiente.
+**Incremento React main (2026-11-19):** derivación TSX → JSX habilitada con el Babel existente y sincronización compartida, limitada a main.tsx/main.jsx. Preserva JSX para Vite y adapta referencias relativas por AST; el diff de main.jsx es solo de formato. Pasan 16 pruebas focalizadas (cinco nuevas), tipos de Brixa, lint, formato y verify:sync. La CI del piloto previo está verde según confirmación del responsable; el incremento nuevo requiere validación manual/CI. No se ejecutaron instalaciones ni verificaciones integrales, no se añadieron dependencias y T-018 sigue intacta. App/useAppContent y los demás pares de código/pruebas permanecen fuera de este incremento. Véase el informe para los comandos manuales y los límites del lint ligero JSX. T-023 continúa EN PROGRESO.
+
+**Revisión para commit React:** el responsable confirmó sin errores `verify:generated -- frontend+ts frontend+js` y `verify:generated -- frontend+ts+i18n fullstack+js+sqlite+i18n`; no se repitieron. La revisión estática delimita 21 pares de código aplicativo/pruebas y dos configuraciones equivalentes aún sin derivación/sincronización, detallados en docs/t023-pilot.md, además del control de igualdad de cuatro fragmentos api-docs al incorporar ese overlay. Son cobertura de D-098 pendiente; no se exige un resolver universal ni código futuro de Auth/RBAC. CI del incremento pendiente; T-023 sigue EN PROGRESO. No se implementaron nuevas derivaciones durante esta revisión.
+
 **Aprobación:** Aprobado en alcance y arquitectura (D-098 tras INV-05b, su complemento e INV-08).
 **Dependencias:** D-098. Requisito previo obligatorio para la implementación de módulos de Auth y RBAC (T-014a, T-014b1).
 
@@ -294,7 +304,7 @@ Notas:
 - Paridad funcional completa entre variantes verificada mediante el arnés existente (`verify:generated`).
 
 **Límites conocidos y pendientes:**
-- El piloto técnico INV-08 validó la derivación sobre overlays y código aplicativo; no presupone la comprobación integral en entornos Docker ni sobre bases de datos PostgreSQL reales (verificaciones que continúan pendientes en sus respectivas etapas).
+- El piloto INV-08 cubrió overlays y código aplicativo. T-023 verificó posteriormente Docker y PostgreSQL real mediante el arnés integral.
 - La integración de T-023 debe completarse y verificarse antes de comenzar la codificación de las plantillas de Auth y RBAC (T-014a, T-014b1).
 
 ---
@@ -303,7 +313,7 @@ Notas:
 
 **Estado:** COMPLETADA (DISEÑO DOCUMENTAL) (2026-11-17; todas las decisiones estructurales y operativas consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; tarea completada sin código ni modificaciones de plantillas; las verificaciones técnicas de implementación se transfieren a T-014a y T-014c).
 **Aprobación:** Aprobado (arquitectura y decisiones confirmadas por el responsable).
-**Dependencias:** Ninguna pendiente para el diseño. Prerrequisito cumplido para las especificaciones de T-014a, T-014b1 y T-014c. (Nota: la implementación de plantillas de Auth/RBAC continúa bloqueada por T-023 y T-018).
+**Dependencias:** Ninguna pendiente para el diseño. Prerrequisito cumplido para las especificaciones de T-014a, T-014b1 y T-014c. (Nota: la implementación de plantillas de Auth/RBAC continúa condicionada por T-018 tras completarse T-023).
 
 **Objetivo:** cerrar por escrito las decisiones estructurales que, tomadas tarde, obligarían a rehacer plantillas. Brixa genera proyectos nuevos (D-005): el riesgo no es migrar datos de usuarios, sino rehacer el código de las plantillas.
 
@@ -483,7 +493,7 @@ Notas:
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018 y T-023)
+**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018; T-023 completada)
 **Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión pendientes.
 **Dependencias:** T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync en verde antes de implementar plantillas de Auth en ambas variantes). Decisiones de diseño consolidadas en D-080 a D-098. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069, D-077, D-078).
 
@@ -562,7 +572,7 @@ Notas:
 
 ### T-014b1 — Motor RBAC, API administrativa y auditoría mínima
 
-**Estado:** BLOQUEADA (por T-014a, T-014-0, T-018 y T-023)
+**Estado:** BLOQUEADA (por T-014a, T-014-0, T-018; T-023 completada)
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-014a, T-014-0, T-018 y T-023.
 

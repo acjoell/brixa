@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+
 import express from "express";
 import { app } from "../src/app.js";
 import { openapiSpec, setupApiDocs } from "../src/docs/swagger.js";

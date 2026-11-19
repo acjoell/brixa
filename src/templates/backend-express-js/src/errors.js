@@ -1,4 +1,5 @@
 import { inspect } from "node:util";
+
 import { redact } from "./redact.js";
 
 export class ValidationError extends Error {

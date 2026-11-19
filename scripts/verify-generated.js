@@ -16,6 +16,9 @@
  *
  * No se ejecuta dentro de npm test porque es lento y usa red.
  * process.exit solo se llama aquí (fuera de src/).
+ * --functional-only verifica funcionamiento sin evaluar seguridad.
+ * --audit-only instala y audita sin ejecutar comprobaciones funcionales.
+ * Sin estos flags conserva la verificación integral estricta.
  */
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -27,6 +30,17 @@ import { performance } from "node:perf_hooks";
 import { verifyI18n } from "./verify-i18n.js";
 
 const suiteStartTime = performance.now();
+let verificationMode = "all";
+
+export function getVerificationMode(args) {
+  const modes = args.filter((arg) => arg === "--functional-only" || arg === "--audit-only");
+  if (modes.length > 1) throw new Error("Selecciona un único modo de verificación.");
+  return modes[0] === "--functional-only"
+    ? "functional"
+    : modes[0] === "--audit-only"
+      ? "audit"
+      : "all";
+}
 
 function formatDuration(ms) {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -103,6 +117,17 @@ function run(cmd, args, cwd, extraEnv = {}, customTimeoutMs = null) {
       `✖ Falló "${label}" tras ${formatDuration(duration)}${isTimeout ? ` (TIMEOUT alcanzado: ${formatDuration(timeoutMs)})` : ""} (T+${getElapsedSuite()})`,
     );
     throw err;
+  }
+}
+
+export function prepareDependencies(projectDir, mode = "all") {
+  run("npm", ["install", "--no-audit"], projectDir);
+  if (mode === "functional") {
+    console.log(
+      "FUNCIONAL: auditoría no evaluada; requiere verify:generated:audit para seguridad.",
+    );
+  } else {
+    run("npm", ["audit", "--audit-level=moderate"], projectDir);
   }
 }
 
@@ -755,10 +780,8 @@ async function verifyDockerVariant(
       fs.writeFileSync(envFile, envLines.join("\n") + "\n", "utf-8");
     }
 
-    run("npm", ["install", "--no-audit"], backendDir);
-    run("npm", ["audit", "--audit-level=moderate"], backendDir);
-    run("npm", ["install", "--no-audit"], frontendDir);
-    run("npm", ["audit", "--audit-level=moderate"], frontendDir);
+    prepareDependencies(backendDir, verificationMode);
+    prepareDependencies(frontendDir, verificationMode);
 
     if (database === "postgres") {
       const schemaFile = path.join(
@@ -992,8 +1015,7 @@ export const testItems = sqliteTable("test_items", {
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
-  run("npm", ["install", "--no-audit"], projectDir);
-  run("npm", ["audit", "--audit-level=moderate"], projectDir);
+  prepareDependencies(projectDir, verificationMode);
 
   if (database === "postgres") {
     const schemaFile = path.join(
@@ -1168,6 +1190,16 @@ async function verifyVariant(variant, step, total, pgContext) {
     await generateProject(modality, language, projectDir, database, docker, apiDocs, i18n);
     console.log(`Proyecto generado en: ${projectDir}`);
 
+    if (verificationMode === "audit") {
+      const directories =
+        modality === "fullstack"
+          ? [path.join(projectDir, "frontend"), path.join(projectDir, "backend")]
+          : [projectDir];
+      for (const directory of directories) prepareDependencies(directory, verificationMode);
+      console.log(`✔ ${label}: auditoría correcta; funcionamiento no evaluado.`);
+      return;
+    }
+
     if (docker) {
       if (!isDockerComposeV2Available()) {
         console.log("\n========================================================");
@@ -1196,14 +1228,12 @@ async function verifyVariant(variant, step, total, pgContext) {
       }
 
       // Frontend: install, audit, build, lint
-      run("npm", ["install", "--no-audit"], frontendDir);
-      run("npm", ["audit", "--audit-level=moderate"], frontendDir);
+      prepareDependencies(frontendDir, verificationMode);
       run("npm", ["run", "build"], frontendDir);
       run("npm", ["run", "lint"], frontendDir);
 
       // Backend: install, audit, build (si TS), lint, typecheck (si TS), test
-      run("npm", ["install", "--no-audit"], backendDir);
-      run("npm", ["audit", "--audit-level=moderate"], backendDir);
+      prepareDependencies(backendDir, verificationMode);
       if (language === "ts") {
         run("npm", ["run", "build"], backendDir);
         run("npm", ["run", "typecheck"], backendDir);
@@ -1332,8 +1362,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         verifyNoDatabaseArtifacts(projectDir);
       }
 
-      run("npm", ["install", "--no-audit"], projectDir);
-      run("npm", ["audit", "--audit-level=moderate"], projectDir);
+      prepareDependencies(projectDir, verificationMode);
       if (modality === "frontend" || language === "ts") {
         run("npm", ["run", "build"], projectDir);
       }
@@ -1402,7 +1431,7 @@ async function verifyVariant(variant, step, total, pgContext) {
 
 /** Verifica integración con PostgreSQL: schema, db:generate, db:migrate, existencia de tabla y tests. */
 async function verifyDatabaseIntegration(backendDir, language, pgContext, variantLabel) {
-  // Nota: la auditoría npm ya fue realizada inmediatamente tras la instalación en verifyVariant.
+  // La auditoría se ejecuta en modo integral o audit; el modo functional no la evalúa.
 
   if (!pgContext.available || !pgContext.databaseUrl) {
     console.log("\n========================================================");
@@ -1476,7 +1505,7 @@ await client.end();
 
 /** Verifica integración con SQLite: schema, db:generate, db:migrate (incluso con data/ borrada), existencia de tabla y tests. */
 async function verifySqliteIntegration(backendDir, language) {
-  // Nota: la auditoría npm ya fue realizada inmediatamente tras la instalación en verifyVariant.
+  // La auditoría se ejecuta en modo integral o audit; el modo functional no la evalúa.
 
   const databaseUrl = "file:./data/app.db";
 
@@ -1645,7 +1674,13 @@ async function main() {
   }
 
   // Parseo de argumentos de línea de comandos y variables de entorno para partición
-  const rawArgs = process.argv.slice(2);
+  verificationMode = getVerificationMode(process.argv.slice(2));
+  console.log(
+    `Modo: ${verificationMode}${verificationMode === "functional" ? " (seguridad NO EVALUADA)" : ""}`,
+  );
+  const rawArgs = process.argv
+    .slice(2)
+    .filter((arg) => arg !== "--functional-only" && arg !== "--audit-only");
   let cliPartition = null;
   const filterArgs = [];
 
@@ -1763,7 +1798,9 @@ async function main() {
   }
 
   // El contenedor de PostgreSQL solo se arranca si alguna variante seleccionada lo necesita.
-  const needsPostgres = variantsToRun.some((v) => v.database === "postgres" && !v.docker);
+  const needsPostgres =
+    verificationMode !== "audit" &&
+    variantsToRun.some((v) => v.database === "postgres" && !v.docker);
   const pgContext = needsPostgres
     ? await setupPostgres()
     : { databaseUrl: null, stop: async () => {}, available: true };
@@ -1783,7 +1820,7 @@ async function main() {
     );
   } else {
     console.log(
-      `\n=== ${total}/${total}  ✔ verify:generated completado con éxito en ${formatDuration(totalElapsed)} ===`,
+      `\n=== ${total}/${total}  ✔ verify:generated (${verificationMode}) completado con éxito${verificationMode === "functional" ? "; seguridad NO EVALUADA" : ""} en ${formatDuration(totalElapsed)} ===`,
     );
   }
 }
@@ -1793,7 +1830,10 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    console.error(`\n✖ verify:generated falló tras ${getElapsedSuite()}:`, err.message ?? err);
+    console.error(
+      `\n✖ verify:generated (${verificationMode}) falló tras ${getElapsedSuite()}:`,
+      err.message ?? err,
+    );
     process.exit(1);
   });
 }

@@ -1,6 +1,6 @@
 import { inspect } from "node:util";
 import type { Request, Response, NextFunction } from "express";
-import { z } from "zod";
+import type { z } from "zod";
 import { redact } from "./redact.js";
 
 export interface ValidationIssue {

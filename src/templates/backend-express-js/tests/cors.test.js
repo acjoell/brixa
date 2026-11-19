@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+
 import { app } from "../src/app.js";
 import { parseConfig } from "../src/config.js";
 

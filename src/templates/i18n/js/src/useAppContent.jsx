@@ -1,8 +1,8 @@
-import { useTranslation, Trans } from 'react-i18next'
-import { LanguageSelector } from './components/LanguageSelector.jsx'
+import { useTranslation, Trans } from "react-i18next";
+import { LanguageSelector } from "./components/LanguageSelector.jsx";
 
 export function useAppContent() {
-  const { t } = useTranslation()
+  const { t } = useTranslation();
   return {
     LanguageSelector,
     t: (key, params) => t(key, params),
@@ -15,5 +15,5 @@ export function useAppContent() {
         }}
       />
     ),
-  }
+  };
 }

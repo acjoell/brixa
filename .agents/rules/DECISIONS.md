@@ -1708,7 +1708,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ### D-098 — Estrategia JavaScript/TypeScript: Híbrido versionado con derivación determinista desde TypeScript
 
-**Estado:** Confirmada (2026-11-16; fundamentada en INV-05b, su complemento e INV-08; implementación pendiente en T-023).
+**Estado:** Confirmada (2026-11-16; fundamentada en INV-05b, su complemento e INV-08; implementación completada en [T-023](../../docs/t023-pilot.md)).
 
 **Contexto:** Mantener de forma manual plantillas duplicadas completas en JavaScript y TypeScript genera costes crecientes de sincronización y riesgo de discrepancias lógicas a medida que se incorporan capacidades complejas (Auth, RBAC, multitenancy). Era necesario definir un modelo que redujera la duplicación manteniendo las garantías de legibilidad, calidad y paridad funcional de ambas variantes, sin penalizar a los proyectos generados ni añadir sobrecarga de compilación al CLI.
 
@@ -1726,7 +1726,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
   - **Cero dependencias adicionales:** los proyectos JavaScript generados no incorporan dependencias adicionales por este mecanismo.
   - **Paridad y garantías idénticas:** se mantienen intactas todas las garantías de seguridad y paridad funcional en ambas variantes (JavaScript y TypeScript), especialmente para Auth, RBAC y multitenancy.
 
-- **Requisitos de sincronización y validación (a implementar en T-023):**
+- **Requisitos de sincronización y validación (implementados en T-023):**
   - **Comando de derivación explícito:** script/herramienta en el repositorio para actualizar los archivos JavaScript derivados.
   - **Comando `verify:sync` (solo lectura):** comprobación determinista que compare la derivación esperada con los archivos JavaScript versionados, verificando contenido y detectando cualquier modificación de lógica interna.
   - **Integración de `verify:sync` en CI:** bloqueo automático de pull requests si se detecta desincronización entre TypeScript y JavaScript.
@@ -1736,9 +1736,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
     - Verificación de combinaciones y overlays mediante el arnés existente de Brixa (`verify:generated`).
     - Fallo explícito ante imports inválidos, diferencias de sincronización o archivos derivados incorrectos.
 
-**Límites conocidos y pendientes:**
-- El piloto técnico INV-08 validó la viabilidad de la derivación sobre overlays y código aplicativo; no presupone la comprobación integral en Docker ni sobre bases de datos PostgreSQL reales (verificaciones que continúan pendientes en sus respectivas etapas).
-- El derivador, el comando `verify:sync` y las verificaciones en CI no están implementados todavía; su construcción e integración constituyen un prerrequisito obligatorio antes de implementar los módulos Auth y RBAC.
+**Alcance histórico de INV-08:** el piloto validó la viabilidad de la derivación sobre overlays y código aplicativo. T-023 cubrió posteriormente la verificación integral con Docker y PostgreSQL real e incorporó `verify:sync` a CI.
 
 **Motivo:** Las investigaciones INV-05b e INV-08 demostraron que la derivación por AST/Babel proporciona diffs limpios, conserva fidelidad con el código original, elimina la duplicación manual y garantiza paridad estricta entre variantes sin añadir latencia de generación al CLI ni dependencias a los proyectos generados.
 
