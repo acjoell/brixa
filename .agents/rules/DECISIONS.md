@@ -1037,6 +1037,10 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+**Incremento residual de T-018 (pendiente de validación integral):** se implementan las proyecciones de SV-1 a SV-7 conservando BD y Docker, la separación `test:unit`/`test:db` y el informe automático combinatorio y JS/TS. Los nombres de scripts son una elección local de implementación, dado que el informe original INV-06 no está disponible en el repositorio. `npm test` conserva su cobertura y los modos funcional/auditoría conservan su distinción. El informe marca variantes no ejecutadas y parejas incompletas, y el arnés falla ante una verificación obligatoria fallida o infraestructura ausente. Las proyecciones quedan pendientes de acreditación en la lista de seguridad hasta ejecutar la validación real. D-052 sigue pendiente de asignar los controles negativos de i18n. Evidencia focalizada y comandos de validación en la matriz de T-018.
+
+**Validación local posterior del incremento:** el responsable confirma `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` sin errores. No se localizó un informe persistido por variante para contrastar la ejecución de las siete proyecciones y el piloto. Se conserva pendiente su acreditación detallada y CI remota. T-018 continúa EN PROGRESO.
+
 ### D-066 — Versiones exactas y cadencia de actualización
 
 **Estado:** Confirmada (2026-11-08).

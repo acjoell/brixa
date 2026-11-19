@@ -11,7 +11,8 @@
     "start": "node src/index.js",
     "lint": "eslint .",
     "format:check": "prettier --check .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude tests/db.test.js"
   },
   "dependencies": {
     "cors": "2.8.6",

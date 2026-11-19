@@ -28,6 +28,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { verifyI18n } from "./verify-i18n.js";
+import { runReportedVerification } from "./verification-report.js";
 
 const suiteStartTime = performance.now();
 let verificationMode = "all";
@@ -614,7 +615,7 @@ async function startPostgresContainer() {
   return { databaseUrl, stop, containerName, user, pass, port };
 }
 
-async function setupPostgres() {
+export async function setupPostgres() {
   if (process.env.VERIFY_DATABASE_URL) {
     console.log("\nUsando VERIFY_DATABASE_URL provista por el entorno.");
     return {
@@ -750,13 +751,14 @@ export async function generateProject(
 }
 
 /** Verifica variantes con Docker usando docker compose */
-async function verifyDockerVariant(
+export async function verifyDockerVariant(
   projectDir,
   modality,
   language,
   database,
   variantLabel,
   apiDocs = false,
+  backendPrepared = false,
 ) {
   console.log(`\nIniciando verificación Docker para ${variantLabel}...`);
 
@@ -780,7 +782,7 @@ async function verifyDockerVariant(
       fs.writeFileSync(envFile, envLines.join("\n") + "\n", "utf-8");
     }
 
-    prepareDependencies(backendDir, verificationMode);
+    if (!backendPrepared) prepareDependencies(backendDir, verificationMode);
     prepareDependencies(frontendDir, verificationMode);
 
     if (database === "postgres") {
@@ -1015,7 +1017,7 @@ export const testItems = sqliteTable("test_items", {
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
-  prepareDependencies(projectDir, verificationMode);
+  if (!backendPrepared) prepareDependencies(projectDir, verificationMode);
 
   if (database === "postgres") {
     const schemaFile = path.join(
@@ -1205,7 +1207,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         console.log("\n========================================================");
         console.log("NO VERIFICADO: Docker Compose v2");
         console.log("========================================================");
-        return;
+        return "NOT_VERIFIED";
       }
       await verifyDockerVariant(projectDir, modality, language, database, label, apiDocs);
       const variantDuration = performance.now() - variantStartTime;
@@ -1404,6 +1406,7 @@ async function verifyVariant(variant, step, total, pgContext) {
       console.log(
         `\n⚠ ${label}: NO VERIFICADO: PostgreSQL (${formatDuration(variantDuration)}, acumulado: ${getElapsedSuite()})`,
       );
+      return "NOT_VERIFIED";
     } else {
       console.log(
         `\n✔ ${label} verificado correctamente (${formatDuration(variantDuration)}, acumulado: ${getElapsedSuite()})`,
@@ -1430,7 +1433,7 @@ async function verifyVariant(variant, step, total, pgContext) {
 }
 
 /** Verifica integración con PostgreSQL: schema, db:generate, db:migrate, existencia de tabla y tests. */
-async function verifyDatabaseIntegration(backendDir, language, pgContext, variantLabel) {
+export async function verifyDatabaseIntegration(backendDir, language, pgContext, variantLabel) {
   // La auditoría se ejecuta en modo integral o audit; el modo functional no la evalúa.
 
   if (!pgContext.available || !pgContext.databaseUrl) {
@@ -1500,11 +1503,12 @@ await client.end();
   }
 
   // 5. Ejecutar tests con DATABASE_URL definida
-  run("npm", ["run", "test"], backendDir, { DATABASE_URL: databaseUrl });
+  run("npm", ["run", "test:unit"], backendDir);
+  run("npm", ["run", "test:db"], backendDir, { DATABASE_URL: databaseUrl });
 }
 
 /** Verifica integración con SQLite: schema, db:generate, db:migrate (incluso con data/ borrada), existencia de tabla y tests. */
-async function verifySqliteIntegration(backendDir, language) {
+export async function verifySqliteIntegration(backendDir, language) {
   // La auditoría se ejecuta en modo integral o audit; el modo functional no la evalúa.
 
   const databaseUrl = "file:./data/app.db";
@@ -1562,7 +1566,8 @@ client.close();
   }
 
   // 6. Ejecutar tests con DATABASE_URL definida
-  run("npm", ["run", "test"], backendDir, { DATABASE_URL: databaseUrl });
+  run("npm", ["run", "test:unit"], backendDir);
+  run("npm", ["run", "test:db"], backendDir, { DATABASE_URL: databaseUrl });
 }
 
 // ---------------------------------------------------------------------------
@@ -1806,9 +1811,12 @@ async function main() {
     : { databaseUrl: null, stop: async () => {}, available: true };
 
   try {
-    for (let i = 0; i < variantsToRun.length; i++) {
-      await verifyVariant(variantsToRun[i], i + 2, total, pgContext);
-    }
+    await runReportedVerification(
+      VARIANTS,
+      variantsToRun,
+      (variant, index) => verifyVariant(variant, index + 2, total, pgContext),
+      verificationMode,
+    );
   } finally {
     await pgContext.stop();
   }

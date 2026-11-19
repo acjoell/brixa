@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude tests/db.test.ts"
   },
   "dependencies": {
     "cors": "2.8.6",

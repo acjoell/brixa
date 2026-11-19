@@ -62,7 +62,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
-| T-018 | EN PROGRESO; validación integral local y CI remota confirmadas, alcance residual pendiente | T-017b, INV-06; separación de pruebas con BD, cobertura pairwise automática y decisión/controles negativos repetibles de i18n |
+| T-018 | EN PROGRESO; piloto validado, requisitos residuales implementados con pruebas focalizadas | Validación integral y CI del incremento residual, asignación de i18n pendiente |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -458,7 +458,7 @@ Notas:
 
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** EN PROGRESO (2026-11-19; validación integral local y CI remota confirmadas; alcance residual obligatorio pendiente)
+**Estado:** EN PROGRESO (incremento residual con validación integral local confirmada por el responsable, pendiente de CI y acreditación por variante)
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -519,17 +519,19 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 | Mutaciones fuera del proyecto generado | Catálogo/motor en `scripts/` de Brixa; el piloto solo modifica copias temporales y restaura originales |
 | Scripts, listas y clasificación (Alcance y D-065) | `package.json` enlaza ambas baterías mediante `verify:all`. `src/verified-variants.ts` contiene ambas listas. `mutation-engine.test.js` comprueba clasificación estricta, restauración y coincidencia del piloto con la lista de seguridad. 41/41 aprobadas |
 | Ejecución en serie e instalaciones independientes (Alcance y D-062) | `verify-security.js` recorre variantes y mutaciones en serie, instala en temporales independientes y elimina cada directorio en `finally`. CI configura caché npm compartida |
-| Mutaciones con BD y proyecciones (§6.3) | El catálogo contiene HTTP 500, CORS y CSP. `verify-security.js` genera las tres variantes con `database=none`. Las mutaciones RLS corresponden a T-014c cuando exista esa capacidad. Sigue sin acreditarse la proyección de las variantes de §6.3 sobre las capacidades existentes, exigida por su nota de activación gradual. Se debe resolver su encaje con el piloto acotado antes del cierre |
-| Separación de pruebas con BD | Pendiente del alcance original. Las plantillas PostgreSQL/SQLite fijan `fileParallelism: false` y omiten la prueba de conexión si falta `DATABASE_URL`, pero no separan scripts de pruebas rápidas y pruebas que requieren BD |
-| Cobertura por pares automática | Pendiente del alcance original. D-053 registra 73/76 pares cubiertos por las 32 variantes y tres pares descubiertos; T-018 exige un informe automático que distinga combinaciones válidas, declaradas, ejecutadas y pares cubiertos. `src/verified-variants.test.ts` verifica tamaño/lista, no calcula ni informa cobertura por pares |
+| Mutaciones con BD y proyecciones (§6.3) | Implementadas las siete proyecciones conservando modalidad, lenguaje, BD y Docker. Se mantienen los tres controles HTTP 500/CORS/CSP del piloto. `verify-security.js` reutiliza las verificaciones de BD y Docker sobre el proyecto temporal y evita reinstalar su backend. Pruebas de orquestación con procesos simulados comprueban 10 variantes, 30 mutaciones previstas y limpieza en éxito/fallo. Ejecución real pendiente |
+| Separación de pruebas con BD | Implementados `test:unit` (excluye `tests/db.test.*`) y `test:db` (solo conexión) en los manifests correspondientes. `npm test` conserva ambos grupos. El arnés integral ejecuta ambos scripts con la URL de BD apropiada. Generación focalizada PostgreSQL/SQLite JS/TS y selección real de archivos con Vitest aprobadas sin instalaciones |
+| Cobertura por pares automática | `verification-report.js` calcula 76 combinaciones y 76 pares válidos, 73 pares declarados y los tres huecos de D-053. Ambos arneses emiten tabla JS/TS y JSON con selección, ejecución, resultado, parejas incompletas/fallidas y diferencias de estado. Pruebas focalizadas verifican que el fallo interrumpe y se informa de variantes pendientes. El modo funcional/auditoría queda explícito. La falta de infraestructura obligatoria produce fallo global |
 | Mutaciones de i18n / T-013e | Pendiente. `verify:generated` valida dos variantes i18n, pero no repite controles negativos ni comprueba por mutación que fallen al retirar protecciones; D-052 mantiene abierta la decisión de asignar ese trabajo a T-013e o absorberlo en T-018 |
 | PostgreSQL del arnés y plantillas | Diferencia documentada como permite P-015: arnés `postgres:17-alpine`, plantillas `postgres:17.4-alpine` |
 
+**Validación focalizada del incremento residual:** 42 pruebas aprobadas en cinco archivos (`security-residuals.test.js`, `security-projections.test.js`, `verify-modes.test.js`, `verify-partitions.test.js` y `verified-variants.test.ts`). Incluyen generación temporal de cuatro combinaciones PostgreSQL/SQLite JS/TS sin instalar dependencias, selección real de tests con Vitest, reporte ante fallo o infraestructura ausente y orquestación simulada de las diez variantes. Tipos, ESLint y Prettier correctos. Los nombres `test:unit`/`test:db` se adoptan como elección local porque el informe original INV-06 no está disponible. Los resultados anteriores de 9/9 y CI verde corresponden al piloto, y la validación real de las nuevas proyecciones sigue pendiente.
+
 **Acciones pendientes para el cierre:**
-1. Implementar y probar la separación entre pruebas rápidas y las que requieren base de datos en proyectos generados, con nombres de scripts conforme a INV-06.
-2. Añadir el informe automático de cobertura por pares requerido, distinguiendo combinaciones válidas, variantes declaradas, variantes ejecutadas y pares cubiertos.
+1. Ejecutar CI portable/full del incremento. El responsable confirma que `npm test`, `npm run verify:sync` y `VERIFY_SCOPE=full npm run verify:all` finalizaron sin errores. No se encontró un log o JSON guardado de esa ejecución en el repositorio. El código selecciona diez variantes y treinta mutaciones en ámbito full, pero la acreditación individual del piloto y las siete proyecciones queda pendiente del informe detallado o CI. Esta revisión no repitió las ejecuciones integrales.
+2. Tras esa validación, incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS`. La lista conserva por ahora las tres variantes del piloto ya validadas, de acuerdo con D-053/D-065.
 3. Resolver la asignación de los controles negativos repetibles de i18n (D-052). Su implementación dentro de T-018 queda condicionada a esa decisión. La revisión anterior los presentó indebidamente como obligación ya asignada a T-018.
-4. Resolver la discrepancia entre el piloto sin BD y la proyección exigida por §6.3. El mínimo técnico, si esa regla se aplica al cierre actual, consiste en ejecutar las protecciones existentes en las proyecciones de variantes, sin anticipar Auth/RBAC/RLS.
+4. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
 5. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
 6. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
 

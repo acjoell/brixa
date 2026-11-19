@@ -17,7 +17,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { generateProject } from "./verify-generated.js";
+import {
+  generateProject,
+  getVariantLabel,
+  getPortableVariants,
+  setupPostgres,
+  verifyDatabaseIntegration,
+  verifySqliteIntegration,
+  verifyDockerVariant,
+} from "./verify-generated.js";
+import { runReportedVerification } from "./verification-report.js";
 import {
   executeCommand,
   runMutationCheck,
@@ -46,8 +55,22 @@ export const PILOT_VARIANTS = [
   { modality: "fullstack", language: "ts" },
 ];
 
-function getVariantLabel(v) {
-  return [v.modality, v.language].join("+");
+// §6.3: remove only capabilities that do not exist yet (Auth, RBAC, tenancy).
+export const SECURITY_PROJECTIONS = [
+  { modality: "backend", language: "ts", database: "postgres", docker: true },
+  { modality: "backend", language: "js", database: "postgres" },
+  { modality: "backend", language: "ts", database: "sqlite" },
+  { modality: "backend", language: "ts", database: "sqlite", docker: true },
+  { modality: "fullstack", language: "js", database: "postgres" },
+  { modality: "fullstack", language: "ts", database: "postgres" },
+  { modality: "fullstack", language: "js", database: "sqlite" },
+];
+export const SECURITY_VARIANTS = [...PILOT_VARIANTS, ...SECURITY_PROJECTIONS];
+
+export function securityVariantsForScope(scope) {
+  if (scope === "full") return SECURITY_VARIANTS;
+  if (scope === "portable") return getPortableVariants(SECURITY_VARIANTS);
+  throw new Error(`VERIFY_SCOPE inválido: ${scope}`);
 }
 
 /**
@@ -71,8 +94,8 @@ async function runStep(label, cmd, args, cwd) {
 /**
  * Verifica una variante del piloto con el catálogo de mutaciones de seguridad.
  */
-async function verifySecurityVariant(variant, step, total) {
-  const { modality, language } = variant;
+async function verifySecurityVariant(variant, step, total, pgContext) {
+  const { modality, language, database = "none", docker = false } = variant;
   const label = getVariantLabel(variant);
   console.log(
     `\n========================================================\n[${step}/${total}] Verificando seguridad en variante: ${label}\n======================================================== [T+${getElapsedSuite()}]`,
@@ -87,7 +110,7 @@ async function verifySecurityVariant(variant, step, total) {
 
   try {
     // 1. Generar proyecto
-    await generateProject(modality, language, projectDir, "none", false, false, false);
+    await generateProject(modality, language, projectDir, database, docker, false, false);
     console.log(`Proyecto generado en: ${projectDir}`);
 
     // 2. Resolver directorios según modalidad
@@ -113,12 +136,19 @@ async function verifySecurityVariant(variant, step, total) {
     }
     await runStep("npm run lint (backend)", "npm", ["run", "lint"], backendDir);
 
+    if (database === "postgres") {
+      if (!pgContext.available) throw new Error("PostgreSQL obligatorio no disponible");
+      await verifyDatabaseIntegration(backendDir, language, pgContext, label);
+    } else if (database === "sqlite") {
+      await verifySqliteIntegration(backendDir, language);
+    }
+
     // 4. Verificación de Línea Base sin mutación (debe estar 100% verde)
     console.log(`\nComprobando línea base de tests sin mutación...`);
     const baselineReportPath = path.join(backendDir, `.baseline-report-${Date.now()}.json`);
     const baselineExec = await executeCommand(
       "npm",
-      ["run", "test", "--", "--reporter=json", `--outputFile=${baselineReportPath}`],
+      ["run", "test:unit", "--", "--reporter=json", `--outputFile=${baselineReportPath}`],
       backendDir,
     );
     const baselineReport = parseVitestReport(baselineReportPath);
@@ -128,7 +158,7 @@ async function verifySecurityVariant(variant, step, total) {
       console.error(
         JSON.stringify(
           {
-            command: "npm run test -- --reporter=json",
+            command: "npm run test:unit -- --reporter=json",
             cwd: backendDir,
             reportPath: baselineReportPath,
             ...baselineExec,
@@ -186,6 +216,9 @@ async function verifySecurityVariant(variant, step, total) {
       }
     }
 
+    if (docker) {
+      await verifyDockerVariant(projectDir, modality, language, database, label, false, true);
+    }
     const variantDuration = performance.now() - variantStart;
     console.log(
       `\n✔ Variante ${label} verificada con éxito: todas las mutaciones fueron detectadas (${formatDuration(variantDuration)})`,
@@ -205,22 +238,28 @@ async function verifySecurityVariant(variant, step, total) {
  * Función principal del arnés de verificación de seguridad.
  */
 export async function runSecurityVerification() {
+  const variants = securityVariantsForScope(process.env.VERIFY_SCOPE || "full");
   console.log("========================================================");
   console.log("Brixa — verify:security (Arnés de Verificación de Seguridad)");
   console.log("========================================================");
   console.log(`Node: ${process.version} | Plataforma: ${process.platform} ${process.arch}`);
-  console.log(`Variantes piloto: ${PILOT_VARIANTS.map(getVariantLabel).join(", ")}`);
+  console.log(`Variantes seleccionadas: ${variants.map(getVariantLabel).join(", ")}`);
   console.log(`Mutaciones piloto: ${PILOT_SECURITY_MUTATIONS.map((m) => m.id).join(", ")}`);
 
   // Verificar siempre las fuentes actuales, aunque exista un dist/ anterior.
   await runStep("npm run build", "npm", ["run", "build"], root);
 
   const results = [];
-  const total = PILOT_VARIANTS.length;
-
-  for (let i = 0; i < total; i++) {
-    const vResult = await verifySecurityVariant(PILOT_VARIANTS[i], i + 1, total);
-    results.push(vResult);
+  const total = variants.length;
+  const pgContext = variants.some((v) => v.database === "postgres")
+    ? await setupPostgres()
+    : { available: false, stop: async () => {} };
+  try {
+    await runReportedVerification(SECURITY_VARIANTS, variants, async (variant, index) => {
+      results.push(await verifySecurityVariant(variant, index + 1, total, pgContext));
+    });
+  } finally {
+    await pgContext.stop();
   }
 
   const totalDuration = performance.now() - suiteStartTime;
