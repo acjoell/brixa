@@ -1,17 +1,8 @@
-# T-023 — Piloto TypeScript → JavaScript
+# T-023 — Derivación TypeScript → JavaScript
 
-Última comprobación: **2026-11-19**. El bloqueo de auditoría por picomatch ha
-desaparecido tras la retirada oficial del aviso el 2026-11-18. La ejecución
-integral local registra 32 variantes y 47 auditorías estrictas correctas. Los
-resultados del 2026-11-17 se conservan abajo como historial; ya no describen un
-bloqueo vigente. T-023 continúa EN PROGRESO por los criterios restantes.
-El responsable confirmó CI remota verde del piloto committed. El incremento
-React main descrito más abajo tiene comprobaciones ligeras propias y validación
-integral manual confirmada por el responsable; la CI de este incremento está pendiente.
+**COMPLETADA.** La implementación `522e8b1` cubre 29/29 pares y los cuatro fragmentos de API Docs. El responsable confirmó que `npm run verify:generated` terminó con código 0 en 902,55 s. El contador 34/34 incluye la compilación, las 32 variantes y el resumen (`scripts/verify-generated.js`, `variantsToRun.length + 2`). Todos los jobs de GitHub Actions y las auditorías estrictas pasaron según la confirmación del responsable.
 
-El árbol de trabajo posterior a `cbd2dbe` incorpora el inventario completo. La
-matriz final recoge su evidencia local. Las verificaciones integrales citadas
-arriba corresponden a revisiones anteriores.
+El bloqueo de picomatch quedó resuelto tras la retirada de GHSA-fc5q-39xc-vjpf el 2026-11-18. Las secciones fechadas conservan los resultados y pendientes históricos. La matriz final recoge el cierre.
 
 ## Alcance y uso
 
@@ -395,15 +386,13 @@ Archivos con cambios en esta intervención:
 
 ## Matriz de aceptación T-023 / D-098 y D-066
 
-| Criterio | Estado en este árbol | Evidencia o comprobación pendiente |
+| Criterio | Estado al cierre | Evidencia |
 |---|---|---|
 | Derivación determinista TS/TSX, comentarios, JSX, marcadores y fragmentos | Cumplido localmente | Restauración exacta e idempotencia en las seis familias, composición API, i18n y Vite. |
 | Sincronización de solo lectura y fallo ante diferencias o archivos ausentes | Cumplido localmente | Pruebas negativas de edición manual, falta de origen/destino y restauración. |
 | Imports correctos en el inventario | Comprobado estáticamente para las rutas actuales | Módulos/subpaths externos enumerados, destinos locales y exports estáticos nominales/default, incluido el reemplazo del hook i18n. Pruebas negativas de import type, ruta, export, atributo JSON, import dinámico y sintaxis TS en fragmentos. Los exports de dependencias instaladas se ejercitan en el arnés. |
 | JS versionado, CLI copia preconstruidos, dependencias y versiones D-066 | Preservado | Sin cambios al generador, manifests, lockfile ni imágenes. |
 | Tipos, lint y tests en proyectos generados de ambos lenguajes, paridad de overlays | Validación integral local confirmada por el responsable | El responsable ejecutó `npm run verify:generated` sobre este incremento y confirmó el código de salida 0. |
-| CI bloqueante de sincronización y seguridad | Configurada, pendiente de resultado remoto | Mismos comandos y auditorías estrictas, sin cambios al workflow. |
+| CI bloqueante de sincronización y seguridad | Cumplido | Todos los jobs verdes en GitHub Actions y auditorías satisfactorias, confirmados por el responsable. |
 
-**T-023 sigue EN PROGRESO.** Queda por confirmar la CI remota de esta revisión.
-El workflow también permite ejecutar el job remoto
-`verify-full` mediante `workflow_dispatch`. El trabajo sobre T-018 permanece independiente.
+Los seis criterios originales de T-023 están satisfechos. La rama está lista para su integración en `main`.
