@@ -57,7 +57,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | INV-01 a INV-06 (incluidas 04a, 04b, 05a y 05b) | Ejecutadas por Antigravity; resultados reportados. Ver sección 5 | — |
 | INV-07 | COMPLETADA | — |
 | INV-08 | COMPLETADA | Piloto técnico realizado; decisión P-013 aprobada en D-098 (límites técnicos en Docker y PostgreSQL real pendientes en etapas de integración) |
-| T-023 | PENDIENTE | Decisión D-098 (INV-08 completada); requisito previo a la implementación de Auth/RBAC en ambas variantes (T-014a, T-014b1) |
+| T-023 | EN PROGRESO (piloto PostgreSQL; CI remota pendiente) | Decisión D-098 (INV-08 completada); requisito previo a la implementación de Auth/RBAC en ambas variantes (T-014a, T-014b1) |
 | T-014-0 | COMPLETADA (DISEÑO) | Decisiones consolidadas en D-080 a D-107; modelo integral de amenazas en SECURITY.md §14 y contratos de arquitectura en §15; diseño completado sin código; validaciones técnicas de implementación diferidas a T-014a/c |
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
@@ -267,7 +267,11 @@ Notas:
 
 ### T-023 — Derivador JavaScript/TypeScript y verificación de sincronización (verify:sync)
 
-**Estado:** PENDIENTE
+**Estado:** EN PROGRESO — bloqueo externo de picomatch retirado: GHSA-fc5q-39xc-vjpf fue retirado oficialmente el 2026-11-18. La revalidación local del 2026-11-19 registra 32 variantes integrales y 47 auditorías estrictas correctas; el piloto PostgreSQL JS/TS se repitió con salida 0 capturada. Auditoría de Brixa y 172 pruebas locales correctas. Siguen pendientes CI remota y los criterios de la tarea completa fuera del piloto; T-018 no integrada ni modificada. Evidencia y matriz: [T-023](../../docs/t023-pilot.md).
+
+**Revalidación (2026-11-19):** npm audit reporta cero vulnerabilidades en Brixa y en las variantes generadas, manteniendo picomatch 4.0.7 y los controles estrictos. La ejecución completa terminó con mensaje de éxito en 1152,19 s, sin omisiones ni errores; su código numérico de shell no se recuperó por el reinicio del servidor. La repetición integral de backend PostgreSQL JS/TS terminó con código 0 en 28,77 s. Los únicos avisos restantes son dos deprecaciones de @esbuild-kit y la notificación de nueva versión de npm, sin actualizaciones aplicadas. No se cambiaron dependencias, lockfiles ni código funcional. Los resultados del 2026-11-17 siguientes se conservan como historial, no como bloqueo vigente.
+
+**Actualización de validación (2026-11-17):** el mismo arnés dispone de modos explícitos funcional y auditoría, conservando el modo integral estricto por defecto. `verify:generated:functional` completó backend y fullstack JS/TS con PostgreSQL, más backend Docker JS/TS (seis variantes). Las auditorías JS/TS independientes y el comando integral conservan código 1 por picomatch. Tipos, lint, formato, sincronización y 172 pruebas locales correctos; sin defectos adicionales del derivador. CI informa funcionamiento y auditoría en pasos separados, sin tolerar errores de seguridad; ejecución remota pendiente. T-023 continúa EN PROGRESO; criterios originales intactos y T-018 independiente.
 **Aprobación:** Aprobado en alcance y arquitectura (D-098 tras INV-05b, su complemento e INV-08).
 **Dependencias:** D-098. Requisito previo obligatorio para la implementación de módulos de Auth y RBAC (T-014a, T-014b1).
 
