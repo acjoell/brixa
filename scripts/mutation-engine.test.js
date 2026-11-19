@@ -284,14 +284,28 @@ export function testMe() {
     expect(missing.spawnError?.code).toBe("ENOENT");
     expect(missing.timedOut).toBe(false);
     expect(classify(null, missing).reason).toBe("SPAWN_ERROR");
-    const timeout = await executeCommand(
-      process.execPath,
-      ["-e", "setInterval(() => {}, 1000)"],
-      tmpDir,
-      { timeoutMs: 100 },
-    );
-    expect(classify(null, timeout).reason).toBe("TIMEOUT");
-  });
+    const readyFile = path.join(tmpDir, "child-ready");
+    try {
+      const running = executeCommand(
+        process.execPath,
+        [
+          "-e",
+          `require('node:fs').writeFileSync(${JSON.stringify(readyFile)}, 'ready'); setInterval(() => {}, 1000)`,
+        ],
+        tmpDir,
+        { timeoutMs: 1000 },
+      );
+      while (!fs.existsSync(readyFile)) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const timeout = await running;
+      expect(fs.readFileSync(readyFile, "utf8")).toBe("ready");
+      expect(timeout.timedOut).toBe(true);
+      expect(classify(null, timeout).reason).toBe("TIMEOUT");
+    } finally {
+      fs.rmSync(readyFile, { force: true });
+    }
+  }, 10_000);
 
   it.each(["passed", "failed"])("restaura y limpia tras resultado real %s", async (status) => {
     // Proceso local sin red: entrega un reporte estructurado como el de Vitest.
