@@ -1031,6 +1031,10 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Revalidación (2026-11-19):** Integración local con T-023: nueve mutaciones detectadas, tres líneas base 46/46 y auditorías estrictas de los backends aprobadas; 100 pruebas focalizadas y controles estáticos correctos. El bloqueo anterior es histórico (retirada y auditorías de T-023 confirmadas por el responsable). Se conservan sincronización, modos de verificación y auditorías CI de T-023. T-018 sigue EN PROGRESO: faltan validación integral del merge, CI remota (incluido Windows) y alcance residual documentado en su matriz de aceptación; no cambia D-065.
 
+**Actualización de aceptación (2026-11-19; confirmación del responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` pasan localmente; CI completa está verde, incluida Windows Node 26 Group A tras corregir la prueba de timeout, y Verify Generated Full Scope con Docker/PostgreSQL. La auditoría de dependencias es satisfactoria y las nueve mutaciones fueron detectadas. Esto sustituye el pendiente histórico de validación integral/CI y el bloqueo Windows descritos arriba. T-018 continúa EN PROGRESO porque el alcance original aún requiere separar pruebas con BD, informar automáticamente cobertura por pares y resolver la asignación de controles negativos repetibles de i18n conforme a D-052 (ver la matriz de aceptación en `TASKS_POST_MVP.md`). No se modifica ni relaja la exigencia de D-065.
+
+**Confirmación posterior a la corrección de portabilidad:** el responsable confirma CI verde en Windows Node 24/26 A/B, Linux y macOS tras publicar `b1e61aa6f910929271419ecae9232ffe99a47022`. Los incidentes Windows quedan resueltos. La revisión de §6.3 identifica una discrepancia pendiente entre su exigencia de ejecutar proyecciones de variantes y el piloto actual sin BD. La matriz de T-018 recoge esta cuestión y distingue las mutaciones RLS futuras de las protecciones actuales.
+
 ---
 
 ### D-066 — Versiones exactas y cadencia de actualización
