@@ -63,7 +63,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
 | T-013e | PENDIENTE | D-052 y cobertura existente de T-013d |
-| T-018 | IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE | Acreditar SV-5 con Docker y PostgreSQL en alcance `full` |
+| T-018 | COMPLETADA | Implementación e integración completadas; CI normal aprobado y CI Full con SV-5, Docker y PostgreSQL aprobado según confirmación del desarrollador |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -473,9 +473,9 @@ Notas:
 
 ### T-018 — Infraestructura de verificación avanzada
 
-**Estado:** IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE. No equivale a aceptación definitiva.
+**Estado:** IMPLEMENTACIÓN E INTEGRACIÓN COMPLETADAS. La validación conjunta de T-018 + T-023 está COMPLETADA. CI normal y CI Full con SV-5 (fullstack JS + PostgreSQL y Docker) aprobados según confirmación del desarrollador.
 
-**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. El responsable confirma que la CI normal de main está verde. La aceptación sigue pendiente de acreditar la ejecución real de SV-5 con Docker y PostgreSQL mediante `workflow_dispatch` en alcance `full` y registrar el resultado por variante. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
+**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. El responsable confirma que la CI normal de main está verde. El desarrollador confirma que la ejecución CI Full posterior a la corrección cubrió SV-5 con Docker y PostgreSQL y finalizó exitosamente. No se dispone aquí de un informe o identificador de ejecución local. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -543,14 +543,15 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 **Validación focalizada del incremento residual:** 42 pruebas aprobadas en cinco archivos (`security-residuals.test.js`, `security-projections.test.js`, `verify-modes.test.js`, `verify-partitions.test.js` y `verified-variants.test.ts`). Incluyen generación temporal de cuatro combinaciones PostgreSQL/SQLite JS/TS sin instalar dependencias, selección real de tests con Vitest, reporte ante fallo o infraestructura ausente y orquestación simulada de las diez variantes. Tipos, ESLint y Prettier correctos. Los nombres `test:unit`/`test:db` se adoptan como elección local porque el informe original INV-06 no está disponible. Los resultados anteriores de 9/9 y CI verde corresponden al piloto, y la validación real de las nuevas proyecciones sigue pendiente.
 
-**Acciones pendientes para el cierre:**
-1. Acreditar la ejecución real de SV-5 (fullstack JavaScript, PostgreSQL y Docker) en `main` mediante `workflow_dispatch` en alcance `full`. Conservar el informe por variante de `verify:security`.
-2. Incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS` conforme a D-053 y D-065.
-3. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
-4. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
-5. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
+**Cierre administrativo T-018 + T-023:** T-023 está COMPLETADA. T-018 está IMPLEMENTADA e INTEGRADA en main. La CI normal de main fue aprobada según el responsable. Queda completo el resultado del workflow full que ejecuta SV-5 con Docker y PostgreSQL. Se puede avanzar a T-014a sin reabrir T-018 por asuntos administrativos. T-013e permanece PENDIENTE e independiente, sin bloquear T-014a.
 
-**Revisión final de aceptación (2026-11-19; evidencia comunicada por el responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` aprobaron localmente; CI está verde, incluido Windows Node 26 Group A tras corregir la prueba de timeout, y la verificación Full Scope con Docker/PostgreSQL; auditoría de dependencias satisfactoria; nueve mutaciones detectadas y 41/41 pruebas del motor aprobadas. No se repitieron estas ejecuciones durante la revisión documental. Esta evidencia cierra los pendientes de integración/CI y el incidente Windows, pero deja pendientes los requisitos y decisiones de alcance detallados en la matriz; por tanto, T-018 no puede marcarse COMPLETADA todavía.
+**Pendiente de validación:**
+1. Incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS` conforme a D-053 y D-065.
+2. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
+3. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
+4. T-023 permanece COMPLETADA. T-018 está COMPLETADA, con validación conjunta T-018 + T-023 completada según confirmación del desarrollador.
+
+**Revisión final de aceptación (2026-11-19; evidencia comunicada por el responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` aprobaron localmente; CI está verde, incluido Windows Node 26 Group A tras corregir la prueba de timeout, y la verificación Full Scope con Docker/PostgreSQL; auditoría de dependencias satisfactoria; nueve mutaciones detectadas y 41/41 pruebas del motor aprobadas. No se repitieron estas ejecuciones durante la revisión documental. Esta evidencia cierra los pendientes de integración/CI y el incidente Windows, pero deja pendientes los requisitos y decisiones de alcance detallados en la matriz; por tanto, la validación full de SV-5 queda aprobada según confirmación del desarrollador.
 
 **Riesgos:** mutaciones frágiles frente a cambios de plantilla; coste de minutos de CI. Advertencia DEP0190 en Windows (`shell: true` con argumentos en `execFileSync`): deuda técnica del arnés (`scripts/verify-generated.js` y `scripts/verify-i18n.js`), a evaluar durante el mantenimiento de la infraestructura de verificación sin alterar el comportamiento de las plantillas generadas ni refactorizar el manejo de procesos en esta etapa.
 
