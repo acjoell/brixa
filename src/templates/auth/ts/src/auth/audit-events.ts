@@ -1,0 +1,15 @@
+export const systemAuditEvents = [
+  "login_succeeded",
+  "login_failed",
+  "logout",
+  "account_activated",
+  "password_changed",
+  "brute_force_detected",
+  "user_created",
+  "user_disabled",
+  "bootstrap",
+  "activation_token_issued",
+  "activation_token_consumed",
+  "activation_token_revoked",
+  "activation_token_expired",
+] as const;

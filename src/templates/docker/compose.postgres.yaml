@@ -7,6 +7,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?La variable de entorno POSTGRES_PASSWORD es obligatoria y debe ser alfanumerica}@postgres:5432/${POSTGRES_DB:-app}
       # @@INSERT:api-docs-env@@
+      # @@INSERT:auth-env@@
     depends_on:
       postgres:
         condition: service_healthy

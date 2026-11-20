@@ -26,6 +26,8 @@ export interface RawOptions {
 
 /** Opciones validadas y normalizadas listas para la generación. */
 export interface UserOptions {
+  /** Activa el overlay de Auth al componer el backend. */
+  auth?: boolean | undefined;
   modality: Modality;
   language: Language;
   database?: Database | undefined;

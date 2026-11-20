@@ -23,6 +23,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export type GenerateError =
+  | { kind: "auth_requires_backend_database" }
   | { kind: "unsupported_combination"; modality: string; language: string; database?: string }
   | { kind: "copy_error"; message: string };
 
@@ -272,12 +273,21 @@ async function appendEnvBlock(
   await fs.writeFile(envPath, merged, "utf-8");
 }
 
-async function appendEnvExample(envPath: string): Promise<void> {
-  const line = "DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD\n";
+const runtimePostgresExample = "postgresql://app_exec:CLAVE@localhost:5432/NOMBRE_BD";
+const composeRuntimeExample = "postgresql://app_exec:CLAVE@postgres:5432/app";
+const composeSetup =
+  "Configura DATABASE_URL para app_exec con host postgres en .env. Proporciona POSTGRES_PASSWORD únicamente al invocar Docker Compose. Inicia primero postgres, sigue ops/README.md del backend y aplica las migraciones indicadas abajo antes de iniciar Express.";
+const migrationInstructions =
+  "Proporciona MIGRATION_DATABASE_URL con el usuario table_owner solo al proceso de migración mediante el entorno de la orden. Usa una URL postgresql://table_owner:CLAVE@HOST:5432/BD. Guarda únicamente DATABASE_URL de app_exec en el archivo .env del backend. Antes de migrar, sigue ops/README.md del backend para aprovisionar ambos roles.";
+
+async function appendEnvExample(envPath: string, auth: boolean, docker: boolean): Promise<void> {
+  const line = auth
+    ? `DATABASE_URL=${docker ? composeRuntimeExample : runtimePostgresExample}\n# ${migrationInstructions}\n`
+    : "DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD\n";
   await appendEnvBlock(envPath, line, "PostgreSQL");
 }
 
-async function appendBackendReadmeDatabase(readmePath: string): Promise<void> {
+async function appendBackendReadmeDatabase(readmePath: string, auth: boolean): Promise<void> {
   const content = `
 ## Base de datos
 
@@ -288,7 +298,7 @@ Este backend incluye integración con PostgreSQL mediante Drizzle ORM.
 1. Configura la variable de entorno \`DATABASE_URL\` en tu archivo \`.env\`:
 
 \`\`\`bash
-DATABASE_URL=postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD
+DATABASE_URL=${auth ? runtimePostgresExample : "postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD"}
 \`\`\`
 
 Por seguridad, nunca confirmes credenciales reales al control de versiones.
@@ -300,7 +310,7 @@ Por seguridad, nunca confirmes credenciales reales al control de versiones.
 npm run db:generate
 \`\`\`
 
-4. Aplica las migraciones en la base de datos:
+4. Aplica las migraciones en la base de datos:${auth ? "\n\n" + migrationInstructions : ""}
 \`\`\`bash
 npm run db:migrate
 \`\`\`
@@ -324,7 +334,12 @@ El backend incluye persistencia con PostgreSQL y Drizzle ORM. Define tablas en \
   await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
 }
 
-async function applyPostgresOverlay(targetBackendDir: string, language: Language): Promise<void> {
+async function applyPostgresOverlay(
+  targetBackendDir: string,
+  language: Language,
+  auth = false,
+  docker = false,
+): Promise<void> {
   const overlayDir = path.join(templatesDir(), "database-postgres", language);
   await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
 
@@ -367,10 +382,10 @@ async function applyPostgresOverlay(targetBackendDir: string, language: Language
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 
   // Añadir DATABASE_URL a .env.example
-  await appendEnvExample(path.join(targetBackendDir, ".env.example"));
+  await appendEnvExample(path.join(targetBackendDir, ".env.example"), auth, docker);
 
   // Añadir sección de base de datos a README.md
-  await appendBackendReadmeDatabase(path.join(targetBackendDir, "README.md"));
+  await appendBackendReadmeDatabase(path.join(targetBackendDir, "README.md"), auth);
 }
 
 async function appendEnvExampleSqlite(envPath: string): Promise<void> {
@@ -492,36 +507,42 @@ async function applySqliteOverlay(targetBackendDir: string, language: Language):
 // Modificadores de archivos para overlay Docker
 // ---------------------------------------------------------------------------
 
-async function appendEnvExampleDockerPostgres(envPath: string): Promise<void> {
+async function appendEnvExampleDockerPostgres(
+  envPath: string,
+  authPostgres: boolean,
+): Promise<void> {
   const content = `# Configuración para Docker Compose
 # POSTGRES_PASSWORD es obligatoria para docker compose y debe ser alfanumérica.
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=ejemplo123
+${authPostgres ? "# Proporciona POSTGRES_PASSWORD desde el entorno de Docker Compose." : "POSTGRES_PASSWORD=ejemplo123"}
 POSTGRES_DB=app
 `;
   await appendEnvBlock(envPath, content, "Docker PostgreSQL");
+}
+
+function dockerMigrationCommand(language: Language, authPostgres: boolean): string {
+  const command = language === "ts" ? "node dist/db/migrate.js" : "npm run db:migrate";
+  return `docker compose run --rm ${authPostgres ? "-e MIGRATION_DATABASE_URL " : ""}backend ${command}`;
 }
 
 async function appendBackendReadmeDocker(
   readmePath: string,
   language: Language,
   database: Database,
+  authPostgres = false,
 ): Promise<void> {
-  const isTs = language === "ts";
   const hasDb = database === "postgres" || database === "sqlite";
 
   let dbSection = "";
   if (hasDb) {
-    const migrateCmd = isTs
-      ? "docker compose run --rm backend node dist/db/migrate.js"
-      : "docker compose run --rm backend npm run db:migrate";
+    const migrateCmd = dockerMigrationCommand(language, authPostgres);
 
     dbSection = `
 ### Migraciones de base de datos
 
 > **Importante:** ejecuta \`npm run db:generate\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
 
-Aplica las migraciones en la base de datos dentro del contenedor:
+Aplica las migraciones en la base de datos dentro del contenedor:${authPostgres ? "\n\n" + migrationInstructions + " En Compose usa postgres como host en ambas URLs, y pasa MIGRATION_DATABASE_URL desde el entorno de la orden puntual." : ""}
 
 \`\`\`bash
 ${migrateCmd}
@@ -539,7 +560,7 @@ ${migrateCmd}
 ### Arranque
 
 1. Se recomienda ejecutar \`npm install\` antes de \`docker compose build\` para fijar el archivo de bloqueo (\`package-lock.json\`).
-2. Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo \`.env\` (en PostgreSQL, \`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
+2. ${authPostgres ? composeSetup : "Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo `.env` (en PostgreSQL, `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica)."}
 3. Construye e inicia los servicios:
 
 \`\`\`bash
@@ -567,22 +588,20 @@ async function appendRootReadmeDockerFullstack(
   readmePath: string,
   language: Language,
   database: Database,
+  authPostgres = false,
 ): Promise<void> {
-  const isTs = language === "ts";
   const hasDb = database === "postgres" || database === "sqlite";
 
   let dbSection = "";
   if (hasDb) {
-    const migrateCmd = isTs
-      ? "docker compose run --rm backend node dist/db/migrate.js"
-      : "docker compose run --rm backend npm run db:migrate";
+    const migrateCmd = dockerMigrationCommand(language, authPostgres);
 
     dbSection = `
 ### Migraciones de base de datos
 
 > **Importante:** ejecuta \`npm run db:generate\` dentro de \`backend/\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
 
-Aplica las migraciones en la base de datos desde la raíz del proyecto:
+Aplica las migraciones en la base de datos desde la raíz del proyecto:${authPostgres ? "\n\n" + migrationInstructions + " En Compose usa postgres como host en ambas URLs, y pasa MIGRATION_DATABASE_URL desde el entorno de la orden puntual." : ""}
 
 \`\`\`bash
 ${migrateCmd}
@@ -600,7 +619,7 @@ ${migrateCmd}
 ### Arranque
 
 1. Se recomienda ejecutar \`npm install\` en \`frontend/\` y \`backend/\` antes de \`docker compose build\` para fijar los archivos de bloqueo (\`package-lock.json\`).
-2. Si utilizas PostgreSQL, configura las variables de entorno requeridas en el archivo \`.env\` de la raíz (\`POSTGRES_PASSWORD\` es obligatoria y debe ser alfanumérica).
+2. ${authPostgres ? composeSetup : "Si utilizas PostgreSQL, configura las variables de entorno requeridas en el archivo `.env` de la raíz (`POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica)."}
 3. Construye e inicia los servicios:
 
 \`\`\`bash
@@ -628,6 +647,7 @@ async function applyDockerOverlay(
   targetBackendDir: string,
   language: Language,
   database: Database,
+  authPostgres = false,
 ): Promise<void> {
   const dockerTemplates = path.join(templatesDir(), "docker");
 
@@ -647,11 +667,16 @@ async function applyDockerOverlay(
 
   // 4. Variables de compose en .env.example si usa postgres
   if (database === "postgres") {
-    await appendEnvExampleDockerPostgres(path.join(targetBackendDir, ".env.example"));
+    await appendEnvExampleDockerPostgres(path.join(targetBackendDir, ".env.example"), authPostgres);
   }
 
   // 5. Sección Docker en README.md
-  await appendBackendReadmeDocker(path.join(targetBackendDir, "README.md"), language, database);
+  await appendBackendReadmeDocker(
+    path.join(targetBackendDir, "README.md"),
+    language,
+    database,
+    authPostgres,
+  );
 }
 
 async function applyFullstackDockerOverlay(
@@ -660,6 +685,7 @@ async function applyFullstackDockerOverlay(
   backendDest: string,
   language: Language,
   database: Database,
+  authPostgres = false,
 ): Promise<void> {
   const dockerTemplates = path.join(templatesDir(), "docker");
   const fullstackTemplates = path.join(dockerTemplates, "fullstack");
@@ -699,11 +725,16 @@ async function applyFullstackDockerOverlay(
 
   // 5. Raíz: .env.example si usa postgres
   if (database === "postgres") {
-    await appendEnvExampleDockerPostgres(path.join(outputDir, ".env.example"));
+    await appendEnvExampleDockerPostgres(path.join(outputDir, ".env.example"), authPostgres);
   }
 
   // 6. Raíz: README.md sección Docker
-  await appendRootReadmeDockerFullstack(path.join(outputDir, "README.md"), language, database);
+  await appendRootReadmeDockerFullstack(
+    path.join(outputDir, "README.md"),
+    language,
+    database,
+    authPostgres,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -792,6 +823,51 @@ export async function appendComposeApiDocsEnv(composePath: string): Promise<void
   await fs.writeFile(composePath, updated, "utf-8");
 }
 
+const COMPOSE_AUTH_MARKER = "# @@INSERT:auth-env@@";
+const AUTH_ENV_EXAMPLE =
+  "# Argon2id por proceso (0 en cola desactiva la espera)\nARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n" +
+  "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n";
+
+async function composeDockerEnv(outputDir: string, options: UserOptions): Promise<void> {
+  const composePath = path.join(outputDir, "compose.yaml");
+  const envPath = path.join(outputDir, ".env.example");
+  if (options.apiDocs) {
+    await appendComposeApiDocsEnv(composePath);
+    await appendEnvExampleApiDocs(envPath);
+  }
+  if (options.auth) {
+    const content = await fs.readFile(composePath, "utf8");
+    if (!content.includes(COMPOSE_AUTH_MARKER)) {
+      throw new Error(
+        `No se encontró el punto de inserción "${COMPOSE_AUTH_MARKER}" en ${composePath}.`,
+      );
+    }
+    let updated = content.replace(
+      COMPOSE_AUTH_MARKER,
+      () =>
+        'ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"\n' +
+        '      ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"\n' +
+        '      SESSION_IDLE_TIMEOUT_MINUTES: "${SESSION_IDLE_TIMEOUT_MINUTES-30}"\n' +
+        '      SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"',
+    );
+    if (options.database === "postgres") {
+      const runtimeLine = /^ {6}DATABASE_URL: .+$/gm;
+      if (updated.match(runtimeLine)?.length !== 1)
+        throw new Error("Entrada DATABASE_URL de Compose inesperada.");
+      updated = updated.replace(
+        runtimeLine,
+        '      DATABASE_URL: "${DATABASE_URL:?Se requiere la URL de app_exec}"',
+      );
+      if (options.modality === "fullstack") {
+        await appendEnvBlock(envPath, `DATABASE_URL=${composeRuntimeExample}\n`, "Auth PostgreSQL");
+      }
+    }
+    await fs.writeFile(composePath, updated, "utf8");
+    if (options.modality === "fullstack") await appendEnvBlock(envPath, AUTH_ENV_EXAMPLE, "auth");
+  }
+  await cleanupComposeInsertionPoints(composePath);
+}
+
 export async function cleanupComposeInsertionPoints(composePath: string): Promise<void> {
   try {
     const content = await fs.readFile(composePath, "utf-8");
@@ -822,34 +898,7 @@ async function applyApiDocsOverlay(targetBackendDir: string, language: Language)
   //    _fragments/ se omite automáticamente por la convención de copyDir.
   await copyDir(overlayDir, targetBackendDir, path.basename(targetBackendDir));
 
-  // 2. Resolver puntos de inserción en app y index.
-  const ext = language === "ts" ? "ts" : "js";
   const contributor = "api-docs";
-
-  for (const basename of ["app", "index"] as const) {
-    const srcFile = path.join(targetBackendDir, "src", `${basename}.${ext}`);
-    const baseContent = await fs.readFile(srcFile, "utf-8");
-
-    const insertions: InsertionMap = {};
-
-    // Importaciones (tanto app como index tienen el punto imports)
-    const importsFragment = await readFragment(overlayDir, `${basename}.imports`);
-    insertions["imports"] = [{ contributor, lines: importsFragment }];
-
-    // Punto específico de cada archivo
-    if (basename === "app") {
-      const routesFragment = await readFragment(overlayDir, "app.routes");
-      insertions["routes"] = [{ contributor, lines: routesFragment }];
-    } else {
-      const startupFragment = await readFragment(overlayDir, "index.startup");
-      insertions["startup"] = [{ contributor, lines: startupFragment }];
-    }
-
-    const resolved = resolveInsertionPoints(baseContent, insertions);
-    await fs.writeFile(srcFile, resolved, "utf-8");
-  }
-
-  // 3. Fusionar package.json deterministamente con detección de conflicto.
   const pkgPath = path.join(targetBackendDir, "package.json");
   const pkgRaw = await fs.readFile(pkgPath, "utf-8");
   const pkgJson = JSON.parse(pkgRaw) as PackageJson;
@@ -982,6 +1031,71 @@ El frontend incluye soporte de internacionalización con i18next y selector de i
   }
 }
 
+async function copyAuthMigrations(source: string, destination: string): Promise<void> {
+  const existing = await fs.lstat(destination).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  });
+  const conflict = (entry: string) =>
+    new Error(
+      `Conflicto de migraciones Auth: "${entry}" no coincide con el historial de la plantilla.`,
+    );
+  if (existing) {
+    if (!existing.isDirectory()) throw conflict(destination);
+    const expected = new Map(
+      (await fs.readdir(source, { recursive: true, withFileTypes: true })).map((entry) => [
+        path.relative(source, path.join(entry.parentPath, entry.name)),
+        entry,
+      ]),
+    );
+    for (const entry of await fs.readdir(destination, { recursive: true, withFileTypes: true })) {
+      const target = path.join(entry.parentPath, entry.name);
+      const relative = path.relative(destination, target);
+      const template = expected.get(relative);
+      if (entry.isDirectory() && template?.isDirectory()) continue;
+      if (
+        !entry.isFile() ||
+        !template?.isFile() ||
+        !(await fs.readFile(target)).equals(await fs.readFile(path.join(source, relative)))
+      ) {
+        throw conflict(target);
+      }
+    }
+  }
+  await fs.cp(source, destination, { recursive: true, force: false });
+}
+
+async function applyAuthOverlay(
+  backendDir: string,
+  language: Language,
+  database: Database,
+): Promise<void> {
+  const overlay = path.join(templatesDir(), "auth", language);
+  const pkgPath = path.join(backendDir, "package.json");
+  const base = JSON.parse(await fs.readFile(pkgPath, "utf8")) as PackageJson;
+  const additions = JSON.parse(
+    await fs.readFile(path.join(overlay, "package.json"), "utf8"),
+  ) as PackageJsonOverlay;
+  const merged = mergePackageJson(base, additions, "auth");
+  const persistence = path.join(templatesDir(), `auth-${database}`);
+  if (database === "postgres") {
+    await fs.cp(path.join(persistence, "ops"), path.join(backendDir, "ops"), {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+  } else {
+    await fs.appendFile(
+      path.join(backendDir, "README.md"),
+      "\n### Auditoría SQLite\n\nLa migración 0002 protege los eventos existentes mediante triggers y una tabla WITHOUT ROWID. La migración reconstruye la tabla y sus índices de Brixa. Si has añadido índices, triggers o referencias a esta tabla, revisa su conservación antes de migrar. Las inserciones con identificador nuevo siguen permitidas. La protección requiere conservar el esquema y sus triggers en futuras migraciones. Quien pueda alterar el esquema o reemplazar el archivo puede modificar el historial. SQLite carece de separación de privilegios por tabla como la de PostgreSQL.\n",
+    );
+  }
+  await copyAuthMigrations(path.join(persistence, "drizzle"), path.join(backendDir, "drizzle"));
+  await copyDir(path.join(persistence, language), backendDir, path.basename(backendDir));
+  await copyDir(overlay, backendDir, path.basename(backendDir));
+  await appendEnvBlock(path.join(backendDir, ".env.example"), AUTH_ENV_EXAMPLE, "auth");
+  await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+
 // ---------------------------------------------------------------------------
 // Función principal de generación
 // ---------------------------------------------------------------------------
@@ -996,6 +1110,9 @@ El frontend incluye soporte de internacionalización con i18next y selector de i
 export async function generate(options: UserOptions): Promise<GenerateResult> {
   const { modality, language, outputDir } = options;
   const database = options.database ?? "none";
+  if (options.auth && (modality === "frontend" || database === "none")) {
+    return { ok: false, error: { kind: "auth_requires_backend_database" } };
+  }
 
   const combinationKey =
     modality === "frontend"
@@ -1012,23 +1129,8 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
   }
 
   // Resumen previo a la generación
-  const verified = isVerified({
-    modality,
-    language,
-    database,
-    docker: options.docker,
-    apiDocs: options.apiDocs,
-    i18n: options.i18n,
-  });
-  if (!verified) {
-    const label = variantLabel({
-      modality,
-      language,
-      database,
-      docker: options.docker,
-      apiDocs: options.apiDocs,
-      i18n: options.i18n,
-    });
+  if (!isVerified(options)) {
+    const label = variantLabel(options);
     console.warn(
       `\nNota: combinación experimental (${label}), aún no verificada de extremo a extremo por Brixa.\n`,
     );
@@ -1062,7 +1164,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       await fs.writeFile(path.join(outputDir, "README.md"), readmeContent, "utf-8");
 
       if (database === "postgres") {
-        await applyPostgresOverlay(backendDest, language);
+        await applyPostgresOverlay(backendDest, language, options.auth);
         await appendRootReadmeDatabase(path.join(outputDir, "README.md"));
       } else if (database === "sqlite") {
         await applySqliteOverlay(backendDest, language);
@@ -1075,13 +1177,15 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
       }
 
       if (options.docker) {
-        await applyFullstackDockerOverlay(outputDir, frontendDest, backendDest, language, database);
-        if (options.apiDocs) {
-          await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
-          await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
-        } else {
-          await cleanupComposeInsertionPoints(path.join(outputDir, "compose.yaml"));
-        }
+        await applyFullstackDockerOverlay(
+          outputDir,
+          frontendDest,
+          backendDest,
+          language,
+          database,
+          options.auth && database === "postgres",
+        );
+        await composeDockerEnv(outputDir, options);
       }
 
       if (options.i18n) {
@@ -1090,8 +1194,9 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
       }
 
+      if (options.auth) await applyAuthOverlay(backendDest, language, database);
       await cleanupUnresolvedFrontendInsertionPoints(frontendDest, language);
-      await cleanupUnresolvedInsertionPoints(backendDest, language);
+      await composeBackendInsertionPoints(backendDest, options);
 
       return { ok: true };
     } catch (err) {
@@ -1129,7 +1234,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
 
     if (modality === "backend") {
       if (database === "postgres") {
-        await applyPostgresOverlay(outputDir, language);
+        await applyPostgresOverlay(outputDir, language, options.auth, options.docker);
       } else if (database === "sqlite") {
         await applySqliteOverlay(outputDir, language);
       }
@@ -1137,15 +1242,16 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await applyApiDocsOverlay(outputDir, language);
       }
       if (options.docker) {
-        await applyDockerOverlay(outputDir, language, database);
-        if (options.apiDocs) {
-          await appendComposeApiDocsEnv(path.join(outputDir, "compose.yaml"));
-          await appendEnvExampleApiDocs(path.join(outputDir, ".env.example"));
-        } else {
-          await cleanupComposeInsertionPoints(path.join(outputDir, "compose.yaml"));
-        }
+        await applyDockerOverlay(
+          outputDir,
+          language,
+          database,
+          options.auth && database === "postgres",
+        );
+        await composeDockerEnv(outputDir, options);
       }
-      await cleanupUnresolvedInsertionPoints(outputDir, language);
+      if (options.auth) await applyAuthOverlay(outputDir, language, database);
+      await composeBackendInsertionPoints(outputDir, options);
     }
 
     return { ok: true };
@@ -1233,26 +1339,29 @@ async function copyFile(src: string, dest: string, projectName: string): Promise
   }
 }
 
-async function cleanupUnresolvedInsertionPoints(
+async function composeBackendInsertionPoints(
   backendDir: string,
-  language: Language,
+  options: UserOptions,
 ): Promise<void> {
-  const ext = language === "ts" ? "ts" : "js";
   for (const basename of ["app", "index"] as const) {
-    const file = path.join(backendDir, "src", `${basename}.${ext}`);
-    let content: string;
-    try {
-      content = await fs.readFile(file, "utf-8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        continue;
-      }
-      throw err;
-    }
+    const file = path.join(backendDir, "src", `${basename}.${options.language}`);
+    const content = await fs.readFile(file, "utf8");
     const cleaned = cleanupInsertionPoints(content);
-    if (cleaned !== content) {
-      await fs.writeFile(file, cleaned, "utf-8");
+    const insertions: InsertionMap = {};
+    const contributors = [];
+    if (options.apiDocs) contributors.push("api-docs");
+    if (options.auth && basename === "index") contributors.push("auth");
+    if (options.auth && options.database === "postgres" && basename === "index")
+      contributors.push("auth-postgres");
+    for (const contributor of contributors) {
+      const overlay = path.join(templatesDir(), contributor, options.language);
+      for (const point of ["imports", basename === "app" ? "routes" : "startup"]) {
+        const lines = await readFragment(overlay, `${basename}.${point}`);
+        (insertions[point] ??= []).push({ contributor, lines });
+      }
     }
+    const result = contributors.length ? resolveInsertionPoints(content, insertions) : cleaned;
+    if (result !== content) await fs.writeFile(file, result, "utf8");
   }
 }
 
@@ -1411,6 +1520,8 @@ El proxy de Vite es exclusivo para desarrollo local. El despliegue en producció
  */
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
+    case "auth_requires_backend_database":
+      return "Auth requiere un backend con base de datos.";
     case "unsupported_combination": {
       const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace(/\+/g, " + ")).join(", ");
       const combo =

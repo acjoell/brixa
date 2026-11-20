@@ -5,6 +5,7 @@ services:
       PORT: 3000
       DATABASE_URL: file:./data/app.db
       # @@INSERT:api-docs-env@@
+      # @@INSERT:auth-env@@
     volumes:
       - sqlite_data:/app/data
     healthcheck:

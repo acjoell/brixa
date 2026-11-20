@@ -63,6 +63,61 @@ const groups = {
     modules: ["swagger-ui-express"],
     fragments: ["app.imports", "app.routes", "index.imports", "index.startup"],
   },
+  "auth-postgres": {
+    overlays: ["auth"],
+    files: [
+      "src/db/schema.ts",
+      "src/db/session-write.ts",
+      "src/db/client.ts",
+      "src/db/connection-url.ts",
+      "src/db/migrate.ts",
+      "tests/session-postgres.test.ts",
+    ],
+    fragments: ["index.imports", "index.startup"],
+    modules: [
+      "drizzle-orm",
+      "drizzle-orm/pg-core",
+      "pg",
+      "drizzle-orm/node-postgres",
+      "drizzle-orm/node-postgres/migrator",
+    ],
+  },
+  "auth-sqlite": {
+    overlays: ["auth"],
+    files: [
+      "src/db/schema.ts",
+      "src/db/session-write.ts",
+      "tests/session-lifecycle.test.ts",
+      "tests/system-audit.test.ts",
+    ],
+    modules: [
+      "drizzle-orm",
+      "drizzle-orm/sqlite-core",
+      "@libsql/client",
+      "drizzle-orm/libsql",
+      "drizzle-orm/libsql/migrator",
+    ],
+  },
+  auth: {
+    overlays: ["auth-postgres", "auth-sqlite"],
+    files: [
+      "src/auth/audit-events.ts",
+      "src/auth/system-audit.ts",
+      "src/auth/session-config.ts",
+      "src/auth/sessions.ts",
+      "src/auth/password-limits.ts",
+      "src/auth/argon2id-phc.ts",
+      "src/auth/password-crypto.ts",
+      "src/auth/argon2-limiter.ts",
+      "tests/system-audit-contract.ts",
+      "tests/password-limits.test.ts",
+      "tests/argon2id-phc.test.ts",
+      "tests/password-crypto.test.ts",
+      "tests/argon2-limiter.test.ts",
+    ],
+    modules: ["@node-rs/argon2", "drizzle-orm"],
+    fragments: ["index.imports", "index.startup"],
+  },
   i18n: {
     files: ["src/i18n.ts", "src/components/LanguageSelector.tsx", "src/useAppContent.tsx"],
     modules: ["i18next", "react-i18next", "i18next-browser-languagedetector"],
@@ -229,6 +284,7 @@ function templateGroup(directory, name) {
     entries,
     sourceDir: dir("ts"),
     targetDir: dir("js"),
+    overlayDirs: (group.overlays ?? []).map((overlay) => path.join(directory, overlay, "js")),
     nodeRuntime: !frontend,
     fallback: group.base ? null : path.join(directory, base.base + "-js"),
     modules: new Set([...base.modules, ...group.modules]),
@@ -249,6 +305,7 @@ async function localModule(reference, parent, group, destinations, filename) {
     throw new Error(`Referencia local no soportada: ${reference} en ${filename}`);
   }
   const candidates = [resolved];
+  for (const store of group.overlayDirs) candidates.push(path.join(store, relative));
   if (group.fallback) candidates.push(path.join(group.fallback, relative));
   for (const candidate of candidates) {
     if (destinations.has(candidate) || (await exists(candidate))) return candidate;

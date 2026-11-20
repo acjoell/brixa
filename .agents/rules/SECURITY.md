@@ -29,7 +29,7 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 
 - **Identidad interna exclusiva (D-100):** Auth v1 opera únicamente con el proveedor de identidad interno de Brixa. Quedan fuera de alcance OAuth, OIDC, SSO y proveedores externos.
 - **Sesiones opacas con token de 32 bytes (D-087):** Único modelo en v1, sin JWT. Generado con `crypto.randomBytes(32)` o Web Crypto API. En base de datos se almacena **exclusivamente el hash SHA-256** del token; el token en claro nunca se persiste.
-- **Autoridad server-side:** PostgreSQL es la autoridad sobre la validez de la sesión; cada petición verifica vigencia y revocación.
+- **Autoridad server-side (D-101):** Para Auth sin multitenancy, la BD persistente seleccionada es autoridad de sesiones. PostgreSQL y SQLite en archivo conservan las garantías esenciales de expiración, actividad y revocación, con verificación en BD por petición. `:memory:` no persiste entre reinicios o procesos. La consistencia de libSQL remoto requiere validación específica.
 - **Transportes de autenticación (D-089):** Fullstack utiliza **exclusivamente cookies** de sesión. Backend independiente permite seleccionar entre cookies o Bearer (sin mezcla simultánea). En Bearer se utiliza la cabecera estándar `Authorization: Bearer <token>`.
 
 ### Ciclo de vida y expiración de sesiones (D-088, D-101)
@@ -294,7 +294,7 @@ La información personal debe tratarse con criterios de minimización y protecci
    - **Protección RLS obligatoria:** Columna `organization_id` no nula y políticas RLS forzadas (`FORCE ROW LEVEL SECURITY`), garantizando aislamiento estricto de registros entre organizaciones.
    - **Acceso:** Administradores autorizados de la propia organización.
 3. **Garantías comunes de inmutabilidad y persistencia:**
-   - **Historial append-only:** Tablas de solo inserción. El rol `app_exec` carece contractualmente de permisos `UPDATE` y `DELETE` sobre las tablas de auditoría.
+   - **Historial append-only (D-105):** PostgreSQL separa efectivamente ejecución y propietario/migrador, sin UPDATE ni DELETE para `app_exec`, incluso con Auth sin multitenancy y sin exigir RLS. En SQLite, la migración `0002_audit_append_only` usa `WITHOUT ROWID` y tres triggers para rechazar actualizaciones, eliminaciones y sustituciones de filas existentes, y permite insertar eventos nuevos. La garantía depende de conservar el esquema y sus triggers. Quien pueda editar o reemplazar el archivo, o modificar el esquema, puede alterar el historial. SQLite carece de privilegios por tabla equivalentes a los de PostgreSQL.
    - **Atomicidad transaccional:** Las mutaciones de negocio y su evento de auditoría se persisten atómicamente dentro de la misma transacción de base de datos (`tx`).
    - **Persistencia de denegaciones fuera de rollback:** Los intentos de acceso denegados, anomalías y violaciones de seguridad se registran **fuera de las transacciones revertidas** (vía conexión o transacción independiente de auditoría) para evitar que un atacante borre su rastro forzando un error.
    - **Correlación de peticiones:** Inclusión obligatoria del identificador `requestId` en cada registro para trazabilidad de extremo a extremo.
@@ -549,8 +549,8 @@ Ninguna protección se considera infalible. La seguridad del sistema se basa en 
 - **Escenario:** Un atacante que ha comprometido temporalmente una cuenta con privilegios en la aplicación intenta alterar o borrar las entradas del log de auditoría para eliminar la evidencia de sus acciones.
 - **Activo afectado:** Integridad, no repudio y trazabilidad forense de las pistas de auditoría.
 - **Impacto:** Imposibilidad de investigar incidentes de seguridad o determinar el alcance de una intrusión.
-- **Controles aprobados (D-097, D-105):** Tablas de auditoría estrictamente *append-only*. El rol de base de datos de la aplicación (`app_exec`) carece por completo de privilegios `UPDATE` y `DELETE` concedidos sobre las tablas `audit_log_system` y `audit_log_org`. La aplicación no expone endpoints ni lógica para mutar o truncar auditorías. Intentos de denegación se persisten fuera de transacciones revertidas.
-- **Verificaciones necesarias:** Pruebas de integración intentando ejecutar sentencias `UPDATE` y `DELETE` sobre las tablas de auditoría utilizando el cliente de la aplicación (`app_exec`), verificando que PostgreSQL aborta la operación con error de denegación de privilegios.
+- **Controles aprobados (D-097, D-105):** PostgreSQL protege append-only mediante privilegios efectivos separados entre ejecución y migración, sin UPDATE ni DELETE para `app_exec`. SQLite protege las filas existentes mediante `WITHOUT ROWID` y triggers, con los límites descritos en la sección 9. La aplicación no expone interfaces para mutar ni truncar auditorías. Ambos motores persisten denegaciones fuera de transacciones revertidas.
+- **Verificaciones necesarias:** PostgreSQL debe rechazar UPDATE y DELETE con las credenciales reales de ejecución. En SQLite, las pruebas de regresión deben comprobar la protección tras aplicar todas las migraciones. Ambos motores deben comprobar atomicidad y persistencia independiente de denegaciones tras rollback.
 - **Riesgo residual:** Un atacante que consiga acceso de superusuario a nivel de sistema operativo o motor de base de datos puede alterar tablas físicamente. No se promete inmutabilidad criptográfica absoluta frente a superusuarios de PostgreSQL.
 - **Estado:** Mitigación definida.
 
@@ -718,7 +718,7 @@ export async function getOrganizationInvoices(ctx: ActorContext, db: Database) {
 
 #### 8. Auditoría y eventos de seguridad
 - **Responsabilidad:** Trazabilidad inmutable de eventos críticos.
-- **Contrato:** Dos tablas *append-only* (`audit_log_system` y `audit_log_org`). Privilegios `UPDATE` y `DELETE` denegados para `app_exec`. Persistencia atómica en mutaciones y fuera de rollback en denegaciones.
+- **Contrato:** `audit_log_system` obligatoria con Auth en ambos motores; `audit_log_org` exclusiva de multitenancy PostgreSQL. Protección append-only mediante privilegios separados en PostgreSQL, sin UPDATE ni DELETE para `app_exec`; SQLite con protección mediante `WITHOUT ROWID` y triggers, sujeta a los límites de la sección 9. Persistencia atómica en mutaciones y fuera de rollback en denegaciones (D-105).
 
 #### 9. Frontend React y Transporte
 - **Responsabilidad:** Interfaz de usuario, navegación defensiva y transporte seguro.
@@ -741,11 +741,11 @@ export async function getOrganizationInvoices(ctx: ActorContext, db: Database) {
 | **Hash Argon2id defensivo** | **Obligatoria si hay Auth** | Backends y fullstack con Auth | Parámetros explícitos, validación previa, limitador 2/8 (D-091, D-102). |
 | **Protección CSRF multicapa** | **Obligatoria si hay cookies** | Fullstack y backend con cookies | Sin synchronizer token en same-origin (D-103). |
 | **Activación segura de cuentas** | **Obligatoria si hay Auth** | Backends y fullstack con Auth | Token aleatorio hash SHA-256 en BD, sin contraseñas por defecto ni SMTP (D-107). |
-| **Auditoría del sistema (`audit_log_system`)** | **Obligatoria si hay Auth** | Proyectos con Auth | Append-only, sin UPDATE/DELETE, correlación por requestId (D-105). |
+| **Auditoría del sistema (`audit_log_system`)** | **Obligatoria si hay Auth** | PostgreSQL y SQLite | Atomicidad y requestId; PostgreSQL con privilegios separados, SQLite con protección limitada mediante `WITHOUT ROWID` y triggers (D-105, sección 9). |
 | **Bootstrap seguro por CLI** | **Obligatoria si hay Auth** | Proyectos con Auth | Comando local idempotente sin endpoints web (D-085). |
 | **Auditoría organizacional (`audit_log_org`)** | **Condicional** | Solo proyectos con Multitenancy | Aislamiento RLS en eventos de tenant (D-105). |
-| **PostgreSQL RLS y separación de roles** | **Condicional** | Solo proyectos con Multitenancy | Obligatorio en multitenant; SQLite excluido (D-094, D-096). |
-| **RBAC dinámico con catálogo en código** | **Opcional** | Seleccionable en CLI | Alcances de aplicación y organización (D-082, D-106). |
+| **PostgreSQL RLS** | **Condicional** | Solo proyectos con Multitenancy | SQLite excluido (D-094, D-096). La separación de privilegios de auditoría PostgreSQL también se exige con Auth sin multitenancy (D-105). |
+| **RBAC dinámico con catálogo en código** | **Opcional** | Previsto con Auth en SQLite y PostgreSQL, T-014b1 | SQLite sin multitenancy; multitenancy exclusivamente PostgreSQL. Requiere validación antes de declararse soportado (D-082, D-106). |
 | **Registro público de usuarios** | **Opcional** | Solo Auth sin multitenancy | Administrado por defecto; público posterior y condicionado (D-086). |
 | **Federación OAuth / OIDC / SSO** | **Futura (fuera de v1)** | Evolución posterior | Desacoplada a nivel de arquitectura; sin código en v1 (D-100). |
 | **Invitaciones organizacionales voluntarias** | **Futura (fuera de v1)** | Evolución posterior | Aprovisionamiento administrado en v1 (D-107). |

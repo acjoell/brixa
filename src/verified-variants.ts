@@ -21,6 +21,7 @@ interface VerifiedVariant {
  * (p. ej. "fullstack+js+sqlite+i18n").
  */
 export function variantLabel(opts: {
+  auth?: boolean | undefined;
   modality: string;
   language: string;
   database?: string | undefined;
@@ -33,6 +34,7 @@ export function variantLabel(opts: {
   if (opts.docker) parts.push("docker");
   if (opts.apiDocs) parts.push("docs");
   if (opts.i18n) parts.push("i18n");
+  if (opts.auth) parts.push("auth");
   return parts.join("+");
 }
 
@@ -81,6 +83,7 @@ const _verifiedSet = new Set(VERIFIED_VARIANTS.map(variantLabel));
  * Devuelve true si la combinación dada está entre las 32 verificadas por el arnés.
  */
 export function isVerified(opts: {
+  auth?: boolean | undefined;
   modality: string;
   language: string;
   database?: string | undefined;
@@ -88,16 +91,7 @@ export function isVerified(opts: {
   apiDocs?: boolean | undefined;
   i18n?: boolean | undefined;
 }): boolean {
-  return _verifiedSet.has(
-    variantLabel({
-      modality: opts.modality,
-      language: opts.language,
-      database: opts.database,
-      docker: opts.docker,
-      apiDocs: opts.apiDocs,
-      i18n: opts.i18n,
-    }),
-  );
+  return _verifiedSet.has(variantLabel(opts));
 }
 
 /**
@@ -116,6 +110,7 @@ const _verifiedSecuritySet = new Set(VERIFIED_SECURITY_VARIANTS.map(variantLabel
  * Devuelve true si la combinación dada está entre las verificadas por el arnés de seguridad.
  */
 export function isSecurityVerified(opts: {
+  auth?: boolean | undefined;
   modality: string;
   language: string;
   database?: string | undefined;
@@ -123,14 +118,5 @@ export function isSecurityVerified(opts: {
   apiDocs?: boolean | undefined;
   i18n?: boolean | undefined;
 }): boolean {
-  return _verifiedSecuritySet.has(
-    variantLabel({
-      modality: opts.modality,
-      language: opts.language,
-      database: opts.database,
-      docker: opts.docker,
-      apiDocs: opts.apiDocs,
-      i18n: opts.i18n,
-    }),
-  );
+  return _verifiedSecuritySet.has(variantLabel(opts));
 }

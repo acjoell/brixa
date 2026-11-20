@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { inspect } from "node:util";
@@ -27,6 +29,7 @@ import {
 import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
 // @ts-expect-error La plantilla JavaScript no incluye archivo de declaraciones .d.ts
 import { redact as redactJs } from "../templates/backend-express-js/src/redact.js";
+import { connectionUrl } from "../templates/auth-postgres/ts/src/db/connection-url.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -52,6 +55,311 @@ interface NginxBlock {
   directives: string[];
   children: NginxBlock[];
 }
+
+describe("persistencia de Auth", () => {
+  for (const database of ["postgres", "sqlite"] as const) {
+    for (const language of ["js", "ts"] as const) {
+      it(`compone el esquema y la migración de ${database} en ${language} solo con Auth`, async () => {
+        const root = await mkTmp("persistencia");
+        for (const auth of [false, true]) {
+          const outputDir = path.join(root, auth ? "con" : "sin");
+          expect(
+            await generate({ outputDir, modality: "backend", database, language, auth }),
+          ).toEqual({ ok: true });
+          const schema = await fs.readFile(
+            path.join(outputDir, "src/db/schema." + language),
+            "utf8",
+          );
+          expect(schema.includes("export const users")).toBe(auth);
+          expect(schema.includes("export const sessions")).toBe(auth);
+          expect(schema.includes("export const auditLogSystem")).toBe(auth);
+          expect(
+            await fs.stat(path.join(outputDir, "ops/provision.sql")).then(
+              () => true,
+              () => false,
+            ),
+          ).toBe(auth && database === "postgres");
+          if (auth) {
+            const journal = JSON.parse(
+              await fs.readFile(path.join(outputDir, "drizzle/meta/_journal.json"), "utf8"),
+            );
+            const migration = await fs.readFile(
+              path.join(outputDir, "drizzle", journal.entries[0].tag + ".sql"),
+              "utf8",
+            );
+            expect(journal.entries.map((entry: { tag: string }) => entry.tag)).toEqual([
+              "0000_auth",
+              "0001_system_audit",
+              database === "postgres" ? "0002_audit_privileges" : "0002_audit_append_only",
+            ]);
+            await fs.access(path.join(outputDir, "drizzle/meta/0001_snapshot.json"));
+            expect(migration).toContain("session_token_hash");
+            await fs.access(path.join(outputDir, "drizzle/meta/0000_snapshot.json"));
+          } else {
+            await expect(
+              fs.access(path.join(outputDir, "drizzle/0002_audit_append_only.sql")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
+            await expect(
+              fs.access(path.join(outputDir, "drizzle/0001_system_audit.sql")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
+            await expect(
+              fs.access(path.join(outputDir, "drizzle/0000_auth.sql")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
+          }
+        }
+      });
+    }
+  }
+
+  it.each([
+    "0000_auth.sql",
+    "meta/_journal.json",
+    "meta/0000_snapshot.json",
+    "0001_ajena.sql",
+    "0001_system_audit.sql",
+    "meta/0001_snapshot.json",
+  ])("rechaza un historial Auth incompatible en %s sin modificar drizzle/", async (relative) => {
+    const outputDir = await mkTmp("colision-auth");
+    const drizzle = path.join(outputDir, "drizzle");
+    const target = path.join(drizzle, relative);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const original = Buffer.from("historial preexistente\n");
+    await fs.writeFile(target, original);
+    const entries = await fs.readdir(drizzle, { recursive: true });
+
+    expect(
+      await generate({
+        outputDir,
+        modality: "backend",
+        database: "sqlite",
+        language: "ts",
+        auth: true,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        kind: "copy_error",
+        message: expect.stringContaining("Conflicto de migraciones Auth"),
+      },
+    });
+    expect(await fs.readFile(target)).toEqual(original);
+    expect((await fs.readdir(drizzle, { recursive: true })).sort()).toEqual(entries.sort());
+  });
+
+  it("persiste identidades y sesiones en archivo SQLite y aplica sus restricciones", async () => {
+    const outputDir = await mkTmp("sqlite-auth");
+    expect(
+      await generate({
+        outputDir,
+        modality: "backend",
+        database: "sqlite",
+        language: "ts",
+        auth: true,
+      }),
+    ).toEqual({ ok: true });
+    const filename = path.join(outputDir, "auth.db");
+    const db = new DatabaseSync(filename);
+    const id = randomUUID();
+    const digest = createHash("sha256").update(randomBytes(32)).digest("hex");
+    try {
+      db.exec(await fs.readFile(path.join(outputDir, "drizzle/0000_auth.sql"), "utf8"));
+      const user = db.prepare(
+        "INSERT INTO users (id,canonical_identifier,created_at,updated_at) VALUES (?, ?, 1, 1)",
+      );
+      user.run(id, "persona");
+      db.exec(await fs.readFile(path.join(outputDir, "drizzle/0001_system_audit.sql"), "utf8"));
+      expect(db.prepare("SELECT canonical_identifier FROM users WHERE id=?").get(id)).toEqual({
+        canonical_identifier: "persona",
+      });
+      expect(db.prepare("SELECT COUNT(*) AS total FROM audit_log_system").get()).toEqual({
+        total: 0,
+      });
+      expect(() => user.run(randomUUID(), "persona")).toThrow(/UNIQUE/);
+      for (const identifier of [Buffer.from("persona"), Buffer.from("otra")]) {
+        expect(() => user.run(randomUUID(), identifier)).toThrow(
+          /CHECK.*users_identifier_nonempty/,
+        );
+      }
+      expect(() => user.run("invalid", "otra")).toThrow(/CHECK/);
+      expect(() => db.prepare("UPDATE users SET status = 'otro'").run()).toThrow(/CHECK/);
+      const session = db.prepare(
+        "INSERT INTO sessions (session_token_hash,user_id,created_at,last_activity_at,idle_expires_at) VALUES (?, ?, 1, 2, 3)",
+      );
+      expect(() => session.run(digest, randomUUID())).toThrow(/FOREIGN KEY/);
+      expect(() => session.run("credencial", id)).toThrow(/CHECK/);
+      session.run(digest, id);
+      expect(() => session.run(digest, id)).toThrow(/UNIQUE/);
+      for (const hash of [Buffer.from(digest), Buffer.from("0".repeat(64))]) {
+        expect(() => session.run(hash, id)).toThrow(/CHECK.*sessions_digest/);
+      }
+    } finally {
+      db.close();
+    }
+    const reopened = new DatabaseSync(filename);
+    try {
+      expect(reopened.prepare("SELECT * FROM sessions").get()).toEqual({
+        session_token_hash: digest,
+        user_id: id,
+        created_at: 1,
+        last_activity_at: 2,
+        idle_expires_at: 3,
+        revoked_at: null,
+      });
+      expect(reopened.prepare("SELECT * FROM users").get()).toEqual({
+        id,
+        canonical_identifier: "persona",
+        status: "pending_activation",
+        created_at: 1,
+        updated_at: 1,
+        password_hash: null,
+      });
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
+it("separa identidades PostgreSQL y rechaza credenciales incompletas o privilegiadas", () => {
+  const runtime = "postgresql://app_exec:fixture@postgres/app";
+  const migration = "postgresql://table_owner:fixture@postgres/app";
+  expect(connectionUrl("DATABASE_URL", { DATABASE_URL: runtime })).toBe(runtime);
+  expect(connectionUrl("MIGRATION_DATABASE_URL", { MIGRATION_DATABASE_URL: migration })).toBe(
+    migration,
+  );
+  for (const env of [
+    {},
+    { DATABASE_URL: migration },
+    { DATABASE_URL: runtime + "?user=postgres" },
+    { DATABASE_URL: runtime, MIGRATION_DATABASE_URL: migration },
+    { DATABASE_URL: runtime, POSTGRES_PASSWORD: "fixture" },
+    { DATABASE_URL: "postgresql://app_exec@postgres/app" },
+  ]) {
+    expect(() => connectionUrl("DATABASE_URL", env)).toThrow();
+  }
+  for (const env of [{ DATABASE_URL: runtime }, { MIGRATION_DATABASE_URL: runtime }]) {
+    expect(() => connectionUrl("MIGRATION_DATABASE_URL", env)).toThrow();
+  }
+});
+
+describe("overlay criptográfico de Auth", () => {
+  it.each([
+    ["backend", "js", "sqlite", true, false],
+    ["backend", "ts", "postgres", true, true],
+    ["fullstack", "ts", "sqlite", true, true],
+    ["fullstack", "js", "postgres", true, false],
+    ["backend", "ts", "sqlite", false, false],
+    ["fullstack", "js", "postgres", false, true],
+  ] as const)(
+    "compone entorno Docker en %s %s %s con auth=%s y docs=%s",
+    async (modality, language, database, auth, apiDocs) => {
+      const outputDir = await mkTmp("proyecto");
+      expect(
+        await generate({ outputDir, modality, language, database, auth, apiDocs, docker: true }),
+      ).toEqual({ ok: true });
+      const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
+      const environment =
+        /\n {2}backend:\n(?: {4}[^\n]+\n)*? {4}environment:\n((?: {6}[^\n]+\n)+)/.exec(
+          compose,
+        )?.[1];
+      const separate = auth && database === "postgres";
+      const backend = modality === "fullstack" ? path.join(outputDir, "backend") : outputDir;
+      const read = (name: string) => fs.readFile(path.join(backend, name), "utf8");
+      expect((await read("src/index." + language)).includes("await checkRuntimeIdentity()")).toBe(
+        separate,
+      );
+      expect((await read("src/db/migrate." + language)).includes("MIGRATION_DATABASE_URL")).toBe(
+        separate,
+      );
+      expect((await read("drizzle.config." + language)).includes("MIGRATION_DATABASE_URL")).toBe(
+        separate,
+      );
+      const instructions = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
+      expect(instructions.includes("run --rm -e MIGRATION_DATABASE_URL backend")).toBe(separate);
+      if (separate) {
+        expect(environment).toContain('DATABASE_URL: "${DATABASE_URL:?');
+        expect(compose.split(/\n {2}(?:frontend|postgres):/)[0]).not.toMatch(
+          /MIGRATION_DATABASE_URL|POSTGRES_PASSWORD|env_file|table_owner/,
+        );
+      }
+      expect(environment).toBeDefined();
+      expect(compose).not.toContain("@@INSERT:");
+      expect(environment?.includes("ENABLE_API_DOCS:")).toBe(apiDocs);
+      const example = await fs
+        .readFile(path.join(outputDir, ".env.example"), "utf8")
+        .catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+          throw error;
+        });
+      expect(
+        environment?.includes('SESSION_IDLE_TIMEOUT_MINUTES: "${SESSION_IDLE_TIMEOUT_MINUTES-30}"'),
+      ).toBe(auth);
+      expect(
+        environment?.includes('SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"'),
+      ).toBe(auth);
+      expect(
+        example.includes("SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n"),
+      ).toBe(auth);
+      if (auth) {
+        expect(environment).toContain('ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"');
+        expect(environment).toContain('ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"');
+        expect(example).toContain("ARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n");
+      } else {
+        expect(compose).not.toContain("ARGON2_");
+        expect(example).not.toContain("ARGON2_");
+      }
+    },
+  );
+
+  it.each([
+    ["backend", "js", true],
+    ["fullstack", "ts", true],
+    ["backend", "ts", false],
+  ] as const)("compone %s %s con auth=%s", async (modality, language, auth) => {
+    const outputDir = await mkTmp("proyecto");
+    const apiDocs = modality === "fullstack";
+    const result = await generate({
+      outputDir,
+      modality,
+      language,
+      database: "sqlite",
+      auth,
+      apiDocs,
+    });
+    expect(result.ok).toBe(true);
+    const backend = modality === "fullstack" ? path.join(outputDir, "backend") : outputDir;
+    const pkg = JSON.parse(await fs.readFile(path.join(backend, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(pkg.dependencies["@node-rs/argon2"]).toBe(auth ? "2.2.2" : undefined);
+    expect(pkg.dependencies.express).toBeDefined();
+    expect(pkg.dependencies["drizzle-orm"]).toBeDefined();
+    const moduleFile = path.join(backend, "src", "auth", "password-crypto." + language);
+    const index = await fs.readFile(path.join(backend, "src", "index." + language), "utf8");
+    expect(index.includes("getArgon2Limiter();")).toBe(auth);
+    expect(index.includes("parseSessionConfig(process.env);")).toBe(auth);
+    expect(index.includes("validateApiDocsEnv(process.env.ENABLE_API_DOCS)")).toBe(apiDocs);
+    if (auth) {
+      const init = index.indexOf("getArgon2Limiter();");
+      expect(init).toBeGreaterThan(index.indexOf("process.loadEnvFile()"));
+      expect(init).toBeLessThan(index.indexOf("app.listen("));
+    }
+    if (auth) await expect(fs.access(moduleFile)).resolves.toBeUndefined();
+    else await expect(fs.access(moduleFile)).rejects.toMatchObject({ code: "ENOENT" });
+    if (modality === "fullstack") {
+      const frontend = await fs.readFile(path.join(outputDir, "frontend", "package.json"), "utf8");
+      expect(frontend).not.toContain("@node-rs/argon2");
+    }
+  });
+
+  it.each(["frontend", "backend"] as const)("rechaza Auth en %s sin BD", async (modality) => {
+    const outputDir = await mkTmp("proyecto");
+    expect(await generate({ outputDir, modality, language: "ts", auth: true })).toEqual({
+      ok: false,
+      error: { kind: "auth_requires_backend_database" },
+    });
+    await expect(fs.access(outputDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
 
 function parseNginxConfig(raw: string): NginxBlock {
   const root: NginxBlock = { name: "root", directives: [], children: [] };

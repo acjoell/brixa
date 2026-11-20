@@ -23,6 +23,9 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
     ["frontend-react-js", 4],
     ["database-sqlite/js", 5],
     ["api-docs/js", 7],
+    ["auth/js", 15],
+    ["auth-postgres/js", 8],
+    ["auth-sqlite/js", 4],
     ["i18n/js", 3],
     ["database-postgres/js", 5],
   ]) {
