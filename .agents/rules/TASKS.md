@@ -451,7 +451,7 @@ Regla común: cada subtarea requiere antes un diseño breve y una decisión regi
 - Comprobar por variante typecheck, lint, format:check, build y audit.
 - Comprobar `tsc --showConfig` sobre `resolveJsonModule`.
 
-**Nota (2026-11-07):** D-052 indica que el alcance quedó reducido a dos variantes con i18n (frontend TypeScript y aplicación completa JavaScript con SQLite) y que los controles negativos N1–N7 no son repetibles en el arnés. D-052 remite a una tarea T-013e que no existe en este archivo; la decisión de abrirla o de que T-018 la absorba sigue pendiente (`TASKS_POST_MVP.md`, cuestiones abiertas).
+**Nota (2026-11-07):** D-052 indica que el alcance quedó reducido a dos variantes con i18n (frontend TypeScript y aplicación completa JavaScript con SQLite) y que los controles negativos N1–N7 no son repetibles en el arnés. La deuda se registra en [T-013e](TASKS_POST_MVP.md#t-013e--controles-negativos-repetibles-de-i18n). T-013d permanece completada con alcance reducido.
 
 ### T-014 — Diseñar e implementar autenticación y autorización
 

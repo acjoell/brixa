@@ -62,7 +62,8 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017a | COMPLETADA | Decisiones D-069, D-077 y D-078 (composición de archivos compartidos de overlays actuales cerrada) |
 | T-017a-ui | COMPLETADA | T-017a, D-079 (composición de main, App y vite.config cerrada) |
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
-| T-018 | IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE | Evidencia por variante y CI, asignación de i18n pendiente |
+| T-013e | PENDIENTE | D-052 y cobertura existente de T-013d |
+| T-018 | IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE | Acreditar SV-5 con Docker y PostgreSQL en alcance `full` |
 | T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
@@ -456,11 +457,25 @@ Notas:
 
 ---
 
+### T-013e — Controles negativos repetibles de i18n
+
+**Estado:** PENDIENTE.
+
+**Origen:** [D-052](DECISIONS.md#d-052--internacionalización-opcional-con-i18next). N1–N7 se ejecutaron una vez en T-013c y quedaron fuera del cierre con alcance reducido de T-013d.
+
+**Alcance:** incorporar N1–N7 a `verify:generated` para frontend TypeScript y fullstack JavaScript con SQLite. Esta tarea queda fuera de T-018 y de los prerrequisitos de T-014a.
+
+**Criterios de aceptación:**
+
+- Ejecutar N1–N7 de forma repetible y registrar el resultado por control y variante.
+- Demostrar que retirar o alterar la protección correspondiente hace fallar la aserción esperada de cada control.
+- Reportar mutaciones ausentes, duplicadas y errores de infraestructura como errores e impedir que cuenten como detecciones válidas.
+
 ### T-018 — Infraestructura de verificación avanzada
 
 **Estado:** IMPLEMENTACIÓN COMPLETA — VALIDACIÓN REMOTA PENDIENTE. No equivale a aceptación definitiva.
 
-**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. La última CI remota sigue pendiente de conclusión y no se espera para integrar, por autorización expresa del responsable. Permanecen pendientes el informe real por variante, la acreditación de proyecciones en la lista y la aceptación definitiva. D-052 conserva abierta la asignación de N1–N7: T-013d cerró con alcance reducido, y no se reabre ni se crea T-013e por inferencia. No se asignan nuevos requisitos i18n a T-018. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
+**Revisión de integración (2026-11-19):** se corrige SV-5 para conservar Docker en fullstack JS + PostgreSQL, como exige §6.3. La regresión comprueba la configuración exacta, tres verificaciones Docker en la orquestación simulada y su representación en el informe JS/TS (JS aprobado, TS no declarado para esa configuración). Tipos, ESLint, Prettier y pruebas focalizadas aprobados. Las verificaciones integrales locales comunicadas por el responsable preceden a esta corrección; no acreditan su ejecución real con Docker. El responsable confirma que la CI normal de main está verde. La aceptación sigue pendiente de acreditar la ejecución real de SV-5 con Docker y PostgreSQL mediante `workflow_dispatch` en alcance `full` y registrar el resultado por variante. Las notas de CI pendiente anteriores son historial; esta revisión define el estado vigente.
 **Aprobación:** Aprobado (alcance).
 **Dependencias:** T-017b, INV-06.
 
@@ -478,7 +493,7 @@ Notas:
 - Alinear la imagen de PostgreSQL del arnés (`postgres:17-alpine`) con la que generan las plantillas (`postgres:17.4-alpine`) o documentar la diferencia (P-015).
 - Instalaciones independientes y caché compartida de npm (D-062); sin symlinks.
 
-**Deuda relacionada:** D-052 cita una tarea T-013e que no existe en `TASKS.md` (la inspección y la revisión no la encontraron); los controles negativos de i18n se ejecutaron una vez y no son repetibles. Se decide si se abre T-013e o si T-018 absorbe el trabajo.
+**Deuda relacionada:** D-052 asigna N1–N7 a T-013e, fuera del alcance de T-018.
 
 **Áreas afectadas:** **[I]** `scripts/verify-generated.js`, `src/verified-variants.ts` y su test; **[L]** `package.json` del CLI (scripts); `.github/workflows/ci.yml`. Archivos incorporados en `fe41218`: `scripts/mutation-engine.js`, `scripts/mutation-engine.test.js`, `scripts/security-mutations.js` y `scripts/verify-security.js`.
 
@@ -524,18 +539,16 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 | Mutaciones con BD y proyecciones (§6.3) | Implementadas las siete proyecciones conservando modalidad, lenguaje, BD y Docker. Se mantienen los tres controles HTTP 500/CORS/CSP del piloto. `verify-security.js` reutiliza las verificaciones de BD y Docker sobre el proyecto temporal y evita reinstalar su backend. Pruebas de orquestación con procesos simulados comprueban 10 variantes, 30 mutaciones previstas y limpieza en éxito/fallo. Ejecución real pendiente |
 | Separación de pruebas con BD | Implementados `test:unit` (excluye `tests/db.test.*`) y `test:db` (solo conexión) en los manifests correspondientes. `npm test` conserva ambos grupos. El arnés integral ejecuta ambos scripts con la URL de BD apropiada. Generación focalizada PostgreSQL/SQLite JS/TS y selección real de archivos con Vitest aprobadas sin instalaciones |
 | Cobertura por pares automática | `verification-report.js` calcula 76 combinaciones y 76 pares válidos, 73 pares declarados y los tres huecos de D-053. Ambos arneses emiten tabla JS/TS y JSON con selección, ejecución, resultado, parejas incompletas/fallidas y diferencias de estado. Pruebas focalizadas verifican que el fallo interrumpe y se informa de variantes pendientes. El modo funcional/auditoría queda explícito. La falta de infraestructura obligatoria produce fallo global |
-| Mutaciones de i18n / T-013e | Pendiente. `verify:generated` valida dos variantes i18n, pero no repite controles negativos ni comprueba por mutación que fallen al retirar protecciones; D-052 mantiene abierta la decisión de asignar ese trabajo a T-013e o absorberlo en T-018 |
 | PostgreSQL del arnés y plantillas | Diferencia documentada como permite P-015: arnés `postgres:17-alpine`, plantillas `postgres:17.4-alpine` |
 
 **Validación focalizada del incremento residual:** 42 pruebas aprobadas en cinco archivos (`security-residuals.test.js`, `security-projections.test.js`, `verify-modes.test.js`, `verify-partitions.test.js` y `verified-variants.test.ts`). Incluyen generación temporal de cuatro combinaciones PostgreSQL/SQLite JS/TS sin instalar dependencias, selección real de tests con Vitest, reporte ante fallo o infraestructura ausente y orquestación simulada de las diez variantes. Tipos, ESLint y Prettier correctos. Los nombres `test:unit`/`test:db` se adoptan como elección local porque el informe original INV-06 no está disponible. Los resultados anteriores de 9/9 y CI verde corresponden al piloto, y la validación real de las nuevas proyecciones sigue pendiente.
 
 **Acciones pendientes para el cierre:**
-1. Ejecutar CI portable/full del incremento. El responsable confirma que `npm test`, `npm run verify:sync` y `VERIFY_SCOPE=full npm run verify:all` finalizaron sin errores. No se encontró un log o JSON guardado de esa ejecución en el repositorio. El código selecciona diez variantes y treinta mutaciones en ámbito full, pero la acreditación individual del piloto y las siete proyecciones queda pendiente del informe detallado o CI. Esta revisión no repitió las ejecuciones integrales.
-2. Tras esa validación, incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS`. La lista conserva por ahora las tres variantes del piloto ya validadas, de acuerdo con D-053/D-065.
-3. Resolver la asignación de los controles negativos repetibles de i18n (D-052). Su implementación dentro de T-018 queda condicionada a esa decisión. La revisión anterior los presentó indebidamente como obligación ya asignada a T-018.
-4. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
-5. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
-6. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
+1. Acreditar la ejecución real de SV-5 (fullstack JavaScript, PostgreSQL y Docker) en `main` mediante `workflow_dispatch` en alcance `full`. Conservar el informe por variante de `verify:security`.
+2. Incorporar las proyecciones acreditadas a `VERIFIED_SECURITY_VARIANTS` conforme a D-053 y D-065.
+3. La activación gradual se implementa quitando únicamente las capacidades aún inexistentes de SV-1 a SV-7. `VERIFY_SCOPE=portable` selecciona cinco variantes (piloto y dos proyecciones SQLite sin Docker), y `full` selecciona diez (piloto y siete proyecciones). Las mutaciones RLS corresponden a la futura implementación de T-014c.
+4. Tras completar el alcance pendiente, ejecutar las verificaciones pertinentes y actualizar la matriz. La validación integral local y CI remota del piloto ya están confirmadas por el responsable.
+5. T-023 permanece COMPLETADA. T-018 sigue EN PROGRESO y no desbloquea Auth/RBAC.
 
 **Revisión final de aceptación (2026-11-19; evidencia comunicada por el responsable):** `npm test`, `verify:sync` y `VERIFY_SCOPE=full npm run verify:all` aprobaron localmente; CI está verde, incluido Windows Node 26 Group A tras corregir la prueba de timeout, y la verificación Full Scope con Docker/PostgreSQL; auditoría de dependencias satisfactoria; nueve mutaciones detectadas y 41/41 pruebas del motor aprobadas. No se repitieron estas ejecuciones durante la revisión documental. Esta evidencia cierra los pendientes de integración/CI y el incidente Windows, pero deja pendientes los requisitos y decisiones de alcance detallados en la matriz; por tanto, T-018 no puede marcarse COMPLETADA todavía.
 
@@ -800,7 +813,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 3. **Propiedades desconocidas en validación** (descartar o rechazar). Tras INV-02.
 4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; estilos y pruebas específicas pendientes de INV-05a e INV-06 (P-017).
 5. **Versión de `package.json` en `main`** tras el tag (P-016). Por defecto: versión de preparación.
-6. **T-013e.** ¿Se abre o T-018 absorbe el trabajo?
+6. **T-013e.** Asignación resuelta en D-052. La implementación de N1–N7 queda pendiente en T-013e.
 7. **Relación con la decisión de validar `DATABASE_URL` sin que el servidor lo importe.** Tras INV-02.
 8. **Orden entre composición y seguridad base.** Este archivo ordena T-017a antes de T-017b; la propuesta v3 propone endurecer antes. ¿Se adelantan solo las partes que no tocan archivos compartidos (`redact` en los overlays de base de datos, `nginx.conf`)?
 9. **Multitenancy con SQLite.** Resuelta por D-064 y ratificada en D-094: SQLite queda terminantemente excluido de multitenancy en esta etapa.
