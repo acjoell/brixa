@@ -1,2 +1,3 @@
 getArgon2Limiter();
 parseSessionConfig(process.env);
+parseActivationExpiryHours(process.env);

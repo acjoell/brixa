@@ -1,6 +1,7 @@
 import { systemAuditEvents } from "../auth/audit-events.js";
+import type { SystemAuditEventName } from "../auth/audit-events.js";
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, check, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, check, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const instant = (name: string) => integer(name, { mode: "timestamp_ms" });
 const states = ["pending_activation", "active", "disabled"] as const;
@@ -53,7 +54,7 @@ export const auditLogSystem = sqliteTable(
   "audit_log_system",
   {
     id: text("id").notNull().primaryKey(),
-    event: text("event", { enum: systemAuditEvents }).notNull(),
+    event: text("event").$type<SystemAuditEventName>().notNull(),
     actorId: text("actor_id").references(() => users.id),
     requestId: text("request_id").notNull(),
     createdAt: instant("created_at").notNull(),
@@ -69,5 +70,54 @@ export const auditLogSystem = sqliteTable(
     ),
     index("audit_system_request_idx").on(table.requestId),
     index("audit_system_time_idx").on(table.createdAt),
+  ],
+);
+
+export const initialAdministrator = sqliteTable(
+  "initial_administrator",
+  {
+    singleton: text("singleton").notNull().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+  },
+  () => [check("initial_administrator_singleton", sql`singleton = 'initial'`)],
+);
+
+const activationStates = ["open", "consumed", "revoked", "expired"] as const;
+
+export const activationTokens = sqliteTable(
+  "activation_tokens",
+  {
+    tokenDigest: text("token_digest").notNull().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status", { enum: activationStates }).notNull().default("open"),
+    issuedAt: instant("issued_at").notNull(),
+    expiresAt: instant("expires_at").notNull(),
+    closedAt: instant("closed_at"),
+  },
+  (table) => [
+    check(
+      "activation_tokens_digest",
+      sql`typeof(token_digest) = 'text' AND length(token_digest) = 64 AND token_digest NOT GLOB '*[^0-9a-f]*' AND instr(token_digest, char(0)) = 0`,
+    ),
+    check(
+      "activation_tokens_dates",
+      sql`typeof(issued_at) = 'integer' AND typeof(expires_at) = 'integer' AND (closed_at IS NULL OR typeof(closed_at) = 'integer') AND expires_at > issued_at`,
+    ),
+    check(
+      "activation_tokens_lifecycle",
+      sql`(status = 'open' AND closed_at IS NULL) OR
+          (closed_at IS NOT NULL AND closed_at >= issued_at AND (
+            (status = 'consumed' AND closed_at < expires_at) OR
+            status = 'revoked' OR
+            (status = 'expired' AND closed_at >= expires_at)
+          ))`,
+    ),
+    uniqueIndex("activation_tokens_open_user_idx")
+      .on(table.userId)
+      .where(sql`status = 'open'`),
   ],
 );

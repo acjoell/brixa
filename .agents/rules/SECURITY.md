@@ -72,11 +72,10 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 - **Aprovisionamiento administrado por defecto:** El modelo estándar es administrado por un actor con permisos. Si el usuario ya existe en el sistema, se reutiliza su identidad global. No se genera un sistema de invitaciones con aceptación voluntaria en v1.
 - **Activación segura de cuentas creadas administrativamente (D-107):**
   - Cuentas nuevas quedan en estado `pending_activation`.
-  - Token de activación de 32 bytes aleatorios criptográficos, caducidad limitada y de un solo uso.
-  - En la base de datos se almacena **exclusivamente el hash SHA-256** del token; el token en claro nunca se persiste.
+  - El formato canónico, el digest almacenado, la caducidad y el historial de tokens se rigen por D-107. Un token vencido es inválido aunque permanezca abierto.
   - El enlace se entrega de forma controlada al administrador para su distribución por canal privado seguro (sin SMTP obligatorio en el núcleo).
   - El enlace permite únicamente establecer la contraseña inicial; no otorga sesión ni acceso a datos de negocio.
-  - Consumo atómico: validación del token, hash de la contraseña con Argon2id y consumo del token dentro de una misma transacción.
+  - Abrir el enlace no consume el token. Al confirmar, la comprobación de vigencia, el consumo y la actualización de la cuenta con el hash Argon2id se confirman en una misma transacción.
   - El administrador puede invalidar un enlace pendiente y generar uno nuevo sin destruir la cuenta.
   - Prohibido registrar tokens de activación en claro en logs, auditorías o respuestas de error.
 - **Registro público condicionado (D-086):** Configurable en CLI exclusivamente para proyectos con Auth sin multitenancy (manteniendo registro administrado como predeterminado). No otorga privilegios administrativos bajo ningún concepto, incorpora rate limiting estricto y no permite la creación pública de organizaciones.
@@ -718,7 +717,7 @@ export async function getOrganizationInvoices(ctx: ActorContext, db: Database) {
 
 #### 8. Auditoría y eventos de seguridad
 - **Responsabilidad:** Trazabilidad inmutable de eventos críticos.
-- **Contrato:** `audit_log_system` obligatoria con Auth en ambos motores; `audit_log_org` exclusiva de multitenancy PostgreSQL. Protección append-only mediante privilegios separados en PostgreSQL, sin UPDATE ni DELETE para `app_exec`; SQLite con protección mediante `WITHOUT ROWID` y triggers, sujeta a los límites de la sección 9. Persistencia atómica en mutaciones y fuera de rollback en denegaciones (D-105).
+- **Contrato:** `audit_log_system` obligatoria con Auth en ambos motores; `audit_log_org` exclusiva de multitenancy PostgreSQL. Protección append-only mediante privilegios separados en PostgreSQL, sin UPDATE ni DELETE para `app_exec`; SQLite con protección mediante `WITHOUT ROWID` y triggers, sujeta a los límites de la sección 9. Persistencia atómica en mutaciones. Las denegaciones de administración global se registran en `audit_log_system` después del rollback, en una transacción independiente. Categoría y severidad se obtienen del catálogo estático de D-105.
 
 #### 9. Frontend React y Transporte
 - **Responsabilidad:** Interfaz de usuario, navegación defensiva y transporte seguro.
@@ -726,7 +725,7 @@ export async function getOrganizationInvoices(ctx: ActorContext, db: Database) {
 
 #### 10. Bootstrap administrativo
 - **Responsabilidad:** Creación segura del primer administrador y configuración inicial.
-- **Contrato:** Exclusivamente mediante comandos CLI locales del proyecto generado. Idempotente, sin contraseñas predeterminadas y sin endpoints HTTP.
+- **Contrato:** Exclusivamente mediante comandos CLI locales del proyecto generado. Idempotente, sin contraseñas predeterminadas y sin endpoints HTTP. Véase D-085 para la persistencia de la autoridad global, la conexión del comando en PostgreSQL y la configuración inicial de la contraseña.
 
 ---
 

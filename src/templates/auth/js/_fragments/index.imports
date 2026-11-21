@@ -1,2 +1,3 @@
 import { getArgon2Limiter } from "./auth/argon2-limiter.js";
 import { parseSessionConfig } from "./auth/session-config.js";
+import { parseActivationExpiryHours } from "./auth/activation-config.js";

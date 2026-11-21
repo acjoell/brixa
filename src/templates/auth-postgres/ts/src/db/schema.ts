@@ -1,6 +1,7 @@
 import { systemAuditEvents } from "../auth/audit-events.js";
+import type { SystemAuditEventName } from "../auth/audit-events.js";
 import { sql } from "drizzle-orm";
-import { pgTable, text, uuid, timestamp, check, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, check, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 const instant = (name: string) => timestamp(name, { withTimezone: true });
 const states = ["pending_activation", "active", "disabled"] as const;
@@ -43,7 +44,7 @@ export const auditLogSystem = pgTable(
   "audit_log_system",
   {
     id: uuid("id").notNull().primaryKey(),
-    event: text("event", { enum: systemAuditEvents }).notNull(),
+    event: text("event").$type<SystemAuditEventName>().notNull(),
     actorId: uuid("actor_id").references(() => users.id),
     requestId: text("request_id").notNull(),
     createdAt: instant("created_at").notNull(),
@@ -56,5 +57,54 @@ export const auditLogSystem = pgTable(
     check("audit_system_correlation", sql`request_id ~ '^[A-Za-z0-9._:-]{1,128}$'`),
     index("audit_system_request_idx").on(table.requestId),
     index("audit_system_time_idx").on(table.createdAt),
+  ],
+);
+
+export const initialAdministrator = pgTable(
+  "initial_administrator",
+  {
+    singleton: text("singleton").notNull().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+  },
+  () => [check("initial_administrator_singleton", sql`singleton = 'initial'`)],
+);
+
+const activationStates = ["open", "consumed", "revoked", "expired"] as const;
+
+export const activationTokens = pgTable(
+  "activation_tokens",
+  {
+    tokenDigest: text("token_digest").notNull().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status", { enum: activationStates }).notNull().default("open"),
+    issuedAt: instant("issued_at").notNull(),
+    expiresAt: instant("expires_at").notNull(),
+    closedAt: instant("closed_at"),
+  },
+  (table) => [
+    check(
+      "activation_tokens_digest",
+      sql`length(token_digest) = 64 AND token_digest ~ '^[0-9a-f]+$'`,
+    ),
+    check(
+      "activation_tokens_dates",
+      sql`isfinite(issued_at) AND isfinite(expires_at) AND (closed_at IS NULL OR isfinite(closed_at)) AND expires_at > issued_at`,
+    ),
+    check(
+      "activation_tokens_lifecycle",
+      sql`(status = 'open' AND closed_at IS NULL) OR
+          (closed_at IS NOT NULL AND closed_at >= issued_at AND (
+            (status = 'consumed' AND closed_at < expires_at) OR
+            status = 'revoked' OR
+            (status = 'expired' AND closed_at >= expires_at)
+          ))`,
+    ),
+    uniqueIndex("activation_tokens_open_user_idx")
+      .on(table.userId)
+      .where(sql`status = 'open'`),
   ],
 );

@@ -4,7 +4,7 @@ El aprovisionamiento afecta los permisos de conexión y creación de la base ele
 
 1. Como administrador de la base con autorización para crear roles, ejecuta desde el backend `psql -X -d NOMBRE_BD -v target=NOMBRE_BD -f ops/provision.sql`. En Compose inicia primero `docker compose up -d postgres`. Desde la raíz ejecuta `docker compose exec -T postgres psql -X -U postgres -d app -v target=app < ops/provision.sql` (fullstack: usa `backend/ops/provision.sql`). Sustituye los nombres si configuraste POSTGRES_USER o POSTGRES_DB. El script es transaccional y repetirlo conserva las contraseñas.
 2. En una sesión interactiva psql del administrador (Compose: `docker compose exec postgres psql -X -U postgres -d app`), usa `SET password_encryption = 'scram-sha-256';`, luego los comandos separados `\password table_owner` y `\password app_exec`. Asigna secretos distintos mediante los prompts o usa el mecanismo de credenciales del proveedor. Configura autenticación por contraseña sobre una conexión protegida.
-3. Inyecta MIGRATION_DATABASE_URL únicamente en el proceso puntual de migración documentado en el README. Ejecuta las migraciones antes de arrancar Express. DATABASE_URL utiliza app_exec. El administrador conserva acceso para operaciones y revisión del historial.
+3. Inyecta MIGRATION_DATABASE_URL solo en los procesos puntuales de migración y bootstrap documentados en el README. Ejecuta las migraciones antes del bootstrap y de arrancar Express. DATABASE_URL utiliza app_exec. El administrador conserva acceso para operaciones y revisión del historial.
 
 ## Instalaciones con datos o roles previos
 

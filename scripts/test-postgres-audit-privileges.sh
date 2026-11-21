@@ -2,7 +2,8 @@
 # Desde la raíz, con las dependencias del backend PostgreSQL ya instaladas.
 set -euo pipefail
 mode=${1:-upgrade}
-case "$mode" in fresh|upgrade|indirect) ;; *) exit 2 ;; esac
+case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation) ;; *) exit 2 ;; esac
+script_dir=$(dirname "$(realpath "$0")")
 deps=$(realpath "${BRIXA_BACKEND_NODE_MODULES:?Directorio node_modules del backend generado}")
 test -d "$deps/pg"
 test -d "$deps/drizzle-orm"
@@ -43,6 +44,405 @@ owner_url="postgresql://table_owner:$owner_password@127.0.0.1:$port/app"
 export DATABASE_URL="postgresql://app_exec:$runtime_password@127.0.0.1:$port/app"
 migrate() { MIGRATION_DATABASE_URL="$owner_url" node src/db/migrate.js; }
 test "$(admin -Atc 'SHOW server_version_num')" = 170004
+if [[ "$mode" == managed-activation || "$mode" == account-activation ]]; then
+  if [ "$mode" = managed-activation ]; then
+    cp drizzle/meta/_journal.json "$work/journal"
+    node --input-type=module -e '
+      import fs from "node:fs";
+      const path="drizzle/meta/_journal.json", journal=JSON.parse(fs.readFileSync(path));
+      journal.entries=journal.entries.slice(0,5); fs.writeFileSync(path,JSON.stringify(journal));'
+  fi
+  migrate
+  BRIXA_TEST_OWNER_URL="$owner_url" FULL_JOURNAL="$work/journal" ACTIVATION_SCENARIO="$mode" node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { copyFile } from "node:fs/promises";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+import { SystemAuditDenied, withSystemAudit } from "./src/auth/system-audit.js";
+import { setImmediate } from "node:timers/promises";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import * as schema from "./src/db/schema.js";
+import { checkAccountActivation, checkAccountActivationRaces } from "./tests/account-activation-contract.js";
+import {
+  checkManagedActivation,
+  checkManagedActivationRace,
+  holdActivationCommit,
+  managedActivationFixture,
+} from "./tests/managed-activation-contract.js";
+
+const owner = new pg.Client({ connectionString: process.env.BRIXA_TEST_OWNER_URL });
+const runtime = () => new pg.Client({
+  connectionString: process.env.DATABASE_URL,
+  lock_timeout: 5000,
+  statement_timeout: 6000,
+});
+const first = runtime();
+const second = runtime();
+try {
+  await Promise.all([owner.connect(), first.connect(), second.connect()]);
+  const identity = async (connection, role) => {
+    const row = (await connection.query("SELECT session_user, pg_backend_pid() AS pid")).rows[0];
+    assert.equal(row.session_user, role);
+    return row.pid;
+  };
+  await identity(owner, "table_owner");
+  const firstPid = await identity(first, "app_exec");
+  const secondPid = await identity(second, "app_exec");
+  assert.notEqual(firstPid, secondPid);
+  const database = drizzle(first, { schema });
+  const other = drizzle(second, { schema });
+  const privileged = drizzle(owner, { schema });
+  const fixture = await managedActivationFixture(privileged);
+  const race = async (start, contend, onBlocked) => {
+    const { gated, ready, release } = holdActivationCommit(database);
+    const firstWork = Promise.allSettled([start(gated, gated)]);
+    try {
+      await Promise.race([
+        ready,
+        firstWork.then(() => { throw new Error("Primera transacción terminó antes de la barrera"); }),
+      ]);
+      let settled = false;
+      const secondWork = Promise.allSettled([contend(other, other)]).then((result) => {
+        settled = true;
+        return result;
+      });
+      try {
+        const deadline = Date.now() + 4000;
+        while (true) {
+          const { rows } = await owner.query(
+            "SELECT state, wait_event_type, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE pid=$1",
+            [secondPid],
+          );
+          if (!settled && rows[0]?.blockers.includes(firstPid)) break;
+          if (settled || Date.now() >= deadline) {
+            throw new Error(JSON.stringify({ settled, activity: rows }));
+          }
+          await setImmediate();
+        }
+        onBlocked?.();
+      } finally {
+        release();
+        await secondWork;
+      }
+      const [[winner], [contender]] = await Promise.all([firstWork, secondWork]);
+      if (winner.status === "rejected") throw winner.reason;
+      return [winner.value, contender];
+    } finally {
+      release();
+      await firstWork;
+    }
+  };
+  if (process.env.ACTIVATION_SCENARIO === "account-activation") {
+    await checkRuntimeIdentity();
+    await checkAccountActivation(fixture, database, (event, enabled) =>
+      owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_consumption CHECK (event <> '" + event + "') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_consumption"),
+    );
+    await checkAccountActivationRaces(fixture, database, race);
+    console.log("PostgreSQL 17.4: consumo de activación, rollback y cinco carreras comprobados con app_exec.");
+  } else {
+    await owner.query("INSERT INTO audit_log_system VALUES ($1, 'logout', $2, 'before-0005', now())", [randomUUID(), fixture.admin]);
+    const read = async (sql) => (await owner.query(sql)).rows;
+    const historySql = "SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at";
+    const rowsSql = "SELECT * FROM audit_log_system ORDER BY id";
+    const permissionsSql = "SELECT oid, relowner, relacl FROM pg_class WHERE oid='public.audit_log_system'::regclass";
+    const before = await read(rowsSql);
+    const history = await read(historySql);
+    const permissions = await read(permissionsSql);
+    assert.equal(history.length, 5);
+    await copyFile(process.env.FULL_JOURNAL, "drizzle/meta/_journal.json");
+    const migrateAudit = () => migrate(privileged, { migrationsFolder: "drizzle" });
+    await migrateAudit();
+    assert.deepEqual(await read(rowsSql), before);
+    assert.deepEqual(await read(permissionsSql), permissions);
+    const after = await read(historySql);
+    assert.equal(after.length, 6);
+    assert.deepEqual(after.slice(0, 5), history);
+    await migrateAudit();
+    assert.deepEqual(await read(historySql), after);
+    await checkRuntimeIdentity();
+    for (const sql of [
+      "SELECT * FROM audit_log_system",
+      "UPDATE audit_log_system SET request_id='bad'",
+      "DELETE FROM audit_log_system",
+      "TRUNCATE audit_log_system",
+      "ALTER TABLE audit_log_system DROP COLUMN event",
+    ]) await assert.rejects(first.query(sql), { code: "42501" });
+    await assert.rejects(
+      first.query("INSERT INTO audit_log_system VALUES ($1, 'bogus', NULL, 'after-0005', now())", [randomUUID()]),
+      { code: "23514", constraint: "audit_system_event" },
+    );
+    const denial = "platform_admin_access_denied";
+    let called = false;
+    await assert.rejects(withSystemAudit(database, { actorId: fixture.admin, requestId: "invalid-success", event: denial }, async () => {
+      called = true;
+    }), /transacción independiente/);
+    assert.equal(called, false);
+    const deniedInsert = randomUUID();
+    await assert.rejects(withSystemAudit(database, { actorId: deniedInsert, requestId: "rolled-back" }, async (tx) => {
+      const now = new Date();
+      await tx.insert(schema.users).values({ id: deniedInsert, canonicalIdentifier: deniedInsert, createdAt: now, updatedAt: now });
+      throw new SystemAuditDenied(denial);
+    }), (error) => error.cause?.code === "23503");
+    await fixture.audit("invalid-success", []);
+    await fixture.audit("rolled-back", []);
+    assert(!(await fixture.accounts()).some(({ id }) => id === deniedInsert));
+    assert.deepEqual(await read(rowsSql), before);
+
+    await checkManagedActivation(fixture, database, (event, enabled) =>
+      owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_audit CHECK (event <> '" + event + "') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_audit"),
+    );
+    await checkManagedActivationRace(fixture, race);
+    console.log("PostgreSQL 17.4: flujo, rollback y carreras de activación comprobados con app_exec.");
+  }
+} finally {
+  await Promise.all([first.end(), second.end(), owner.end(), pool.end()]);
+}
+JS
+  exit 0
+fi
+if [[ "$mode" == activation-* ]]; then
+  cp drizzle/meta/_journal.json "$work/journal"
+  if [ "$mode" = activation-upgrade ]; then
+    node --input-type=module -e '
+      import fs from "node:fs";
+      const file = "drizzle/meta/_journal.json";
+      const journal = JSON.parse(fs.readFileSync(file));
+      journal.entries = journal.entries.slice(0, 4);
+      fs.writeFileSync(file, JSON.stringify(journal));'
+    migrate
+  fi
+  BRIXA_TEST_OWNER_URL="$owner_url" FULL_JOURNAL="$work/journal" SCENARIO="$mode" node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { copyFile } from "node:fs/promises";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
+import { activationTokenDigest, generateActivationToken } from "./src/auth/activation-token.js";
+import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+
+const owner = new pg.Pool({ connectionString: process.env.BRIXA_TEST_OWNER_URL });
+try {
+  const user = randomUUID();
+  const userSql = "INSERT INTO users(id,canonical_identifier,created_at,updated_at) VALUES ($1,$1::uuid::text,now(),now())";
+  const read = async (table) => (await owner.query("SELECT * FROM " + table + " ORDER BY 1")).rows;
+  const tables = ["users", "sessions", "audit_log_system", "initial_administrator"];
+  const journal = "drizzle.__drizzle_migrations";
+  const upgrade = process.env.SCENARIO === "activation-upgrade";
+  if (upgrade) {
+    await owner.query(userSql, [user]);
+    await owner.query("INSERT INTO sessions VALUES (repeat('a',64),$1,now(),now(),now(),NULL)", [user]);
+    await owner.query("INSERT INTO audit_log_system VALUES ($1,'bootstrap',$2,'activation-test',now())", [randomUUID(), user]);
+    await owner.query("INSERT INTO initial_administrator VALUES ('initial',$1)", [user]);
+  }
+  const before = upgrade ? await Promise.all(tables.map(read)) : [[], [], [], []];
+  const history = upgrade ? await read(journal) : [];
+  if (upgrade) assert.equal(history.length, 4);
+  await copyFile(process.env.FULL_JOURNAL, "drizzle/meta/_journal.json");
+  const run = () => migrate(drizzle(owner), { migrationsFolder: "drizzle" });
+  await run();
+  const after = await read(journal);
+  assert.equal(after.length, 6);
+  assert.deepEqual(after.slice(0, history.length), history);
+  await run();
+  assert.deepEqual(await read(journal), after);
+  assert.deepEqual(await Promise.all(tables.map(read)), before);
+  if (!upgrade) await owner.query(userSql, [user]);
+
+  await checkRuntimeIdentity();
+  assert.equal((await pool.query("SELECT session_user")).rows[0].session_user, "app_exec");
+  const token = generateActivationToken();
+  const digest = activationTokenDigest(token);
+  const issued = new Date("2026-11-21T12:00:00Z");
+  const expires = new Date("2026-11-22T12:00:00Z");
+  const insert = (overrides = {}) => {
+    const { hash, id, status, issuedAt, expiresAt, closed } = {
+      hash: digest, id: user, status: "open", issuedAt: issued, expiresAt: expires, closed: null, ...overrides,
+    };
+    return pool.query("INSERT INTO activation_tokens VALUES ($1,$2,$3,$4,$5,$6)", [hash,id,status,issuedAt,expiresAt,closed]);
+  };
+  const rejects = (promise, code) => assert.rejects(promise, { code });
+  await insert();
+  assert.deepEqual((await pool.query("SELECT * FROM activation_tokens")).rows, [{
+    token_digest: digest, user_id: user, status: "open", issued_at: issued, expires_at: expires, closed_at: null,
+  }]);
+  const other = "b".repeat(64);
+  await rejects(insert({ hash: other }), "23505");
+  await rejects(insert({ status: "revoked", closed: issued }), "23505");
+  assert.equal((await pool.query("UPDATE activation_tokens SET status='revoked', closed_at=issued_at WHERE token_digest=$1", [digest])).rowCount, 1);
+  await insert({ hash: other });
+  await insert({ hash: "c".repeat(64), status: "expired", closed: expires });
+  await insert({ hash: "d".repeat(64), status: "consumed", closed: issued });
+  for (const values of [
+    { hash: token },
+    { hash: other.toUpperCase() },
+    { hash: other + "\n" },
+    { expiresAt: issued },
+    { status: "open", closed: issued },
+    { status: "revoked", closed: null },
+    { status: "expired", closed: issued },
+    { status: "consumed", closed: expires },
+    { status: "bogus", closed: issued },
+    { status: "revoked", closed: new Date(issued.getTime() - 1) },
+  ]) await rejects(insert({ hash: "e".repeat(64), status: "revoked", closed: issued, ...values }), "23514");
+  await rejects(insert({ hash: "e".repeat(64), id: randomUUID(), status: "revoked", closed: issued }), "23503");
+  for (const sql of [
+    "DELETE FROM activation_tokens",
+    "TRUNCATE activation_tokens",
+    "ALTER TABLE activation_tokens DROP COLUMN status",
+    "UPDATE audit_log_system SET request_id=request_id",
+    "DELETE FROM audit_log_system",
+    "UPDATE initial_administrator SET user_id=user_id",
+  ]) await rejects(pool.query(sql), "42501");
+  assert.equal((await read("activation_tokens")).length, 4);
+  assert.deepEqual(await read("audit_log_system"), before[2]);
+  await owner.query("GRANT DELETE ON activation_tokens TO PUBLIC");
+  await assert.rejects(checkRuntimeIdentity(), /insegura/);
+} finally {
+  await Promise.all([owner.end(), pool.end()]);
+}
+JS
+  echo "PostgreSQL 17.4: $mode, historial, restricciones y privilegios efectivos comprobados."
+  exit 0
+fi
+if [ "$mode" = bootstrap-tty ]; then
+  migrate
+  BRIXA_TEST_BOOTSTRAP_OWNER_URL="$owner_url" python3 "$script_dir/test-bootstrap-tty.py" "$DEST" postgres
+  exit 0
+fi
+if [ "$mode" = bootstrap ]; then
+  migrate
+  BRIXA_TEST_OWNER_URL="$owner_url" node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import pg from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+import { bootstrapPostgresAdministrator } from "./src/db/bootstrap.js";
+import * as schema from "./src/db/schema.js";
+import { checkBootstrap, checkBootstrapRace } from "./tests/bootstrap-contract.js";
+
+const env = { MIGRATION_DATABASE_URL: process.env.BRIXA_TEST_OWNER_URL };
+const owner = new pg.Pool({ connectionString: env.MIGRATION_DATABASE_URL, max: 1 });
+const other = new pg.Pool({ connectionString: env.MIGRATION_DATABASE_URL, max: 1 });
+try {
+  await checkRuntimeIdentity();
+  const credentials = { email: "bootstrap@example.test", password: "test-only password" };
+  await assert.rejects(
+    bootstrapPostgresAdministrator(credentials, { DATABASE_URL: process.env.DATABASE_URL }),
+    /MIGRATION_DATABASE_URL no configurada/,
+  );
+  await assert.rejects(
+    bootstrapPostgresAdministrator(credentials, { MIGRATION_DATABASE_URL: process.env.DATABASE_URL }),
+    /Identidad o URL PostgreSQL inválida/,
+  );
+  const database = drizzle(owner, { schema });
+  await checkBootstrap(
+    database,
+    (enabled) => owner.query(enabled
+      ? "ALTER TABLE audit_log_system ADD CONSTRAINT bootstrap_test_failure CHECK (event <> 'bootstrap')"
+      : "ALTER TABLE audit_log_system DROP CONSTRAINT bootstrap_test_failure"),
+    (input) => bootstrapPostgresAdministrator(input, env),
+  );
+  await assert.rejects(pool.query("UPDATE audit_log_system SET request_id=request_id"), { code: "42501" });
+  await assert.rejects(pool.query("DELETE FROM audit_log_system"), { code: "42501" });
+
+  // Solo la base efímera del contenedor. Cada escenario comienza con un historial vacío.
+  await owner.query("TRUNCATE initial_administrator, sessions, audit_log_system, users");
+  await checkBootstrapRace(database, drizzle(other, { schema }));
+} finally {
+  await Promise.all([owner.end(), other.end(), pool.end()]);
+}
+JS
+  echo 'PostgreSQL 17.4: bootstrap, rollback, separación de credenciales y carrera comprobados.'
+  exit 0
+fi
+if [ "$mode" = authority ]; then
+  cp drizzle/meta/_journal.json "$work/journal"
+  node --input-type=module -e '
+    import fs from "node:fs";
+    const path="drizzle/meta/_journal.json", journal=JSON.parse(fs.readFileSync(path));
+    journal.entries=journal.entries.slice(0,3); fs.writeFileSync(path,JSON.stringify(journal));'
+  migrate
+  BRIXA_TEST_OWNER_URL="$owner_url" FULL_JOURNAL="$work/journal" node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { copyFile } from "node:fs/promises";
+import pg from "pg";
+import { checkRuntimeIdentity, db, pool } from "./src/db/client.js";
+import { isInitialAdministrator } from "./src/auth/initial-administrator.js";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { drizzle } from "drizzle-orm/node-postgres";
+
+const owner = new pg.Pool({ connectionString: process.env.BRIXA_TEST_OWNER_URL });
+try {
+  const user = randomUUID();
+  const admin = randomUUID();
+  await owner.query(
+    "INSERT INTO users(id,canonical_identifier,status,created_at,updated_at) VALUES ($1,'user','active',now(),now()), ($2,'admin','active',now(),now())",
+    [user, admin],
+  );
+  await owner.query(
+    "INSERT INTO sessions(session_token_hash,user_id,created_at,last_activity_at,idle_expires_at) VALUES (repeat('a',64),$1,now(),now(),now())",
+    [user],
+  );
+  await pool.query(
+    "INSERT INTO audit_log_system(id,event,actor_id,request_id,created_at) VALUES ($1,'logout',$2,'authority-test',now())",
+    [randomUUID(), user],
+  );
+  const read = async (table) => (await owner.query("SELECT * FROM " + table + " ORDER BY 1")).rows;
+  const tables = ["users", "sessions", "audit_log_system"];
+  const before = await Promise.all(tables.map(read));
+  const journal = "drizzle.__drizzle_migrations";
+  const history = await read(journal);
+  assert.equal(history.length, 3);
+  await copyFile(process.env.FULL_JOURNAL, "drizzle/meta/_journal.json");
+  await migrate(drizzle(owner), { migrationsFolder: "drizzle" });
+  assert.deepEqual(await Promise.all(tables.map(read)), before);
+  const after = await read(journal);
+  assert.equal(after.length, 6);
+  assert.deepEqual(after.slice(0, 3), history);
+  assert.deepEqual(await read("initial_administrator"), []);
+  await checkRuntimeIdentity();
+  const insert = "INSERT INTO initial_administrator(singleton,user_id) VALUES ($1,$2)";
+  const rejects = (promise, code) => assert.rejects(promise, { code });
+  await rejects(owner.query(insert, [null, admin]), "23502");
+  await rejects(owner.query(insert, ["other", admin]), "23514");
+  await rejects(owner.query(insert, ["initial", randomUUID()]), "23503");
+  await rejects(pool.query(insert, ["initial", admin]), "42501");
+  await owner.query(insert, ["initial", admin]);
+  await rejects(owner.query(insert, ["initial", user]), "23505");
+  await rejects(owner.query("DELETE FROM users WHERE id=$1", [admin]), "23503");
+  assert.equal(await isInitialAdministrator(db, admin), true);
+  assert.equal(await isInitialAdministrator(db, user), false);
+  for (const sql of [
+    "UPDATE initial_administrator SET user_id=user_id",
+    "DELETE FROM initial_administrator",
+    "TRUNCATE initial_administrator",
+    "UPDATE audit_log_system SET request_id=request_id",
+    "DELETE FROM audit_log_system",
+  ]) await rejects(pool.query(sql), "42501");
+  await owner.query("GRANT UPDATE (user_id) ON initial_administrator TO PUBLIC");
+  await assert.rejects(checkRuntimeIdentity(), /insegura/);
+  await owner.query("REVOKE UPDATE (user_id) ON initial_administrator FROM PUBLIC");
+  await owner.query("CREATE VIEW authority_fixture AS SELECT * FROM initial_administrator");
+  await owner.query("GRANT INSERT ON authority_fixture TO app_exec");
+  await assert.rejects(checkRuntimeIdentity(), /vista authority_fixture/);
+  await owner.query("DROP VIEW authority_fixture");
+  await checkRuntimeIdentity();
+  assert.deepEqual(await read("audit_log_system"), before[2]);
+} finally {
+  await Promise.all([owner.end(), pool.end()]);
+}
+JS
+  echo 'PostgreSQL 17.4: actualización desde 0002, integridad, autoridad y privilegios comprobados.'
+  exit 0
+fi
 if [ "$mode" = fresh ]; then
   migrate
   migrate

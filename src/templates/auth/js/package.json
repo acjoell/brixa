@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "@node-rs/argon2": "2.2.2"
+  },
+  "scripts": {
+    "auth:bootstrap": "node src/auth/bootstrap-cli.js"
   }
 }

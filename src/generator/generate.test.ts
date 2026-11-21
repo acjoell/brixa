@@ -57,6 +57,45 @@ interface NginxBlock {
 }
 
 describe("persistencia de Auth", () => {
+  it.each([
+    ["backend", "js", "sqlite"],
+    ["backend", "ts", "postgres"],
+    ["fullstack", "js", "postgres"],
+    ["fullstack", "ts", "sqlite"],
+  ] as const)(
+    "compone auth:bootstrap en %s %s %s solo con Auth",
+    async (modality, language, database) => {
+      const root = await mkTmp("bootstrap");
+      for (const auth of [false, true]) {
+        const outputDir = path.join(root, String(auth));
+        expect(
+          await generate({ outputDir, modality, language, database, auth, docker: true }),
+        ).toEqual({ ok: true });
+        const backend = modality === "fullstack" ? path.join(outputDir, "backend") : outputDir;
+        const pkg = JSON.parse(await fs.readFile(path.join(backend, "package.json"), "utf8"));
+        const source = "src/auth/bootstrap-cli." + language;
+        const entry = language === "ts" ? "node --import tsx " + source : "node " + source;
+        expect(pkg.scripts["auth:bootstrap"]).toBe(auth ? entry : undefined);
+        const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
+        if (auth) {
+          await expect(fs.access(path.join(backend, source))).resolves.toBeUndefined();
+          const env = database === "postgres" ? "-e MIGRATION_DATABASE_URL " : "";
+          const command =
+            language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
+          expect(readme).toContain("docker compose run --rm " + env + "backend " + command);
+          const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
+          expect(compose).not.toContain("MIGRATION_DATABASE_URL");
+        } else {
+          await expect(fs.access(path.join(backend, source))).rejects.toMatchObject({
+            code: "ENOENT",
+          });
+          expect(readme).not.toContain("bootstrap-cli");
+          expect(readme).not.toContain("auth:bootstrap");
+        }
+      }
+    },
+  );
+
   for (const database of ["postgres", "sqlite"] as const) {
     for (const language of ["js", "ts"] as const) {
       it(`compone el esquema y la migración de ${database} en ${language} solo con Auth`, async () => {
@@ -72,6 +111,7 @@ describe("persistencia de Auth", () => {
           );
           expect(schema.includes("export const users")).toBe(auth);
           expect(schema.includes("export const sessions")).toBe(auth);
+          expect(schema.includes("export const activationTokens")).toBe(auth);
           expect(schema.includes("export const auditLogSystem")).toBe(auth);
           expect(
             await fs.stat(path.join(outputDir, "ops/provision.sql")).then(
@@ -79,6 +119,7 @@ describe("persistencia de Auth", () => {
               () => false,
             ),
           ).toBe(auth && database === "postgres");
+          expect(schema.includes("export const initialAdministrator")).toBe(auth);
           if (auth) {
             const journal = JSON.parse(
               await fs.readFile(path.join(outputDir, "drizzle/meta/_journal.json"), "utf8"),
@@ -91,11 +132,19 @@ describe("persistencia de Auth", () => {
               "0000_auth",
               "0001_system_audit",
               database === "postgres" ? "0002_audit_privileges" : "0002_audit_append_only",
+              "0003_initial_administrator",
+              "0004_activation_tokens",
+              "0005_platform_admin_audit",
             ]);
+            await fs.access(path.join(outputDir, "drizzle/meta/0005_snapshot.json"));
+            await fs.access(path.join(outputDir, "drizzle/meta/0004_snapshot.json"));
             await fs.access(path.join(outputDir, "drizzle/meta/0001_snapshot.json"));
             expect(migration).toContain("session_token_hash");
             await fs.access(path.join(outputDir, "drizzle/meta/0000_snapshot.json"));
           } else {
+            await expect(
+              fs.access(path.join(outputDir, "drizzle/0004_activation_tokens.sql")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
             await expect(
               fs.access(path.join(outputDir, "drizzle/0002_audit_append_only.sql")),
             ).rejects.toMatchObject({ code: "ENOENT" });
@@ -299,6 +348,14 @@ describe("overlay criptográfico de Auth", () => {
       expect(
         example.includes("SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n"),
       ).toBe(auth);
+      expect(
+        environment?.includes(
+          'ACTIVATION_TOKEN_EXPIRY_HOURS: "${ACTIVATION_TOKEN_EXPIRY_HOURS-24}"',
+        ),
+      ).toBe(auth);
+      expect(example.includes("ACTIVATION_TOKEN_EXPIRY_HOURS=24\n")).toBe(auth);
+      const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
+      expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
       if (auth) {
         expect(environment).toContain('ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"');
         expect(environment).toContain('ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"');

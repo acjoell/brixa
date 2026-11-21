@@ -71,8 +71,22 @@ export async function checkAuditTransactions(database, observer) {
     "login_failed",
   ]);
 
+  const platformDenial = new SystemAuditDenied("platform_admin_access_denied");
+  await expect(
+    withSystemAudit(database, { actorId: null, requestId: input.requestId }, async (tx) => {
+      await tx.insert(users).values(user);
+      throw platformDenial;
+    }),
+  ).rejects.toBe(platformDenial);
+  expect(await readUser()).toEqual([]);
+  expect((await events()).map((row) => row.event).sort()).toEqual([
+    "brute_force_detected",
+    "login_failed",
+    "platform_admin_access_denied",
+  ]);
+
   const deniedEvents = await events();
-  for (const event of ["login_failed", "brute_force_detected"]) {
+  for (const event of ["login_failed", "brute_force_detected", "platform_admin_access_denied"]) {
     const mutate = vi.fn(async (tx) => {
       await tx.insert(users).values(user);
     });
@@ -88,7 +102,7 @@ export async function checkAuditTransactions(database, observer) {
   await expect(
     withSystemAudit(database, { ...input, actorId: id }, async (tx) => {
       await tx.insert(users).values(user);
-      throw denial;
+      throw platformDenial;
     }),
   ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/foreign key/i) } });
   expect(await readUser()).toEqual([]);
@@ -104,6 +118,7 @@ export async function checkAuditTransactions(database, observer) {
   expect((await events()).map((row) => row.event).sort()).toEqual([
     "brute_force_detected",
     "login_failed",
+    "platform_admin_access_denied",
     "user_created",
   ]);
   return input.requestId;

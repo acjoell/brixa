@@ -22,6 +22,27 @@
       "when": 1795220000000,
       "tag": "0002_audit_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795236462611,
+      "tag": "0003_initial_administrator",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795238975457,
+      "tag": "0004_activation_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795241176873,
+      "tag": "0005_platform_admin_audit",
+      "breakpoints": true
     }
   ]
 }

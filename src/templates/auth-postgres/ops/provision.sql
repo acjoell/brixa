@@ -20,7 +20,7 @@ BEGIN
   FOR previous IN
     SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner) AS owner_name
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE (n.nspname = 'public' AND c.relname IN ('users','sessions','audit_log_system')
+    WHERE (n.nspname = 'public' AND c.relname IN ('users','sessions','audit_log_system','initial_administrator')
            OR n.nspname = 'drizzle') AND pg_get_userbyid(c.relowner) <> 'table_owner'
   LOOP
     RAISE EXCEPTION 'Revisar propietario anterior de %.%: %', previous.nspname, previous.relname, previous.owner_name;

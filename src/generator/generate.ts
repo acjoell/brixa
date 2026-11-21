@@ -278,7 +278,7 @@ const composeRuntimeExample = "postgresql://app_exec:CLAVE@postgres:5432/app";
 const composeSetup =
   "Configura DATABASE_URL para app_exec con host postgres en .env. Proporciona POSTGRES_PASSWORD únicamente al invocar Docker Compose. Inicia primero postgres, sigue ops/README.md del backend y aplica las migraciones indicadas abajo antes de iniciar Express.";
 const migrationInstructions =
-  "Proporciona MIGRATION_DATABASE_URL con el usuario table_owner solo al proceso de migración mediante el entorno de la orden. Usa una URL postgresql://table_owner:CLAVE@HOST:5432/BD. Guarda únicamente DATABASE_URL de app_exec en el archivo .env del backend. Antes de migrar, sigue ops/README.md del backend para aprovisionar ambos roles.";
+  "Proporciona MIGRATION_DATABASE_URL con el usuario table_owner mediante el entorno de la orden puntual de migración. Usa una URL postgresql://table_owner:CLAVE@HOST:5432/BD. Guarda únicamente DATABASE_URL de app_exec en el archivo .env del backend. Antes de migrar, sigue ops/README.md del backend para aprovisionar ambos roles.";
 
 async function appendEnvExample(envPath: string, auth: boolean, docker: boolean): Promise<void> {
   const line = auth
@@ -826,7 +826,8 @@ export async function appendComposeApiDocsEnv(composePath: string): Promise<void
 const COMPOSE_AUTH_MARKER = "# @@INSERT:auth-env@@";
 const AUTH_ENV_EXAMPLE =
   "# Argon2id por proceso (0 en cola desactiva la espera)\nARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n" +
-  "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n";
+  "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n" +
+  "ACTIVATION_TOKEN_EXPIRY_HOURS=24\n";
 
 async function composeDockerEnv(outputDir: string, options: UserOptions): Promise<void> {
   const composePath = path.join(outputDir, "compose.yaml");
@@ -848,7 +849,8 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
         'ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"\n' +
         '      ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"\n' +
         '      SESSION_IDLE_TIMEOUT_MINUTES: "${SESSION_IDLE_TIMEOUT_MINUTES-30}"\n' +
-        '      SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"',
+        '      SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"\n' +
+        '      ACTIVATION_TOKEN_EXPIRY_HOURS: "${ACTIVATION_TOKEN_EXPIRY_HOURS-24}"',
     );
     if (options.database === "postgres") {
       const runtimeLine = /^ {6}DATABASE_URL: .+$/gm;
@@ -1068,6 +1070,7 @@ async function applyAuthOverlay(
   backendDir: string,
   language: Language,
   database: Database,
+  composeRoot?: string,
 ): Promise<void> {
   const overlay = path.join(templatesDir(), "auth", language);
   const pkgPath = path.join(backendDir, "package.json");
@@ -1094,6 +1097,25 @@ async function applyAuthOverlay(
   await copyDir(overlay, backendDir, path.basename(backendDir));
   await appendEnvBlock(path.join(backendDir, ".env.example"), AUTH_ENV_EXAMPLE, "auth");
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  const postgres = database === "postgres";
+  const local = postgres
+    ? "Proporciona `MIGRATION_DATABASE_URL` de `table_owner` desde el entorno de la orden puntual. Consulta `ops/README.md` para aprovisionar los roles."
+    : "Configura `DATABASE_URL` con la misma ruta SQLite en archivo que usa el backend.";
+  await fs.appendFile(
+    path.join(backendDir, "README.md"),
+    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n`,
+  );
+  if (composeRoot) {
+    const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";
+    const entry = language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
+    const migration = postgres
+      ? "Usa el host `postgres` en `MIGRATION_DATABASE_URL` y proporciona la variable desde el entorno de esta orden. Conserva `DATABASE_URL` de `app_exec` en el backend."
+      : "El contenedor puntual usa el mismo volumen SQLite que el backend.";
+    await fs.appendFile(
+      path.join(composeRoot, "README.md"),
+      `\n### Bootstrap interactivo con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,7 +1216,13 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
       }
 
-      if (options.auth) await applyAuthOverlay(backendDest, language, database);
+      if (options.auth)
+        await applyAuthOverlay(
+          backendDest,
+          language,
+          database,
+          options.docker ? outputDir : undefined,
+        );
       await cleanupUnresolvedFrontendInsertionPoints(frontendDest, language);
       await composeBackendInsertionPoints(backendDest, options);
 
@@ -1250,7 +1278,13 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
         );
         await composeDockerEnv(outputDir, options);
       }
-      if (options.auth) await applyAuthOverlay(outputDir, language, database);
+      if (options.auth)
+        await applyAuthOverlay(
+          outputDir,
+          language,
+          database,
+          options.docker ? outputDir : undefined,
+        );
       await composeBackendInsertionPoints(outputDir, options);
     }
 
