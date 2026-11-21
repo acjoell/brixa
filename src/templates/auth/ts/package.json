@@ -3,6 +3,7 @@
     "@node-rs/argon2": "2.2.2"
   },
   "scripts": {
-    "auth:bootstrap": "node --import tsx src/auth/bootstrap-cli.ts"
+    "auth:bootstrap": "node --import tsx src/auth/bootstrap-cli.ts",
+    "auth:recover-admin": "node --import tsx src/auth/recover-admin-cli.ts"
   }
 }

@@ -1103,17 +1103,19 @@ async function applyAuthOverlay(
     : "Configura `DATABASE_URL` con la misma ruta SQLite en archivo que usa el backend.";
   await fs.appendFile(
     path.join(backendDir, "README.md"),
-    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n`,
+    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n`,
   );
   if (composeRoot) {
     const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";
     const entry = language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
+    const recovery =
+      language === "ts" ? "node dist/auth/recover-admin-cli.js" : "npm run auth:recover-admin";
     const migration = postgres
       ? "Usa el host `postgres` en `MIGRATION_DATABASE_URL` y proporciona la variable desde el entorno de esta orden. Conserva `DATABASE_URL` de `app_exec` en el backend."
       : "El contenedor puntual usa el mismo volumen SQLite que el backend.";
     await fs.appendFile(
       path.join(composeRoot, "README.md"),
-      `\n### Bootstrap interactivo con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n`,
+      `\n### Bootstrap y recuperación interactivos con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\ndocker compose run --rm ${args}backend ${recovery}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n`,
     );
   }
 }

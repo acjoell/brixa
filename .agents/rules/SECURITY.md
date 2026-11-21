@@ -70,7 +70,7 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 ### Cambio de contraseña y recuperación privilegiada (D-108, D-109)
 
 - **Cambio autenticado:** Requiere sesión válida y verificación de la contraseña actual. Actualiza el hash, revoca todas las sesiones incluida la actual y registra el evento de auditoría en la misma transacción. Requiere volver a iniciar sesión.
-- **Recuperación del administrador inicial:** CLI local independiente del bootstrap, con contraseña oculta y confirmada, sin correo obligatorio. PostgreSQL usa `table_owner` mediante `MIGRATION_DATABASE_URL` sin fallback a `DATABASE_URL`. SQLite usa la BD persistente configurada. Conserva el UUID y la autoridad existentes, no reactiva cuentas deshabilitadas ni inicia sesión. La actualización del hash, la revocación total y la auditoría son atómicas.
+- **Recuperación del administrador inicial:** CLI local independiente del bootstrap, con contraseña oculta y confirmada, sin correo obligatorio. PostgreSQL usa `table_owner` mediante `MIGRATION_DATABASE_URL` sin fallback a `DATABASE_URL`. SQLite usa la BD persistente configurada. Conserva el UUID y la autoridad existentes, no reactiva cuentas deshabilitadas ni inicia sesión. La actualización del hash, la revocación total y la auditoría son atómicas. El evento `initial_admin_password_recovered` se correlaciona mediante el `requestId` del CLI y queda registrado con `actorId: null` (D-109).
 
 ### Protección de inicio de sesión contra abuso (D-110)
 

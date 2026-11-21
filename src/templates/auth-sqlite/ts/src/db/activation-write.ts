@@ -50,10 +50,17 @@ export async function withActivationWrite<T>(
   }
 }
 
-export async function lockActivationUser(tx: Pick<Write, "select">, userId: string) {
+export async function lockAccount(tx: Pick<Write, "select">, userId: string) {
   const { users } = schema;
-  const [user] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId));
-  return user?.status;
+  const [user] = await tx
+    .select({ status: users.status, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user;
+}
+
+export async function lockActivationUser(tx: Pick<Write, "select">, userId: string) {
+  return (await lockAccount(tx, userId))?.status;
 }
 
 export async function readActivation<T>(

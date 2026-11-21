@@ -11,14 +11,14 @@ const messages = {
     "No se pudo completar el bootstrap. Revisa la configuración, la conexión y el estado de la base de datos.",
 };
 
-async function readCredentials() {
+export async function readConsoleCredentials(includeEmail: boolean) {
   const { stdin, stdout } = process;
   const rawBefore = stdin.isRaw;
   const answers: string[] = [];
   const echo = new Writable({
     write(chunk, _encoding, done) {
       // Oculta también el redibujado de readline al editar o pegar una contraseña.
-      if (answers.length === 0) stdout.write(chunk);
+      if (includeEmail && answers.length === 0) stdout.write(chunk);
       done();
     },
   });
@@ -39,13 +39,14 @@ async function readCredentials() {
         cancel();
       });
       terminal.on("line", (answer) => {
-        if (answers.length === 3) return;
+        const total = includeEmail ? 3 : 2;
+        if (answers.length === total) return;
         answers.push(answer);
-        if (answers.length === 1) stdout.write("Contraseña: ");
-        else if (answers.length === 2) stdout.write("\nConfirma la contraseña: ");
-        else resolve(answers);
+        if (answers.length === total) resolve(answers);
+        else if (includeEmail && answers.length === 1) stdout.write("Contraseña: ");
+        else stdout.write("\nConfirma la contraseña: ");
       });
-      stdout.write("Email: ");
+      stdout.write(includeEmail ? "Email: " : "Contraseña: ");
     });
   } finally {
     terminal.close();
@@ -64,7 +65,7 @@ export async function runBootstrapConsole(
     return;
   }
   try {
-    const answers = await readCredentials();
+    const answers = await readConsoleCredentials(true);
     if (!answers) {
       process.stderr.write("Bootstrap cancelado.\n");
       process.exitCode = 130;

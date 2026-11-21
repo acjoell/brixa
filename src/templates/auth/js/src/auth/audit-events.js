@@ -13,6 +13,7 @@ export const systemAuditCatalog = Object.freeze({
   activation_token_revoked: { category: "identity", severity: "info" },
   activation_token_expired: { category: "identity", severity: "info" },
   platform_admin_access_denied: { category: "security", severity: "warning", denial: true },
+  initial_admin_password_recovered: { category: "security", severity: "warning" },
 });
 
 for (const metadata of Object.values(systemAuditCatalog)) Object.freeze(metadata);

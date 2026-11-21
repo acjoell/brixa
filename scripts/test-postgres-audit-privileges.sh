@@ -2,7 +2,7 @@
 # Desde la raíz, con las dependencias del backend PostgreSQL ya instaladas.
 set -euo pipefail
 mode=${1:-upgrade}
-case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation) ;; *) exit 2 ;; esac
+case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery) ;; *) exit 2 ;; esac
 script_dir=$(dirname "$(realpath "$0")")
 deps=$(realpath "${BRIXA_BACKEND_NODE_MODULES:?Directorio node_modules del backend generado}")
 test -d "$deps/pg"
@@ -44,13 +44,13 @@ owner_url="postgresql://table_owner:$owner_password@127.0.0.1:$port/app"
 export DATABASE_URL="postgresql://app_exec:$runtime_password@127.0.0.1:$port/app"
 migrate() { MIGRATION_DATABASE_URL="$owner_url" node src/db/migrate.js; }
 test "$(admin -Atc 'SHOW server_version_num')" = 170004
-if [[ "$mode" == managed-activation || "$mode" == account-activation ]]; then
-  if [ "$mode" = managed-activation ]; then
+if [[ "$mode" == managed-activation || "$mode" == account-activation || "$mode" == login || "$mode" == logout || "$mode" == change-password || "$mode" == admin-recovery ]]; then
+  if [[ "$mode" = managed-activation || "$mode" = admin-recovery ]]; then
     cp drizzle/meta/_journal.json "$work/journal"
-    node --input-type=module -e '
+    SCENARIO="$mode" node --input-type=module -e '
       import fs from "node:fs";
       const path="drizzle/meta/_journal.json", journal=JSON.parse(fs.readFileSync(path));
-      journal.entries=journal.entries.slice(0,5); fs.writeFileSync(path,JSON.stringify(journal));'
+      journal.entries=journal.entries.slice(0,process.env.SCENARIO === "admin-recovery" ? 6 : 5); fs.writeFileSync(path,JSON.stringify(journal));'
   fi
   migrate
   BRIXA_TEST_OWNER_URL="$owner_url" FULL_JOURNAL="$work/journal" ACTIVATION_SCENARIO="$mode" node --input-type=module <<'JS'
@@ -64,6 +64,11 @@ import { setImmediate } from "node:timers/promises";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./src/db/schema.js";
+import { checkAdminRecovery } from "./tests/admin-recovery-contract.js";
+import { withPostgresAdministrator } from "./src/db/bootstrap.js";
+import { checkPasswordChange } from "./tests/change-password-contract.js";
+import { checkLogout } from "./tests/logout-contract.js";
+import { checkLogin, pauseLoginLookup } from "./tests/login-contract.js";
 import { checkAccountActivation, checkAccountActivationRaces } from "./tests/account-activation-contract.js";
 import {
   checkManagedActivation,
@@ -94,6 +99,63 @@ try {
   const database = drizzle(first, { schema });
   const other = drizzle(second, { schema });
   const privileged = drizzle(owner, { schema });
+  if (process.env.ACTIVATION_SCENARIO === "admin-recovery") {
+    const history = async () => (await owner.query("SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at")).rows;
+    const permissions = async () => (await owner.query(
+      "SELECT grantee, privilege_type FROM information_schema.table_privileges WHERE table_schema='public' AND table_name='audit_log_system' ORDER BY 1,2",
+    )).rows;
+    const oldHistory = await history();
+    const oldPermissions = await permissions();
+    assert.equal(oldHistory.length, 6);
+    await withPostgresAdministrator((anotherOwner) => checkAdminRecovery(
+      privileged, anotherOwner, database, database, (gate) => gate(other),
+      async () => {
+        await copyFile(process.env.FULL_JOURNAL, "drizzle/meta/_journal.json");
+        const migrateAudit = () => migrate(privileged, { migrationsFolder: "drizzle" });
+        await migrateAudit();
+        const after = await history();
+        assert.equal(after.length, 7);
+        assert.deepEqual(after.slice(0, 6), oldHistory);
+        assert.deepEqual(await permissions(), oldPermissions);
+        await migrateAudit();
+        assert.deepEqual(await history(), after);
+        await checkRuntimeIdentity();
+        for (const sql of [
+          "UPDATE audit_log_system SET request_id='changed'", "DELETE FROM audit_log_system",
+          "TRUNCATE audit_log_system", "ALTER TABLE audit_log_system ADD COLUMN escape text",
+          "DROP TABLE audit_log_system",
+        ]) await assert.rejects(first.query(sql), { code: "42501" });
+      },
+      (enabled) => owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_recovery CHECK (event <> 'initial_admin_password_recovered') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_recovery"),
+    ), { MIGRATION_DATABASE_URL: process.env.BRIXA_TEST_OWNER_URL });
+    console.log("PostgreSQL 17.4: recuperación privilegiada, carreras y migración 0005 → 0006 comprobadas.");
+  } else if (process.env.ACTIVATION_SCENARIO === "change-password") {
+    await checkRuntimeIdentity();
+    await checkPasswordChange(privileged, database, other, database, other, (connection, gate) => gate(connection), (enabled) =>
+      owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_password_change CHECK (event <> 'password_changed') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_password_change"),
+    );
+    console.log("PostgreSQL 17.4: cambio de contraseña comprobado con app_exec.");
+  } else if (process.env.ACTIVATION_SCENARIO === "logout") {
+    await checkRuntimeIdentity();
+    await checkLogout(privileged, database, other, database, (enabled) =>
+      owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_logout CHECK (event <> 'logout') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_logout"),
+    );
+    console.log("PostgreSQL 17.4: validación y logout auditado comprobados con app_exec.");
+  } else if (process.env.ACTIVATION_SCENARIO === "login") {
+    await checkRuntimeIdentity();
+    await checkLogin(privileged, database, database, other, pauseLoginLookup, (enabled) =>
+      owner.query(enabled
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_login CHECK (event <> 'login_succeeded') NOT VALID"
+        : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_login"),
+    );
+    console.log("PostgreSQL 17.4: login con app_exec, auditoría, rollback y concurrencia comprobados.");
+  } else {
   const fixture = await managedActivationFixture(privileged);
   const race = async (start, contend, onBlocked) => {
     const { gated, ready, release } = holdActivationCommit(database);
@@ -159,7 +221,7 @@ try {
     assert.deepEqual(await read(rowsSql), before);
     assert.deepEqual(await read(permissionsSql), permissions);
     const after = await read(historySql);
-    assert.equal(after.length, 6);
+    assert.equal(after.length, 7);
     assert.deepEqual(after.slice(0, 5), history);
     await migrateAudit();
     assert.deepEqual(await read(historySql), after);
@@ -200,10 +262,14 @@ try {
     await checkManagedActivationRace(fixture, race);
     console.log("PostgreSQL 17.4: flujo, rollback y carreras de activación comprobados con app_exec.");
   }
+  }
 } finally {
   await Promise.all([first.end(), second.end(), owner.end(), pool.end()]);
 }
 JS
+  if [ "$mode" = admin-recovery ]; then
+    BRIXA_TEST_BOOTSTRAP_OWNER_URL="$owner_url" python3 "$script_dir/test-bootstrap-tty.py" "$DEST" postgres recover
+  fi
   exit 0
 fi
 if [[ "$mode" == activation-* ]]; then
@@ -248,7 +314,7 @@ try {
   const run = () => migrate(drizzle(owner), { migrationsFolder: "drizzle" });
   await run();
   const after = await read(journal);
-  assert.equal(after.length, 6);
+  assert.equal(after.length, 7);
   assert.deepEqual(after.slice(0, history.length), history);
   await run();
   assert.deepEqual(await read(journal), after);
@@ -405,7 +471,7 @@ try {
   await migrate(drizzle(owner), { migrationsFolder: "drizzle" });
   assert.deepEqual(await Promise.all(tables.map(read)), before);
   const after = await read(journal);
-  assert.equal(after.length, 6);
+  assert.equal(after.length, 7);
   assert.deepEqual(after.slice(0, 3), history);
   assert.deepEqual(await read("initial_administrator"), []);
   await checkRuntimeIdentity();

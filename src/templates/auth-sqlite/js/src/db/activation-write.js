@@ -43,10 +43,17 @@ export async function withActivationWrite(openDatabase, operation) {
   }
 }
 
-export async function lockActivationUser(tx, userId) {
+export async function lockAccount(tx, userId) {
   const { users } = schema;
-  const [user] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId));
-  return user?.status;
+  const [user] = await tx
+    .select({ status: users.status, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user;
+}
+
+export async function lockActivationUser(tx, userId) {
+  return (await lockAccount(tx, userId))?.status;
 }
 
 export async function readActivation(openDatabase, read) {

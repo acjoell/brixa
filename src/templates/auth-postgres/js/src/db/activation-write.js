@@ -18,13 +18,17 @@ export async function hasActivationAuthority(tx, actorId) {
   return actor !== undefined;
 }
 
-export async function lockActivationUser(tx, userId) {
+export async function lockAccount(tx, userId) {
   const [user] = await tx
-    .select({ status: users.status })
+    .select({ status: users.status, passwordHash: users.passwordHash })
     .from(users)
     .where(eq(users.id, userId))
     .for("no key update");
-  return user?.status;
+  return user;
+}
+
+export async function lockActivationUser(tx, userId) {
+  return (await lockAccount(tx, userId))?.status;
 }
 
 export function readActivation(database, read) {

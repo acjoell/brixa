@@ -43,6 +43,13 @@
       "when": 1795241177444,
       "tag": "0005_platform_admin_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795241177445,
+      "tag": "0006_initial_admin_recovery_audit",
+      "breakpoints": true
     }
   ]
 }

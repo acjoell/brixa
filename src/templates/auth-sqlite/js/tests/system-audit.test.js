@@ -387,7 +387,7 @@ it.each(["vacía", "desde 0003"])("activa la persistencia de tokens SQLite %s", 
     await migrate(db, { migrationsFolder: "drizzle" });
     const migrated = await migrationHistory(client);
     expect(migrated.slice(0, history.length)).toEqual(history);
-    expect(migrated).toHaveLength(6);
+    expect(migrated).toHaveLength(7);
     expect(await readData()).toEqual(before);
     await migrate(db, { migrationsFolder: "drizzle" });
     expect(await migrationHistory(client)).toEqual(migrated);

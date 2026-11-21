@@ -63,7 +63,7 @@ describe("persistencia de Auth", () => {
     ["fullstack", "js", "postgres"],
     ["fullstack", "ts", "sqlite"],
   ] as const)(
-    "compone auth:bootstrap en %s %s %s solo con Auth",
+    "compone auth:bootstrap y auth:recover-admin en %s %s %s solo con Auth",
     async (modality, language, database) => {
       const root = await mkTmp("bootstrap");
       for (const auth of [false, true]) {
@@ -76,13 +76,23 @@ describe("persistencia de Auth", () => {
         const source = "src/auth/bootstrap-cli." + language;
         const entry = language === "ts" ? "node --import tsx " + source : "node " + source;
         expect(pkg.scripts["auth:bootstrap"]).toBe(auth ? entry : undefined);
+        const recoverySource = "src/auth/recover-admin-cli." + language;
+        expect(pkg.scripts["auth:recover-admin"]).toBe(
+          auth ? (language === "ts" ? "node --import tsx " : "node ") + recoverySource : undefined,
+        );
         const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
         if (auth) {
+          await expect(fs.access(path.join(backend, recoverySource))).resolves.toBeUndefined();
           await expect(fs.access(path.join(backend, source))).resolves.toBeUndefined();
           const env = database === "postgres" ? "-e MIGRATION_DATABASE_URL " : "";
           const command =
             language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
           expect(readme).toContain("docker compose run --rm " + env + "backend " + command);
+          const recovery =
+            language === "ts"
+              ? "node dist/auth/recover-admin-cli.js"
+              : "npm run auth:recover-admin";
+          expect(readme).toContain("docker compose run --rm " + env + "backend " + recovery);
           const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
           expect(compose).not.toContain("MIGRATION_DATABASE_URL");
         } else {
@@ -91,6 +101,10 @@ describe("persistencia de Auth", () => {
           });
           expect(readme).not.toContain("bootstrap-cli");
           expect(readme).not.toContain("auth:bootstrap");
+          expect(readme).not.toContain("auth:recover-admin");
+          await expect(fs.access(path.join(backend, recoverySource))).rejects.toMatchObject({
+            code: "ENOENT",
+          });
         }
       }
     },
@@ -135,7 +149,9 @@ describe("persistencia de Auth", () => {
               "0003_initial_administrator",
               "0004_activation_tokens",
               "0005_platform_admin_audit",
+              "0006_initial_admin_recovery_audit",
             ]);
+            await fs.access(path.join(outputDir, "drizzle/meta/0006_snapshot.json"));
             await fs.access(path.join(outputDir, "drizzle/meta/0005_snapshot.json"));
             await fs.access(path.join(outputDir, "drizzle/meta/0004_snapshot.json"));
             await fs.access(path.join(outputDir, "drizzle/meta/0001_snapshot.json"));

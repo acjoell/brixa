@@ -28,13 +28,17 @@ export async function hasActivationAuthority(
   return actor !== undefined;
 }
 
-export async function lockActivationUser(tx: Pick<Write, "select">, userId: string) {
+export async function lockAccount(tx: Pick<Write, "select">, userId: string) {
   const [user] = await tx
-    .select({ status: users.status })
+    .select({ status: users.status, passwordHash: users.passwordHash })
     .from(users)
     .where(eq(users.id, userId))
     .for("no key update");
-  return user?.status;
+  return user;
+}
+
+export async function lockActivationUser(tx: Pick<Write, "select">, userId: string) {
+  return (await lockAccount(tx, userId))?.status;
 }
 
 export function readActivation<T>(

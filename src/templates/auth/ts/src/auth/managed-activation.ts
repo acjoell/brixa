@@ -1,6 +1,6 @@
+import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
 import {
   hasActivationAuthority,
   lockActivationUser,
@@ -11,6 +11,7 @@ import type { db } from "../db/client.js";
 import { activationTokens, users } from "../db/schema.js";
 import { parseActivationExpiryHours } from "./activation-config.js";
 import { activationTokenDigest, generateActivationToken } from "./activation-token.js";
+import { emailSchema } from "./email.js";
 import { recordSystemAudit, SystemAuditDenied, withSystemAudit } from "./system-audit.js";
 
 // Contexto aportado por el llamador autenticado, separado de los datos del alta.
@@ -28,7 +29,6 @@ export class ManagedActivationError extends Error {
   }
 }
 
-const emailSchema = z.string().trim().toLowerCase().max(254).pipe(z.email());
 const userIdSchema = z
   .string()
   .length(36)

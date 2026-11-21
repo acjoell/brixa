@@ -3,6 +3,7 @@
     "@node-rs/argon2": "2.2.2"
   },
   "scripts": {
-    "auth:bootstrap": "node src/auth/bootstrap-cli.js"
+    "auth:bootstrap": "node src/auth/bootstrap-cli.js",
+    "auth:recover-admin": "node src/auth/recover-admin-cli.js"
   }
 }

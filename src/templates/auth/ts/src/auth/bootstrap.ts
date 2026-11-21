@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
 import type { db } from "../db/client.js";
 import { initialAdministrator, users } from "../db/schema.js";
+import { emailSchema } from "./email.js";
 import { hashPassword } from "./password-crypto.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
 import { withSystemAudit } from "./system-audit.js";
-
-const emailSchema = z.string().trim().toLowerCase().max(254).pipe(z.email());
 
 type BootstrapCode =
   "INVALID_CREDENTIALS" | "ALREADY_INITIALIZED" | "EMAIL_IN_USE" | "BOOTSTRAP_FAILED";

@@ -2009,6 +2009,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Decisión:** Ofrecer un CLI local independiente del bootstrap de D-085, con entrada interactiva oculta y confirmación de la contraseña. En PostgreSQL reutiliza `table_owner` mediante `MIGRATION_DATABASE_URL` sin fallback a `DATABASE_URL`. En SQLite utiliza la BD persistente configurada. Conserva el UUID y la asignación de autoridad existentes. El cambio de hash, la revocación de todas las sesiones y su auditoría global se confirman en una misma transacción (D-105). El comando no reactiva cuentas deshabilitadas ni concede una sesión y funciona sin correo obligatorio. La recuperación autónoma queda diferida.
 
+**Auditoría:** El catálogo cerrado incorpora `initial_admin_password_recovered` con categoría `security` y severidad orientativa `warning`. El evento de éxito se confirma en la misma transacción que el nuevo hash y la revocación de sesiones. Usa `actorId: null` y un `requestId` generado por el CLI. El cambio autenticado de D-108 conserva su evento `password_changed`.
+
 ---
 
 ### D-110 — Protección persistente contra abuso en el inicio de sesión

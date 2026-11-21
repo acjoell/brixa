@@ -23,7 +23,7 @@ URL_SECRET = "test-only-connection-secret"
 EMAIL = b"initial@example.test\r"
 
 
-def interactive(backend, env, steps, expected, code):
+def interactive(backend, env, steps, expected, code, command=COMMAND):
     master, slave = pty.openpty()
     original = termios.tcgetattr(slave)
     child = None
@@ -39,7 +39,7 @@ def interactive(backend, env, steps, expected, code):
 
     try:
         child = subprocess.Popen(
-            COMMAND, cwd=backend, env=env, stdin=slave, stdout=slave, stderr=slave,
+            command, cwd=backend, env=env, stdin=slave, stdout=slave, stderr=slave,
         )
         for prompt, answer in steps:
             read_until(lambda: prompt in output)
@@ -68,11 +68,51 @@ def interactive(backend, env, steps, expected, code):
         os.close(master)
 
 
+def recovery(backend, engine, env):
+    command = ("npm", "run", "auth:recover-admin")
+    first = ("Contraseña: ".encode(), SECRET + b"\r")
+    confirm = ("Confirma la contraseña: ".encode(), SECRET + b"\r")
+    prompts = [first, confirm]
+    failure = b"No se pudo recuperar"
+    non_tty = subprocess.run(command, cwd=backend, env=env, input=SECRET, capture_output=True, timeout=12)
+    assert non_tty.returncode == 1 and b"terminal interactiva" in non_tty.stderr
+    assert SECRET not in non_tty.stdout + non_tty.stderr
+    for key in (b"\x03", b"\x04"):
+        interactive(backend, env, [(first[0], key)], b"cancelada", 130, command)
+    interactive(backend, env, [first, (confirm[0], OTHER + b"\r")], b"no coinciden", 1, command)
+    interactive(backend, env, [], b"sin argumentos.", 1, (*command, "--", "fixture-argument"))
+    if engine == "postgres":
+        owner = env.pop("BRIXA_TEST_BOOTSTRAP_OWNER_URL")
+        interactive(backend, env, prompts, failure, 1, command)
+        interactive(backend, {**env, "MIGRATION_DATABASE_URL": env["DATABASE_URL"]}, prompts, failure, 1, command)
+        interactive(backend, {**env, "MIGRATION_DATABASE_URL": owner}, prompts, b"recuperada.", 0, command)
+    else:
+        with tempfile.TemporaryDirectory(prefix="brixa-recovery-tty-") as directory:
+            env["DATABASE_URL"] = "file:" + str(Path(directory) / "auth.db")
+            migration = (
+                ("node", "--import", "tsx", "src/db/migrate.ts")
+                if (backend / "src/db/migrate.ts").exists()
+                else ("npm", "run", "db:migrate")
+            )
+            subprocess.run(migration, cwd=backend, env=env, check=True, timeout=20)
+            interactive(backend, env, prompts, failure, 1, command)
+            interactive(
+                backend, env, [(b"Email: ", EMAIL), first, confirm],
+                b"Administrador inicial creado.", 0,
+            )
+            alternate = [(first[0], OTHER + b"\r"), (confirm[0], OTHER + b"\r")]
+            interactive(backend, env, alternate, b"recuperada.", 0, command)
+    print(f"{engine} PTY: recuperación, confirmación exacta, cancelación y terminal restaurada")
+
+
 def main():
     backend, engine = Path(sys.argv[1]), sys.argv[2]
     env = {**os.environ}
     env.pop("MIGRATION_DATABASE_URL", None)
     env.pop("POSTGRES_PASSWORD", None)
+    if sys.argv[3:] == ["recover"]:
+        recovery(backend, engine, env)
+        return
     prompts = [
         (b"Email: ", EMAIL),
         ("Contraseña: ".encode(), SECRET + b"\r"),
