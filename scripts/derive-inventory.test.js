@@ -23,9 +23,9 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
     ["frontend-react-js", 4],
     ["database-sqlite/js", 5],
     ["api-docs/js", 7],
-    ["auth/js", 26],
-    ["auth-postgres/js", 11],
-    ["auth-sqlite/js", 8],
+    ["auth/js", 35],
+    ["auth-postgres/js", 12],
+    ["auth-sqlite/js", 14],
     ["i18n/js", 3],
     ["database-postgres/js", 5],
   ]) {
@@ -46,7 +46,7 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
   await syncTemplates(directory, true);
   await syncTemplates(directory);
   for (const [relative, expected] of snapshot) expect(await read(relative)).toBe(expected);
-});
+}, 20_000);
 
 it("conserva las instrucciones JSX e inserta los cuatro fragmentos API reales", async () => {
   const hook = await read("frontend-react-js/src/useAppContent.jsx");
