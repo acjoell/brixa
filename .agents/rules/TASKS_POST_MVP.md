@@ -64,7 +64,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
 | T-013e | PENDIENTE | D-052 y cobertura existente de T-013d |
 | T-018 | COMPLETADA | Implementación e integración completadas; CI normal aprobado y CI Full con SV-5, Docker y PostgreSQL aprobado según confirmación del desarrollador |
-| T-014a | BLOQUEADA | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
+| T-014a | EN PROGRESO (①–④ aceptadas, ⑤ pendiente) | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
@@ -561,8 +561,8 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** BLOQUEADA (por T-014-0, T-017b, T-018; T-023 completada)
-**Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión resueltos por D-101.
+**Estado:** EN PROGRESO (①–④ aceptadas. Etapa ⑤ pendiente de inicio).
+**Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión resueltos por D-101. Cambio de contraseña, recuperación privilegiada y protección contra abuso aprobados en D-108 a D-110.
 **Dependencias:** T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync en verde antes de implementar plantillas de Auth en ambas variantes). Decisiones de diseño consolidadas en D-080 a D-098. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069, D-077, D-078).
 
 **Objetivo:** cuentas y credenciales funcionales y verificadas, con una modalidad elegida por proyecto.
@@ -578,20 +578,36 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 - Proveedor de identidad interno exclusivo en v1 (D-100).
 - Protección CSRF obligatoria en operaciones mutables autenticadas por cookies mediante middleware centralizado, validación de `Origin`/`Referer`, Fetch Metadata y cabecera personalizada de API (`X-Requested-With`), sin sincronizador en topología same-origin (D-089, D-103).
 - Bearer mediante cabecera estándar `Authorization: Bearer <token>` (D-089).
-- Límite de intentos de autenticación sin bloqueo permanente de cuentas (nivel 2 de abuso).
+- Cambio autenticado de contraseña y recuperación privilegiada del administrador inicial (D-108 y D-109).
+- Protección persistente contra abuso en el inicio de sesión, con límites por identificador e IP y respuestas 429 independientes de la saturación Argon2id (D-110).
 - Mensajes de error que no revelan si una cuenta existe.
 - Aprovisionamiento administrado y activación segura de cuentas: token criptográfico de un solo uso según D-107, con historial persistente de digests y como máximo un token abierto por usuario; enlace entregado al administrador sin SMTP obligatorio; consumo atómico para contraseña inicial; sin contraseñas predeterminadas.
 - Bootstrap seguro del primer administrador mediante comando de consola local idempotente (D-085).
 - Protección de la documentación de API cuando está activa.
 
-**Fuera de alcance:** JWT en v1 (D-087), Bearer en fullstack en v1 (D-089), access+refresh rotativo en v1 (D-088), cookies cross-site en v1 (D-089), registro público en proyectos con multitenancy (excluido terminantemente por D-086; admisible como opción en Auth sin multitenancy con registro administrado como predeterminado tras consolidar el núcleo), creación pública de organizaciones (D-086), recuperación de contraseña (salvo que aparezca una razón importante), MFA y OAuth/SSO.
+**Fuera de alcance:** JWT en v1 (D-087), Bearer en fullstack en v1 (D-089), access+refresh rotativo en v1 (D-088), cookies cross-site en v1 (D-089), registro público en proyectos con multitenancy (excluido terminantemente por D-086; admisible como opción en Auth sin multitenancy con registro administrado como predeterminado tras consolidar el núcleo), creación pública de organizaciones (D-086), recuperación autónoma de contraseña, MFA y métodos alternativos como OAuth/OIDC, OTP y passkeys (D-111).
 
 **Matriz de compatibilidad (modalidad × backend/fullstack × cliente):** definida según D-089 (fullstack exclusivo cookies; backend independiente con cookies o Bearer sin mezcla simultánea).
 
 **Áreas afectadas:** **[I]** pregunta y validación del CLI (`src/prompts/questions.ts`, `src/validation/options.ts`, `src/types.ts`), generador, `src/verified-variants.ts`, arnés. **[L]** plantillas backend, overlays de base de datos (cuatro archivos de esquema por tabla: dos motores por dos lenguajes). Rutas nuevas: por determinar.
 
+**Orden de implementación propuesto para la etapa ⑤:**
+
+1. ⑤-A1 — Servicio interno de login.
+2. ⑤-A2 — Logout y validación de sesiones.
+3. ⑤-B1 — Cambio autenticado de contraseña.
+4. ⑤-B2 — Recuperación privilegiada del administrador.
+5. ⑤-C — Rate limiting. Antes de este incremento se concretan contabilización, concurrencia, privacidad y limpieza (D-110).
+6. ⑤-D — Integración HTTP.
+7. ⑤-E — Cookies, Bearer, CSRF y protección de API Docs.
+8. ⑤-F — Exposición HTTP de alta y activación.
+9. ⑤-G — Verificación integral y cierre.
+
 **Criterios de aceptación:**
-- Alta, inicio y cierre de sesión funcionan en cada combinación declarada soportada.
+- Alta, activación, inicio y cierre de sesión funcionan en cada combinación declarada soportada.
+- El cambio de contraseña exige sesión válida y contraseña actual. La credencial, la revocación de todas las sesiones y el evento de auditoría se confirman juntos. Se exige un nuevo inicio de sesión (D-108).
+- La recuperación privilegiada funciona por CLI local independiente con entrada oculta y confirmada, en PostgreSQL con `table_owner` mediante `MIGRATION_DATABASE_URL` y en SQLite en archivo. Conserva UUID y autoridad, confirma credencial, revocación total y auditoría conjuntamente, y no reactiva cuentas deshabilitadas ni crea sesiones. Funciona sin correo obligatorio (D-109).
+- Los límites configurables de login parten de 5 fallos por identificador y 10 solicitudes por IP en 15 minutos. Los contadores persisten en la BD seleccionada, sin Redis obligatorio. Se verifica HTTP 429 con `Retry-After`, que el acceso vuelve a estar disponible pese a solicitudes rechazadas y que la saturación de Argon2id conserva su HTTP 503 independiente (D-110).
 - Credenciales no almacenadas en texto plano (ni la credencial de sesión ni las contraseñas). En sesión, únicamente hash SHA-256 en BD (D-087).
 - Revocación efectiva en la petición siguiente. En PostgreSQL y SQLite en archivo se comprueban por petición expiración y revocación y se conservan las reglas de actividad de D-101.
 - La BD persistente seleccionada es autoridad para Auth sin multitenancy. `:memory:` no acredita persistencia; libSQL remoto requiere evidencia específica de consistencia.
@@ -599,10 +615,10 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 - Ninguna credencial ni secreto en el proyecto generado; secretos obligatorios validados al arrancar.
 
 **Pruebas positivas:** flujo completo en cada modalidad; renovación según la decisión; cierre de sesión.
-**Pruebas negativas (SECURITY §11):** no autenticado accede a recurso protegido; credencial caducada, revocada o manipulada; usuario deshabilitado con credencial viva; enumeración de cuentas por mensaje o por tiempo; fuerza bruta con respuesta 429 y **recuperación del acceso tras la espera** (sin bloqueo permanente); solicitud entre orígenes sin CSRF (cookie); credencial anterior tras cambio de contraseña; la credencial en reposo no aparece en la base de datos en claro; contraseña por encima del máximo rechazada; campos como `role` o `isActive` enviados por el cliente sin efecto; ninguna respuesta ni registro contiene hashes o secretos.
+**Pruebas negativas (SECURITY §11):** no autenticado accede a recurso protegido; credencial caducada, revocada o manipulada; usuario deshabilitado con credencial viva; enumeración de cuentas por mensaje o por tiempo; fuerza bruta con respuesta 429 y **recuperación del acceso tras la espera** (sin bloqueo permanente); solicitud entre orígenes sin CSRF (cookie); contraseña actual incorrecta al intentar cambiarla, sesión inválida y revocación de sesiones de otros clientes tras cambio o recuperación; rollback conjunto si falla la auditoría de cualquiera de las operaciones; CLI de recuperación no reactiva una cuenta deshabilitada; la credencial en reposo no aparece en la base de datos en claro; contraseña por encima del máximo rechazada; campos como `role` o `isActive` enviados por el cliente sin efecto; ninguna respuesta ni registro contiene hashes o secretos.
 **Verificaciones:** batería local, `verify:generated` y `verify:security` en las variantes de la sección 6.3 que incluyan autenticación.
 
-**Riesgos y limitaciones (reportado en INV-03b):** los navegadores no aíslan cookies por puerto en `localhost`, mitigado mediante nombre específico de cookie por proyecto (D-089); `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; Safari no está verificado. La cookie `Secure` no se envía por HTTP fuera de `localhost` y los proyectos generados no terminan TLS; el comportamiento de cada navegador debe comprobarse. Un límite de intentos en memoria no se comparte entre instancias.
+**Riesgos y limitaciones (reportado en INV-03b):** los navegadores no aíslan cookies por puerto en `localhost`, mitigado mediante nombre específico de cookie por proyecto (D-089); `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; Safari no está verificado. La cookie `Secure` no se envía por HTTP fuera de `localhost` y los proyectos generados no terminan TLS; el comportamiento de cada navegador debe comprobarse.
 
 ---
 
@@ -757,6 +773,18 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 ---
 
+### Extensiones futuras de Auth (D-111)
+
+Todas están **PENDIENTES**, con dirección aprobada y diseño específico por concretar después de T-014a. Los identificadores corresponden a la numeración global vigente. La sección 13 conserva la equivalencia histórica de los IDs provisionales de la propuesta v3.
+
+| Tarea | Alcance |
+|---|---|
+| T-024 | Identificadores y vinculación. Incorporar email, teléfono y username como identificadores de una identidad interna estable, independiente de métodos y concesiones. Acreditar titularidad al vincular métodos y evitar fusiones automáticas por coincidencia de email. |
+| T-025 | Métodos seleccionables y combinables. Incorporar OAuth/OIDC, OTP y passkeys junto con contraseña. Aplicar el contrato de vinculación de T-024 y reutilizar sesiones y auditoría. |
+| T-026 | Modalidades de registro. Seleccionar registro administrado, público o ambos durante la generación. Mantener el administrado por defecto y aplicar D-086 al habilitar el público. |
+| T-027 | Recuperación autónoma y comunicaciones opcionales. Usar canales verificados y contemplar proveedores opcionales de correo y SMS, sin convertirlos en un requisito del núcleo. |
+| T-028 | MFA opcional. Incorporar un segundo factor seleccionable con los métodos compatibles, reutilizando sesiones y auditoría. |
+
 ### Tarea recurrente — Revisión periódica de dependencias e imágenes
 
 **Estado:** RECURRENTE (activa)  
@@ -793,7 +821,7 @@ Se rechaza con mensaje claro y no se fuerzan valores en silencio (PROJECT_VISION
 ## 9. Fuera del alcance de esta etapa
 
 - MFA, OAuth/SSO, auditoría avanzada y SEO.
-- Registro público y recuperación de contraseña (salvo que aparezca una razón importante).
+- Registro público según D-086 y recuperación autónoma según D-111, planificados después de T-014a.
 - Multitenancy con SQLite.
 - Administrador de plataforma entre organizaciones (propuesto).
 - MongoDB: descartado en esta etapa; no forma parte del roadmap. PostgreSQL y SQLite siguen siendo las bases de datos (D-012).
@@ -827,7 +855,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 12. **Protección de tags `v*`** en el repositorio (cambio de configuración no autorizado en T-019).
 13. **Parámetros de sesión, Argon2id, CSRF, RLS, auditoría, delegación y activación.** Resueltas por D-099 a D-107: inactividad 30m, duración 12h, umbral diferido 60s (D-101); límites PHC y limitador 2/8 (D-102); CSRF multicapa sin synchronizer en same-origin (D-103); migraciones RLS SQL versionadas (D-104); auditoría de dos ámbitos (D-105); reglas de delegación, protección del último admin y no abandono voluntario (D-106); aprovisionamiento administrado y activación segura sin SMTP (D-107).
 
-Dependen de evidencia (no se deciden antes): versión de Zod, almacén de contadores de abuso, comprobación de soporte de sintaxis RLS en Drizzle Kit fijado sobre PostgreSQL real (asignada a T-014c), y parametrización configurable de la duración exacta del token de activación (asignada a T-014a).
+Dependen de evidencia (no se deciden antes): versión de Zod, detalles operativos del rate limiting de D-110 antes de ⑤-C, comprobación de soporte de sintaxis RLS en Drizzle Kit fijado sobre PostgreSQL real (asignada a T-014c), y verificación del flujo de activación conforme a D-107 (asignada a T-014a).
 
 ## 12. Regla de actualización
 

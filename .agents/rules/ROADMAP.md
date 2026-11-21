@@ -144,6 +144,8 @@ Estas capacidades no deben tratarse como simples fragmentos de código. Cada una
 
 **Criterio de salida:** cada capacidad tiene un alcance explícito, controles aplicados a las operaciones pertinentes y pruebas negativas que comprueban que el acceso no autorizado se rechaza.
 
+**Evolución de Auth después de T-014a:** D-111 establece la dirección de las extensiones [T-024 a T-028](TASKS_POST_MVP.md#extensiones-futuras-de-auth-d-111). El alcance y estado de cada tarea se mantienen en ese registro.
+
 ### Fase 6 — Publicación y mantenimiento
 
 **Objetivo:** distribuir Brixa de forma reproducible y facilitar su evolución.

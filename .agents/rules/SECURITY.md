@@ -27,7 +27,7 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 
 ### Mecanismo y credenciales (D-087, D-100)
 
-- **Identidad interna exclusiva (D-100):** Auth v1 opera únicamente con el proveedor de identidad interno de Brixa. Quedan fuera de alcance OAuth, OIDC, SSO y proveedores externos.
+- **Identidad interna exclusiva (D-100):** Auth v1 opera únicamente con el proveedor de identidad interno de Brixa. Quedan fuera del alcance de v1 OAuth, OIDC, SSO y proveedores externos. D-111 mantiene la identidad interna separada de identificadores, métodos y concesiones. Las extensiones reutilizarán sesiones y auditoría y exigirán acreditar titularidad para vincular métodos, sin fusión automática por coincidencia de email. La recuperación autónoma futura requerirá canales verificados.
 - **Sesiones opacas con token de 32 bytes (D-087):** Único modelo en v1, sin JWT. Generado con `crypto.randomBytes(32)` o Web Crypto API. En base de datos se almacena **exclusivamente el hash SHA-256** del token; el token en claro nunca se persiste.
 - **Autoridad server-side (D-101):** Para Auth sin multitenancy, la BD persistente seleccionada es autoridad de sesiones. PostgreSQL y SQLite en archivo conservan las garantías esenciales de expiración, actividad y revocación, con verificación en BD por petición. `:memory:` no persiste entre reinicios o procesos. La consistencia de libSQL remoto requiere validación específica.
 - **Transportes de autenticación (D-089):** Fullstack utiliza **exclusivamente cookies** de sesión. Backend independiente permite seleccionar entre cookies o Bearer (sin mezcla simultánea). En Bearer se utiliza la cabecera estándar `Authorization: Bearer <token>`.
@@ -40,7 +40,7 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 - **Actualización diferida de actividad:** Umbral de **60 segundos** entre escrituras persistidas en la BD (`last_activity_at`) para evitar contención de filas ante peticiones concurrentes.
 - **Garantías de expiración:** El mecanismo de actualización diferida mantiene la vigencia estricta de las sesiones; la actualización diferida nunca extiende la sesión más allá de `created_at + max_lifetime`.
 - **Exclusión de tráfico de mantenimiento:** Consultas automatizadas (pings, polling de frontend o sondeos de salud `/health`) no prolongan la sesión; solo actividad intencionada de usuario actualiza la marca.
-- **Sin rotación periódica en v1:** No hay rotación automática periódica durante peticiones normales. La rotación del identificador de sesión se restringe estrictamente a eventos de seguridad (cambio de contraseña, elevación de privilegios).
+- **Sin rotación periódica en v1:** No hay rotación automática periódica durante peticiones normales. La rotación del identificador de sesión se reserva para eventos sensibles como la elevación de privilegios. El cambio de contraseña y la recuperación privilegiada revocan todas las sesiones (D-108, D-109).
 - **Revocación inmediata:** La revocación de la sesión en base de datos impide el acceso en la petición inmediatamente posterior.
 
 ### Cookies de sesión y desarrollo local (D-089, D-099)
@@ -66,6 +66,17 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 - **Mitigación de enumeración por temporización:** Cuando una cuenta no existe en el inicio de sesión, el backend ejecuta una verificación simulada con un hash Argon2id dummy preparado en memoria para igualar los tiempos de respuesta.
 - **Rehash transparente:** Se ejecuta exclusivamente tras una autenticación exitosa si los parámetros almacenados difieren de los vigentes pero están dentro de los límites defensivos permitidos.
 - **Entrada acotada:** Contraseñas entrantes limitadas a un máximo de 128 caracteres y 512 bytes UTF-8 (D-093).
+
+### Cambio de contraseña y recuperación privilegiada (D-108, D-109)
+
+- **Cambio autenticado:** Requiere sesión válida y verificación de la contraseña actual. Actualiza el hash, revoca todas las sesiones incluida la actual y registra el evento de auditoría en la misma transacción. Requiere volver a iniciar sesión.
+- **Recuperación del administrador inicial:** CLI local independiente del bootstrap, con contraseña oculta y confirmada, sin correo obligatorio. PostgreSQL usa `table_owner` mediante `MIGRATION_DATABASE_URL` sin fallback a `DATABASE_URL`. SQLite usa la BD persistente configurada. Conserva el UUID y la autoridad existentes, no reactiva cuentas deshabilitadas ni inicia sesión. La actualización del hash, la revocación total y la auditoría son atómicas.
+
+### Protección de inicio de sesión contra abuso (D-110)
+
+- **Límites predeterminados configurables:** 5 intentos fallidos por identificador y 10 solicitudes de inicio de sesión por IP, ambos en 15 minutos. Contadores persistentes en la BD seleccionada, sin Redis obligatorio.
+- **Respuesta:** HTTP 429 con `Retry-After` al superar el límite, sin prolongarlo indefinidamente por solicitudes rechazadas. La saturación de Argon2id responde HTTP 503 con `Retry-After: 5` conforme a D-102.
+- **Decisiones operativas:** La contabilización, concurrencia, privacidad y limpieza se concretarán antes de ⑤-C. El control específico de activación se rige por D-107.
 
 ### Aprovisionamiento administrado y activación de cuentas (D-085, D-086, D-107)
 
@@ -286,7 +297,7 @@ La información personal debe tratarse con criterios de minimización y protecci
 ### Auditoría en dos ámbitos: global/sistema y organizacional (D-097, D-105)
 
 1. **Auditoría global o de sistema (`audit_log_system`):**
-   - **Alcance:** Eventos de autenticación (login, logout, fallos repetidos, activación de cuentas, cambios de credenciales), operaciones administrativas globales (usuarios de plataforma, aprovisionamiento de tenants, bootstrap inicial) e intentos no autorizados de acceso organizacional.
+   - **Alcance:** Eventos de autenticación (login, logout, fallos repetidos, activación de cuentas, cambios de credenciales y recuperación privilegiada), operaciones administrativas globales (usuarios de plataforma, aprovisionamiento de tenants, bootstrap inicial) e intentos no autorizados de acceso organizacional.
    - **Acceso:** Restringido a administradores y operadores con alcance de sistema. No requiere columna `organization_id`.
 2. **Auditoría organizacional (`audit_log_org`):**
    - **Alcance:** Mutaciones críticas dentro del tenant (cambios de configuración, asignación/revocación de roles RBAC a concesiones, altas/bajas de concesiones de acceso, eventos de negocio críticos).
@@ -467,7 +478,7 @@ Ninguna protección se considera infalible. La seguridad del sistema se basa en 
 - **Escenario:** Un atacante envía ráfagas masivas de solicitudes de autenticación o inyecta hashes maliciosos con parámetros extremos de memoria ($m$) o tiempo ($t$) para saturar la CPU, consumir la memoria del contenedor y provocar una terminación por Out-Of-Memory (OOM kill).
 - **Activo afectado:** Disponibilidad del servidor backend Express y del proceso Node.js.
 - **Impacto:** Denegación de servicio (DoS) global para todos los usuarios de la aplicación.
-- **Controles aprobados (D-093, D-102):** Validación defensiva previa del string PHC antes de llamar a `verify()`: límites estrictos ($m \le 65536\text{ KiB}$, $t \le 4$, $p \le 2$, longitud $\le 512$ bytes). Hashes fuera de rango se descartan sin ejecutar Argon2id. Limitador de concurrencia local por proceso acotado a 2 operaciones simultáneas y cola máxima de 8 peticiones; saturación rechazada de inmediato con HTTP 503 y `Retry-After: 5`. Rate limiting HTTP previo (HTTP 429) por IP/identificador.
+- **Controles aprobados (D-093, D-102):** Validación defensiva previa del string PHC antes de llamar a `verify()`: límites estrictos ($m \le 65536\text{ KiB}$, $t \le 4$, $p \le 2$, longitud $\le 512$ bytes). Hashes fuera de rango se descartan sin ejecutar Argon2id. Limitador de concurrencia local por proceso acotado a 2 operaciones simultáneas y cola máxima de 8 peticiones; saturación rechazada de inmediato con HTTP 503 y `Retry-After: 5`. Rate limiting HTTP independiente (HTTP 429 con `Retry-After`) por IP e identificador según D-110.
 - **Verificaciones necesarias:** Pruebas de carga enviando más de 10 peticiones concurrentes de autenticación comprobando la respuesta 503; pruebas unitarias con hashes manipulados ($m=1\text{ GB}$, $t=100$) verificando rechazo instantáneo sin consumo de memoria.
 - **Riesgo residual:** El limitador de concurrencia es local al proceso. En despliegues distribuidos multi-instancia, la capacidad total agregada crece con el número de réplicas. Ataques distribuidos masivos (DDoS) requieren mitigación perimetral (WAF/Ingress).
 - **Estado:** Mitigación definida.

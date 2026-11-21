@@ -1005,7 +1005,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Decisión:** El trabajo de T-014 se divide y se registra en `TASKS_POST_MVP.md`: diseño previo (T-014-0); autenticación con dos opciones en el CLI, cookies o Bearer, sobre un núcleo común (T-014a) y sus vistas en aplicación completa (T-014a-ui); RBAC con motor, API administrativa y auditoría mínima (T-014b1) y panel de administración (T-014b2); multitenancy con PostgreSQL RLS, **independiente de RBAC** (T-014c); integración de RBAC con multitenancy (T-014d). Antes de ellas: composición de overlays (T-017a, T-017a-ui), seguridad base con Zod (T-017b) y arnés de verificación (T-018).
 
-**Reglas de alcance aprobadas:** multitenancy solo con PostgreSQL en esta etapa (SQLite sin multitenancy); multitenancy requiere autenticación de Brixa o una identidad externa verificada; se mantienen JavaScript y TypeScript para toda capacidad; quedan fuera de esta etapa MFA, OAuth/SSO, auditoría avanzada, registro público y recuperación de contraseña (salvo razón importante), integración con proveedores de identidad externos (solo contrato) y MongoDB.
+**Reglas de alcance aprobadas:** multitenancy solo con PostgreSQL en esta etapa (SQLite sin multitenancy); multitenancy requiere autenticación de Brixa o una identidad externa verificada; se mantienen JavaScript y TypeScript para toda capacidad; quedan fuera de esta etapa MFA, OAuth/SSO, auditoría avanzada, registro público y recuperación autónoma de contraseña (véase la excepción de recuperación privilegiada en D-109), integración con proveedores de identidad externos (solo contrato) y MongoDB.
 
 **Nota de modificación de alcance (D-086):** El alcance relativo al registro público fue modificado expresamente por D-086: se admite como opción en el CLI exclusivamente para proyectos con autenticación sin multitenancy (manteniendo registro administrado como predeterminado), implementado de forma posterior al núcleo de Auth y sujeto a controles de seguridad. Se mantiene fuera de alcance la creación pública de organizaciones y el registro público para multitenancy.
 
@@ -1015,7 +1015,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Nota de aprobación de estrategia JS/TS (D-098):** La estrategia JavaScript/TypeScript queda aprobada formalmente como híbrido versionado con TypeScript como fuente de verdad y derivación determinista mediante Babel/AST (D-098 tras INV-05b e INV-08); la implementación del derivador y su comando de verificación (`verify:sync`) permanece pendiente en T-023 como requisito previo a la codificación de las plantillas de Auth y RBAC.
 
-**Pendiente de evidencia o decisión:** versión de Zod, almacén de contadores de abuso, comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093; RLS y auditorías resueltas por D-094 a D-097; estrategia JS/TS resuelta en D-098 con implementación en T-023).
+**Pendiente de evidencia o decisión:** versión de Zod, detalles operativos de los contadores de abuso (D-110), comprobación de soporte de sintaxis RLS en el Drizzle Kit fijado (T-014c), parámetros específicos de expiración y rotación de sesiones, reglas de delegación e invitaciones, y forma del esquema (ver P-008 a P-017; hash de contraseñas resuelto por D-091 a D-093; RLS y auditorías resueltas por D-094 a D-097; estrategia JS/TS resuelta en D-098 con implementación en T-023).
 
 ---
 
@@ -1462,7 +1462,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Ciclo de vida de sesión gobernado por doble control temporal: expiración deslizante por inactividad (desplazamiento al registrar actividad del usuario) y límite de vida absoluto e improrrogable desde la creación de la sesión.
 - Revocación efectiva inmediata que impide el acceso en la siguiente petición.
 - Actualizaciones de actividad en base de datos diseñadas para ser eficientes y seguras frente a concurrencia (evitando contención o bloqueos en peticiones paralelas simultáneas).
-- Rotación controlada del identificador de sesión en eventos de seguridad relevantes (como cambio de contraseña o elevación de privilegios).
+- Rotación controlada del identificador de sesión en eventos de seguridad relevantes como la elevación de privilegios. El cambio autenticado de contraseña revoca todas las sesiones y exige volver a iniciar sesión (D-108).
 - Se descarta el esquema de pares access token + refresh token rotativo en v1.
 - Las duraciones predeterminadas de expiración, la periodicidad de rotación y la frecuencia de actualización de actividad quedan pendientes de especificación detallada.
 
@@ -1816,7 +1816,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
   - El mecanismo de actualización diferida nunca puede extender la vida de la sesión más allá del límite absoluto (`created_at + max_lifetime`).
   - La expiración efectiva por inactividad se evalúa siempre contra el valor persistido de `last_activity_at` y el umbral configurado. El retraso máximo en la persistencia (60 s) es conocido y acotado, no compromete la seguridad y se contempla en la validación.
 - **Exclusión de tráfico de mantenimiento:** Las consultas automáticas de mantenimiento (tales como sondeos de salud `/health`, polling periódico de interfaz o telemetría) **no prolongan la sesión**. Solo solicitudes que correspondan a interacción intencional o mutaciones de negocio actualizan la marca de actividad.
-- **Sin rotación periódica de tokens en v1:** Se ratifica D-088. No se realiza rotación automática periódica de tokens de sesión durante peticiones ordinarias para evitar condiciones de carrera en navegadores. La rotación del identificador de sesión se reserva estrictamente para eventos de seguridad sensibles (cambio de credenciales o elevación de privilegios).
+- **Sin rotación periódica de tokens en v1:** Se ratifica D-088. No se realiza rotación automática periódica de tokens de sesión durante peticiones ordinarias para evitar condiciones de carrera en navegadores. La rotación del identificador de sesión se reserva para eventos de seguridad sensibles como la elevación de privilegios. Para el cambio de contraseña y la recuperación privilegiada se aplican la revocación total de sesiones y las reglas de D-108 y D-109.
 - **Revocación inmediata:** La invalidación de una sesión (vía borrado o marca `revoked_at` en BD) surte efecto instantáneo e ineludible en la petición inmediatamente posterior.
 
 **Motivo:** Equilibrio riguroso entre seguridad estricta (revocación inmediata, caducidad absoluta improrrogable) y eficiencia operativa en PostgreSQL, evitando problemas de contención de filas detectados en pruebas de carga concurrentes.
@@ -1844,7 +1844,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
   - Cola de espera acotada a un máximo de **8 solicitudes** por proceso.
   - Ante saturación (cola llena > 8): rechazo inmediato y controlado con **HTTP 503 (Service Unavailable)** y cabecera `Retry-After: 5`.
   - Este limitador aplica a todas las operaciones computacionales de Argon2id: `hash()`, `verify()` y la verificación simulada (*dummy hash*) contra enumeración por tiempo.
-- **Independencia de capas de rate limiting:** El limitador de concurrencia local protege la memoria y la CPU del contenedor ante ráfagas. En la capa HTTP previa opera de forma independiente el rate limiting de autenticación, respondiendo con **HTTP 429 (Too Many Requests)** ante exceso de intentos por IP o identificador de cuenta.
+- **Independencia de capas de rate limiting:** El limitador de concurrencia local protege la memoria y la CPU del contenedor ante ráfagas. En la capa HTTP previa opera de forma independiente el rate limiting de autenticación, respondiendo con **HTTP 429 (Too Many Requests)** ante exceso de intentos por IP o identificador de cuenta, según D-110.
 - **Estrategia de rehash transparente:** La actualización de coste se ejecuta únicamente tras una verificación exitosa de credenciales y cuando los parámetros del hash almacenado difieran de los parámetros operativos vigentes (D-092), pero sigan dentro del rango defensivo aprobado.
 - **Ajustes operativos y restricciones:** Los valores operativos de concurrencia y cola pueden ajustarse mediante variables de entorno según la capacidad del host/contenedor, pero queda prohibida la ampliación arbitraria de los límites criptográficos defensivos máximos ($m > 65536$ KiB, $t > 4$).
 - **Limitación documentada:** El limitador es local a la memoria de cada proceso Node.js. En despliegues multinodo o multi-proceso (clustering, PM2, réplicas de Kubernetes), la concurrencia global simultánea equivale a $N \times 2$. La protección global ante ataques distribuidos recae en el rate limiting perimetral.
@@ -1992,6 +1992,46 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - **Parámetros configurables en implementación:** `ACTIVATION_TOKEN_EXPIRY_HOURS` se valida con Zod como entero de 1 a 168 inclusive, con 24 horas por defecto.
 
 **Motivo:** Resuelve de forma segura, elegante y autocontenida el aprovisionamiento de identidades sin credenciales predeterminadas ni falsas dependencias de infraestructura SMTP, cerrando el modelo de autenticación y autorización de Brixa.
+
+---
+
+### D-108 — Cambio autenticado de contraseña
+
+**Estado:** Confirmada por el responsable. Requisito de cierre de T-014a.
+
+**Decisión:** Exigir una sesión válida y verificar la contraseña actual. Confirmar en la misma transacción el nuevo hash, la revocación de todas las sesiones de la cuenta (incluida la actual) y el evento de auditoría global (D-105). El usuario debe iniciar sesión de nuevo. Esta regla precisa el tratamiento del cambio de credenciales de D-088 y D-101.
+
+---
+
+### D-109 — Recuperación privilegiada del administrador inicial
+
+**Estado:** Confirmada por el responsable. Requisito de cierre de T-014a.
+
+**Decisión:** Ofrecer un CLI local independiente del bootstrap de D-085, con entrada interactiva oculta y confirmación de la contraseña. En PostgreSQL reutiliza `table_owner` mediante `MIGRATION_DATABASE_URL` sin fallback a `DATABASE_URL`. En SQLite utiliza la BD persistente configurada. Conserva el UUID y la asignación de autoridad existentes. El cambio de hash, la revocación de todas las sesiones y su auditoría global se confirman en una misma transacción (D-105). El comando no reactiva cuentas deshabilitadas ni concede una sesión y funciona sin correo obligatorio. La recuperación autónoma queda diferida.
+
+---
+
+### D-110 — Protección persistente contra abuso en el inicio de sesión
+
+**Estado:** Confirmada por el responsable. Los detalles operativos se concretarán antes de ⑤-C.
+
+**Decisión:**
+- Límites predeterminados configurables: 5 intentos fallidos por identificador en 15 minutos y 10 solicitudes de inicio de sesión por IP en 15 minutos.
+- Los contadores persisten en la BD seleccionada, sin Redis obligatorio. Al superar un límite se responde HTTP 429 con `Retry-After`. Las solicitudes rechazadas no deben prolongar el bloqueo indefinidamente.
+- La saturación de Argon2id conserva su respuesta HTTP 503 independiente con `Retry-After: 5` (D-102).
+- La contabilización, concurrencia, privacidad y limpieza se concretarán antes de ⑤-C. Los límites numéricos anteriores corresponden al inicio de sesión. Sigue vigente el control específico de activación de D-107.
+
+---
+
+### D-111 — Evolución modular y selectiva de Auth
+
+**Estado:** Dirección futura confirmada por el responsable. Las extensiones se planifican después del núcleo T-014a.
+
+**Decisión:**
+- La identidad interna es independiente de los identificadores, métodos de autenticación y concesiones de autorización. Evolucionar hacia email, teléfono y username y hacia métodos combinables de contraseña, OAuth/OIDC, OTP y passkeys. La vinculación exige acreditar titularidad y no fusiona cuentas automáticamente por coincidencia de email.
+- Generar los métodos y funcionalidades seleccionados. Contemplar registro administrado, público o ambos, con el administrado por defecto y registro público solo sin multitenancy, sujeto a D-086.
+- Contemplar recuperación autónoma mediante canales verificados, proveedores opcionales de correo y SMS y MFA opcional.
+- Reutilizar las sesiones y la auditoría existentes. Diferir migraciones y abstracciones hasta que una extensión las requiera. D-100 sigue delimitando la identidad interna exclusiva de Auth v1.
 
 ---
 
