@@ -1,7 +1,17 @@
 import { systemAuditEvents } from "../auth/audit-events.js";
 
 import { sql } from "drizzle-orm";
-import { pgTable, text, uuid, timestamp, check, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  bigint,
+  integer,
+  text,
+  uuid,
+  timestamp,
+  check,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 const instant = (name) => timestamp(name, { withTimezone: true });
 const states = ["pending_activation", "active", "disabled"];
@@ -106,5 +116,34 @@ export const activationTokens = pgTable(
     uniqueIndex("activation_tokens_open_user_idx")
       .on(table.userId)
       .where(sql`status = 'open'`),
+  ],
+);
+
+export const loginAbuseCounters = pgTable(
+  "login_abuse_counters",
+  {
+    keyDigest: text("key_digest").notNull().primaryKey(),
+    hits: integer("hits").notNull(),
+    expiresAtMs: bigint("expires_at_ms", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("login_abuse_digest", sql`length(key_digest) = 64 AND key_digest ~ '^[0-9a-f]+$'`),
+    check("login_abuse_window", sql`hits >= 0 AND expires_at_ms >= 0`),
+    index("login_abuse_expiry_idx").on(table.expiresAtMs, table.keyDigest),
+  ],
+);
+
+export const loginIdentifierReservations = pgTable(
+  "login_identifier_reservations",
+  {
+    id: uuid("id").notNull().primaryKey(),
+    keyDigest: text("key_digest").notNull(),
+    expiresAtMs: bigint("expires_at_ms", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("login_reservation_digest", sql`length(key_digest) = 64 AND key_digest ~ '^[0-9a-f]+$'`),
+    check("login_reservation_expiry", sql`expires_at_ms > 0`),
+    index("login_reservation_identifier_idx").on(table.keyDigest, table.expiresAtMs),
+    index("login_reservation_expiry_idx").on(table.expiresAtMs, table.id),
   ],
 );

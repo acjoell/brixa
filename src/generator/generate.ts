@@ -827,7 +827,9 @@ const COMPOSE_AUTH_MARKER = "# @@INSERT:auth-env@@";
 const AUTH_ENV_EXAMPLE =
   "# Argon2id por proceso (0 en cola desactiva la espera)\nARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n" +
   "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n" +
-  "ACTIVATION_TOKEN_EXPIRY_HOURS=24\n";
+  "ACTIVATION_TOKEN_EXPIRY_HOURS=24\n" +
+  "LOGIN_IDENTIFIER_FAILURE_LIMIT=5\nLOGIN_IP_REQUEST_LIMIT=10\nLOGIN_ABUSE_WINDOW_MINUTES=15\n" +
+  "LOGIN_ABUSE_HMAC_KEY=\n";
 
 async function composeDockerEnv(outputDir: string, options: UserOptions): Promise<void> {
   const composePath = path.join(outputDir, "compose.yaml");
@@ -850,7 +852,11 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
         '      ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"\n' +
         '      SESSION_IDLE_TIMEOUT_MINUTES: "${SESSION_IDLE_TIMEOUT_MINUTES-30}"\n' +
         '      SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"\n' +
-        '      ACTIVATION_TOKEN_EXPIRY_HOURS: "${ACTIVATION_TOKEN_EXPIRY_HOURS-24}"',
+        '      ACTIVATION_TOKEN_EXPIRY_HOURS: "${ACTIVATION_TOKEN_EXPIRY_HOURS-24}"\n' +
+        '      LOGIN_IDENTIFIER_FAILURE_LIMIT: "${LOGIN_IDENTIFIER_FAILURE_LIMIT-5}"\n' +
+        '      LOGIN_IP_REQUEST_LIMIT: "${LOGIN_IP_REQUEST_LIMIT-10}"\n' +
+        '      LOGIN_ABUSE_WINDOW_MINUTES: "${LOGIN_ABUSE_WINDOW_MINUTES-15}"\n' +
+        '      LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"',
     );
     if (options.database === "postgres") {
       const runtimeLine = /^ {6}DATABASE_URL: .+$/gm;
@@ -1103,7 +1109,7 @@ async function applyAuthOverlay(
     : "Configura `DATABASE_URL` con la misma ruta SQLite en archivo que usa el backend.";
   await fs.appendFile(
     path.join(backendDir, "README.md"),
-    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n`,
+    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n\n## Contadores de abuso de login\n\nConfigura \`LOGIN_IDENTIFIER_FAILURE_LIMIT\` (5), \`LOGIN_IP_REQUEST_LIMIT\` (10) y \`LOGIN_ABUSE_WINDOW_MINUTES\` (15) con enteros positivos hasta 2147483647. Genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\` y configura la misma clave secreta en todas las instancias que compartan BD. Cambiarla reinicia efectivamente los presupuestos existentes. Con Compose, define estas variables en el entorno o en el archivo \`.env\` de la raíz. La primera solicitud por IP o el primer fallo por identificador abren ventanas independientes. La última plaza se contabiliza y los rechazos posteriores no aplazan el vencimiento. Solo se almacenan claves HMAC, recuentos y vencimientos. SQLite en archivo utiliza el reloj del host compartido. El login consume primero el presupuesto de una IP validada y luego reserva una plaza por identificador durante 60 segundos. Los fallos confirmados y las reservas activas ocupan el presupuesto durante la admisión. Las reservas vencidas liberan su plaza y una verificación tardía no puede emitir sesión. En cada solicitud admitida por IP, la limpieza procesa hasta 100 contadores y 100 reservas vencidas. El adaptador HTTP deberá proporcionar una IP confiable y convertir el tiempo restante a Retry-After.\n`,
   );
   if (composeRoot) {
     const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";
@@ -1115,7 +1121,7 @@ async function applyAuthOverlay(
       : "El contenedor puntual usa el mismo volumen SQLite que el backend.";
     await fs.appendFile(
       path.join(composeRoot, "README.md"),
-      `\n### Bootstrap y recuperación interactivos con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\ndocker compose run --rm ${args}backend ${recovery}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n`,
+      `\n### Bootstrap y recuperación interactivos con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\ndocker compose run --rm ${args}backend ${recovery}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n\nLos contadores de login también toman de ese entorno \`LOGIN_ABUSE_WINDOW_MINUTES\`, \`LOGIN_IDENTIFIER_FAILURE_LIMIT\`, \`LOGIN_IP_REQUEST_LIMIT\` y la clave secreta \`LOGIN_ABUSE_HMAC_KEY\`. Consulta la sección de contadores en el README del backend.\n`,
     );
   }
 }

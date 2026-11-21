@@ -121,3 +121,41 @@ export const activationTokens = sqliteTable(
       .where(sql`status = 'open'`),
   ],
 );
+
+export const loginAbuseCounters = sqliteTable(
+  "login_abuse_counters",
+  {
+    keyDigest: text("key_digest").notNull().primaryKey(),
+    hits: integer("hits").notNull(),
+    expiresAtMs: integer("expires_at_ms").notNull(),
+  },
+  (table) => [
+    check(
+      "login_abuse_digest",
+      sql`typeof(key_digest) = 'text' AND length(key_digest) = 64 AND key_digest NOT GLOB '*[^0-9a-f]*' AND instr(key_digest, char(0)) = 0`,
+    ),
+    check(
+      "login_abuse_window",
+      sql`hits >= 0 AND expires_at_ms >= 0 AND typeof(hits) = 'integer' AND typeof(expires_at_ms) = 'integer'`,
+    ),
+    index("login_abuse_expiry_idx").on(table.expiresAtMs, table.keyDigest),
+  ],
+);
+
+export const loginIdentifierReservations = sqliteTable(
+  "login_identifier_reservations",
+  {
+    id: text("id").notNull().primaryKey(),
+    keyDigest: text("key_digest").notNull(),
+    expiresAtMs: integer("expires_at_ms").notNull(),
+  },
+  (table) => [
+    check(
+      "login_reservation_digest",
+      sql`typeof(key_digest) = 'text' AND length(key_digest) = 64 AND key_digest NOT GLOB '*[^0-9a-f]*' AND instr(key_digest, char(0)) = 0`,
+    ),
+    check("login_reservation_expiry", sql`typeof(expires_at_ms) = 'integer' AND expires_at_ms > 0`),
+    index("login_reservation_identifier_idx").on(table.keyDigest, table.expiresAtMs),
+    index("login_reservation_expiry_idx").on(table.expiresAtMs, table.id),
+  ],
+);

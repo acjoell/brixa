@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { systemAuditCatalog } from "../src/auth/audit-events.js";
 import { bootstrapInitialAdministrator } from "../src/auth/bootstrap.js";
 import { createPasswordChangeService } from "../src/auth/change-password.js";
-import { createLoginService } from "../src/auth/login.js";
+import { testLogin } from "./login-contract.js";
 import { hashPassword } from "../src/auth/password-crypto.js";
 import { recoverInitialAdministrator } from "../src/auth/recover-admin.js";
 import { createSessionService } from "../src/auth/sessions.js";
@@ -34,15 +34,18 @@ export async function checkAdminRecovery(
   assert.equal(await recover(next, "missing"), false);
   assert.deepEqual(systemAuditCatalog[event], { category: "security", severity: "warning" });
   const { userId } = await bootstrapInitialAdministrator(owner, { email, password: previous });
-  const login = await createLoginService(runtimeWriter);
+  const login = await testLogin(runtimeWriter);
   const validation = createSessionService(runtime);
   async function issue(password: string, requestId: string, identifier = email) {
     const token = await login(identifier, password, requestId);
     assert(token);
     return token;
   }
-  const first = await issue(previous, "first");
-  const second = await issue(previous, "second");
+  // The fixture starts on 0005, before the current login schema exists.
+  const legacySessions = createSessionService(owner);
+  const first = await legacySessions.createSession(userId);
+  const second = await legacySessions.createSession(userId);
+  assert(first && second);
   const outsider = randomUUID();
   const now = new Date();
   await owner.insert(users).values({
@@ -53,7 +56,8 @@ export async function checkAdminRecovery(
     createdAt: now,
     updatedAt: now,
   });
-  const unrelated = await issue(previous, "unrelated", "other@example.test");
+  const unrelated = await legacySessions.createSession(outsider);
+  assert(unrelated);
   const read = async () =>
     [
       await owner.select().from(users).orderBy(users.id),
@@ -104,8 +108,8 @@ export async function checkAdminRecovery(
   assert.equal(await login(email, previous, "obsolete"), null);
   let token = await issue(next, "new-password");
 
-  const staleLogin = holdWrite();
-  const loginOnHold = await createLoginService(wrapWriter(staleLogin.gate));
+  const staleLogin = holdWrite(4);
+  const loginOnHold = await testLogin(wrapWriter(staleLogin.gate));
   assert.equal(
     await interleave(staleLogin, loginOnHold(email, next, "stale-login"), async () => {
       assert.equal(await recover(final, "beats-login"), true);

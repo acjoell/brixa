@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { bootstrapInitialAdministrator } from "../src/auth/bootstrap.js";
-import { createLoginService } from "../src/auth/login.js";
+import { testLogin } from "./login-contract.js";
 import { createSessionService } from "../src/auth/sessions.js";
 
 import { auditLogSystem, sessions, users } from "../src/db/schema.js";
@@ -17,7 +17,7 @@ export async function checkLogout(owner, runtime, other, activation, failAudit) 
   const clock = () => now;
   const service = createSessionService(runtime, {}, clock);
   const remote = createSessionService(other, {}, clock);
-  const login = await createLoginService(activation, {}, clock);
+  const login = await testLogin(activation, clock);
   const first = await login(email, password, "login-first");
   const second = await login(email, password, "login-second");
   assert(first && second);

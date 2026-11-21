@@ -5,17 +5,37 @@ import { Algorithm, hash, Version } from "@node-rs/argon2";
 import { eq } from "drizzle-orm";
 import type { ActivationDatabase } from "../src/db/activation-write.js";
 import type { db } from "../src/db/client.js";
-import { auditLogSystem, sessions, users } from "../src/db/schema.js";
+import {
+  auditLogSystem,
+  loginIdentifierReservations as reservations,
+  sessions,
+  users,
+} from "../src/db/schema.js";
 import { createAccountActivationService } from "../src/auth/activate-account.js";
 import { getArgon2Limiter } from "../src/auth/argon2-limiter.js";
 import { bootstrapInitialAdministrator } from "../src/auth/bootstrap.js";
-import { createLoginService } from "../src/auth/login.js";
+import { createLoginService, LoginRateLimitedError } from "../src/auth/login.js";
+import { createLoginAbuseService } from "../src/auth/login-abuse.js";
 import { createManagedActivationService } from "../src/auth/managed-activation.js";
 import { hashPassword, needsPasswordRehash } from "../src/auth/password-crypto.js";
 import { createSessionService } from "../src/auth/sessions.js";
 
 type Database = typeof db;
-type LoginFactory = Awaited<ReturnType<typeof createLoginService>>;
+const testKey = randomBytes(32).toString("hex");
+export const testLoginEnv = { LOGIN_ABUSE_HMAC_KEY: testKey };
+
+export async function testLogin(database: ActivationDatabase, clock = Date.now) {
+  const login = await createLoginService(
+    database,
+    { ...testLoginEnv, LOGIN_IDENTIFIER_FAILURE_LIMIT: "20" },
+    clock,
+  );
+  return (email: unknown, password: unknown, requestId: string) =>
+    login(email, password, requestId, "192.0.2." + ((nextIp++ % 254) + 1));
+}
+let nextIp = 0;
+
+type LoginFactory = Awaited<ReturnType<typeof testLogin>>;
 
 export async function checkLogin(
   owner: Database,
@@ -23,7 +43,10 @@ export async function checkLogin(
   activation: ActivationDatabase,
   other: ActivationDatabase,
   pauseRead: (database: ActivationDatabase, pause: () => Promise<void>) => ActivationDatabase,
-  failAudit: (enabled: boolean) => Promise<unknown>,
+  failAudit: (
+    enabled: boolean,
+    event?: "login_succeeded" | "brute_force_detected",
+  ) => Promise<unknown>,
 ) {
   const password = "test-only login password";
   const adminEmail = "bootstrap@example.test";
@@ -41,8 +64,8 @@ export async function checkLogin(
     await createAccountActivationService(activation)(registration.token, password, "activate"),
     true,
   );
-  const login = await createLoginService(activation);
-  const loginOther = await createLoginService(other);
+  const login = await testLogin(activation);
+  const loginOther = await testLogin(other);
   const audit = (requestId: string) =>
     owner.select().from(auditLogSystem).where(eq(auditLogSystem.requestId, requestId));
   const sessionsFor = (userId: string) =>
@@ -99,6 +122,7 @@ export async function checkLogin(
       code: "ARGON2_SATURATED",
     });
     assert.deepEqual(await audit("saturated"), []);
+    assert.deepEqual(await owner.select().from(reservations), []);
   } finally {
     gate.resolve();
     await Promise.allSettled(jobs);
@@ -134,7 +158,7 @@ export async function checkLogin(
 
   // Las conexiones independientes cambian la fila tras la lectura de la prueba de credencial.
   async function afterLookup(change: () => Promise<unknown>, requestId: string) {
-    const gated = await createLoginService(
+    const gated = await testLogin(
       pauseRead(activation, async () => {
         await change();
       }),
@@ -166,8 +190,8 @@ export async function checkLogin(
     await ready.promise;
   };
   const results = await concurrent(
-    await createLoginService(pauseRead(activation, barrier)),
-    await createLoginService(pauseRead(other, barrier)),
+    await testLogin(pauseRead(activation, barrier)),
+    await testLogin(pauseRead(other, barrier)),
     "rehash",
   );
   assert.equal(results.filter(Boolean).length, 1);
@@ -180,6 +204,144 @@ export async function checkLogin(
       .sort(),
     ["login_failed", "login_succeeded"],
   );
+  const protectedLogin = await createLoginService(activation, testLoginEnv);
+  const remoteLogin = await createLoginService(other, testLoginEnv);
+  const abuse = createLoginAbuseService(activation, testLoginEnv);
+  const remoteAbuse = createLoginAbuseService(other, testLoginEnv);
+
+  // Hold the fifth attempt after DB admission but before Argon2id, without a write lock.
+  const absent = "target@example.test";
+  const checkedIp = "198.51.100.1";
+  for (let i = 1; i <= 4; i++)
+    assert.equal(await protectedLogin(absent, password, "quota-" + i, checkedIp), null);
+  await failAudit(true, "brute_force_detected");
+  try {
+    await assert.rejects(protectedLogin(absent, password, "failed-threshold", checkedIp), {
+      code: "LOGIN_FAILED",
+    });
+    assert.equal((await remoteAbuse.identifierStatus(absent)).blocked, false);
+    assert.deepEqual(await audit("failed-threshold"), []);
+    assert.deepEqual(await owner.select().from(reservations), []);
+  } finally {
+    await failAudit(false, "brute_force_detected");
+  }
+
+  async function pausedLogin(
+    email: string,
+    requestId: string,
+    intervene: () => Promise<void>,
+    rejectCode?: string,
+  ) {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const gated = await createLoginService(
+      pauseRead(activation, async () => {
+        entered.resolve();
+        await resume.promise;
+      }),
+      testLoginEnv,
+    );
+    const attempt = gated(email, password, requestId, checkedIp);
+    const outcome = rejectCode ? assert.rejects(attempt, { code: rejectCode }) : attempt;
+    try {
+      await Promise.race([
+        entered.promise,
+        outcome.then(() => {
+          throw new Error("Login terminó antes de la barrera.");
+        }),
+      ]);
+      await intervene();
+    } finally {
+      resume.resolve();
+      await outcome;
+    }
+    return outcome;
+  }
+
+  const limited = (max: number) => (error: unknown) =>
+    error instanceof LoginRateLimitedError &&
+    Number.isInteger(error.retryAfterSeconds) &&
+    error.retryAfterSeconds >= 1 &&
+    error.retryAfterSeconds <= max;
+  assert.equal(new LoginRateLimitedError(1001).retryAfterSeconds, 2);
+  const fifth = await pausedLogin(absent, "quota-5", async () => {
+    assert.equal((await remoteAbuse.identifierStatus(absent)).blocked, false);
+    await assert.rejects(
+      remoteLogin(absent, password, "pending-limit", "198.51.100.2"),
+      limited(60),
+    );
+    assert.deepEqual(await audit("pending-limit"), []);
+  });
+  assert.equal(fifth, null);
+  await assert.rejects(remoteLogin(absent, password, "quota-6", "198.51.100.3"), limited(900));
+  assert.deepEqual(await audit("quota-6"), []);
+  assert.deepEqual((await audit("quota-5")).map(({ event }) => event).sort(), [
+    "brute_force_detected",
+    "login_failed",
+  ]);
+  assert.equal(
+    (
+      await owner
+        .select()
+        .from(auditLogSystem)
+        .where(eq(auditLogSystem.event, "brute_force_detected"))
+    ).length,
+    1,
+  );
+
+  // A successful login still consumes the tenth IP request, across both connections.
+  const limitedIp = "198.51.100.4";
+  for (let i = 1; i <= 9; i++) assert.equal((await abuse.consumeIp(limitedIp)).accepted, true);
+  const priorSession = await remoteLogin(managedEmail, password, "ip-10", limitedIp);
+  assert(priorSession);
+  await assert.rejects(protectedLogin(managedEmail, password, "ip-11", limitedIp), limited(900));
+  assert.deepEqual(await audit("ip-11"), []);
+
+  const sessionService = createSessionService(runtime);
+  const nextSession = await pausedLogin(managedEmail, "logout-race-login", async () => {
+    assert.equal(await sessionService.logout(priorSession, "logout-race"), true);
+  });
+  assert(nextSession);
+  assert.equal(await sessionService.validateSession(priorSession), null);
+  assert(await sessionService.validateSession(nextSession));
+
+  const singleSlot = { ...testLoginEnv, LOGIN_IDENTIFIER_FAILURE_LIMIT: "1" };
+  const one = createLoginAbuseService(activation, singleSlot);
+  const another = createLoginAbuseService(other, singleSlot);
+  const crashed = await one.reserveIdentifier(managedEmail);
+  assert(crashed.accepted);
+  assert.equal((await another.reserveIdentifier(managedEmail)).accepted, false);
+  await owner
+    .update(reservations)
+    .set({ expiresAtMs: 1 })
+    .where(eq(reservations.id, crashed.reservation.id));
+  const recovered = await another.reserveIdentifier(managedEmail);
+  assert(recovered.accepted);
+  assert.equal(
+    await abuse.finishIdentifier(crashed.reservation, { requestId: "expired-lease" }),
+    false,
+  );
+  const duplicates = await Promise.all([
+    abuse.finishIdentifier(recovered.reservation, null),
+    remoteAbuse.finishIdentifier(recovered.reservation, null),
+  ]);
+  assert.equal(duplicates.filter(Boolean).length, 1);
+  await abuse.cleanupExpired();
+  assert.deepEqual(await owner.select().from(reservations), []);
+  assert.deepEqual(await audit("expired-lease"), []);
+
+  const sessionCount = (await runtime.select().from(sessions)).length;
+  await pausedLogin(
+    managedEmail,
+    "expired-valid-proof",
+    async () => {
+      await owner.update(reservations).set({ expiresAtMs: 1 });
+    },
+    "LOGIN_FAILED",
+  );
+  assert.equal((await runtime.select().from(sessions)).length, sessionCount);
+  assert.deepEqual(await audit("expired-valid-proof"), []);
+  assert.equal((await abuse.identifierStatus(managedEmail)).blocked, false);
   const records = JSON.stringify(await owner.select().from(auditLogSystem));
   for (const secret of [token, password, original, legacy, "corrupt PHC fixture"])
     assert(!records.includes(secret));

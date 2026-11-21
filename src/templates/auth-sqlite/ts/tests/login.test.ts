@@ -26,10 +26,12 @@ it("login SQLite en archivo: credenciales, auditoría, rollback y concurrencia",
         const { database, close } = open();
         return { database: pauseLoginLookup(database, pause), close };
       },
-      (enabled) =>
+      (enabled, event = "login_succeeded") =>
         client.execute(
           enabled
-            ? "CREATE TRIGGER reject_login BEFORE INSERT ON audit_log_system WHEN NEW.event='login_succeeded' BEGIN SELECT RAISE(ABORT, 'fixture'); END"
+            ? "CREATE TRIGGER reject_login BEFORE INSERT ON audit_log_system WHEN NEW.event='" +
+                event +
+                "' BEGIN SELECT RAISE(ABORT, 'fixture'); END"
             : "DROP TRIGGER reject_login",
         ),
     );

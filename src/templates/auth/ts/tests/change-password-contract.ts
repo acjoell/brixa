@@ -5,7 +5,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { Argon2SaturatedError, getArgon2Limiter } from "../src/auth/argon2-limiter.js";
 import { bootstrapInitialAdministrator } from "../src/auth/bootstrap.js";
 import { createPasswordChangeService } from "../src/auth/change-password.js";
-import { createLoginService } from "../src/auth/login.js";
+import { testLogin } from "./login-contract.js";
 import { hashPassword } from "../src/auth/password-crypto.js";
 import { createSessionService, tokenDigest } from "../src/auth/sessions.js";
 import type { ActivationDatabase } from "../src/db/activation-write.js";
@@ -14,7 +14,7 @@ import { auditLogSystem, sessions, users } from "../src/db/schema.js";
 
 type Database = typeof db;
 
-export function holdWrite() {
+export function holdWrite(skip = 0) {
   const entered = Promise.withResolvers<void>();
   const resume = Promise.withResolvers<void>();
   const gate = (database: Database) =>
@@ -22,6 +22,10 @@ export function holdWrite() {
       get(target, key, receiver) {
         if (key !== "transaction") return Reflect.get(target, key, receiver);
         return async (operation: Parameters<Database["transaction"]>[0]) => {
+          if (skip > 0) {
+            skip--;
+            return target.transaction(operation);
+          }
           entered.resolve();
           await resume.promise;
           return target.transaction(operation);
@@ -81,7 +85,7 @@ export async function checkPasswordChange(
   });
   const validate = createSessionService(runtime, {}, clock);
   const remoteSessions = createSessionService(other, {}, clock);
-  const login = await createLoginService(writer, {}, clock);
+  const login = await testLogin(writer, clock);
   const change = createPasswordChangeService(writer, {}, clock);
   const remoteChange = createPasswordChangeService(remoteWriter, {}, clock);
   const getCredential = async () =>
@@ -161,8 +165,8 @@ export async function checkPasswordChange(
   let token = await session(next, "new-password");
 
   // Pausar transacciones después de Argon2id sin simular escrituras de BD.
-  function gateWriter() {
-    const barrier = holdWrite();
+  function gateWriter(skip = 0) {
+    const barrier = holdWrite(skip);
     return { barrier, database: pauseWrite(writer, barrier.gate) };
   }
   let paused = gateWriter();
@@ -181,8 +185,9 @@ export async function checkPasswordChange(
   assert.equal((await activeSessions()).length, 0);
   token = await session(third, "winner-password");
 
-  paused = gateWriter();
-  const delayedLogin = await createLoginService(paused.database, {}, clock);
+  // IP, limpieza, reserva y finalización preceden la transacción de login.
+  paused = gateWriter(4);
+  const delayedLogin = await testLogin(paused.database, clock);
   assert.equal(
     await interleave(paused.barrier, delayedLogin(email, third, "stale-login"), async () => {
       assert.equal(await remoteChange(token, third, next, "change-beats-login"), true);

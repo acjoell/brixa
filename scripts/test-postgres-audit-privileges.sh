@@ -2,7 +2,7 @@
 # Desde la raíz, con las dependencias del backend PostgreSQL ya instaladas.
 set -euo pipefail
 mode=${1:-upgrade}
-case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery) ;; *) exit 2 ;; esac
+case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery|login-abuse) ;; *) exit 2 ;; esac
 script_dir=$(dirname "$(realpath "$0")")
 deps=$(realpath "${BRIXA_BACKEND_NODE_MODULES:?Directorio node_modules del backend generado}")
 test -d "$deps/pg"
@@ -44,13 +44,13 @@ owner_url="postgresql://table_owner:$owner_password@127.0.0.1:$port/app"
 export DATABASE_URL="postgresql://app_exec:$runtime_password@127.0.0.1:$port/app"
 migrate() { MIGRATION_DATABASE_URL="$owner_url" node src/db/migrate.js; }
 test "$(admin -Atc 'SHOW server_version_num')" = 170004
-if [[ "$mode" == managed-activation || "$mode" == account-activation || "$mode" == login || "$mode" == logout || "$mode" == change-password || "$mode" == admin-recovery ]]; then
-  if [[ "$mode" = managed-activation || "$mode" = admin-recovery ]]; then
+if [[ "$mode" == managed-activation || "$mode" == account-activation || "$mode" == login || "$mode" == logout || "$mode" == change-password || "$mode" == admin-recovery || "$mode" == login-abuse ]]; then
+  if [[ "$mode" = managed-activation || "$mode" = admin-recovery || "$mode" = login-abuse ]]; then
     cp drizzle/meta/_journal.json "$work/journal"
     SCENARIO="$mode" node --input-type=module -e '
       import fs from "node:fs";
       const path="drizzle/meta/_journal.json", journal=JSON.parse(fs.readFileSync(path));
-      journal.entries=journal.entries.slice(0,process.env.SCENARIO === "admin-recovery" ? 6 : 5); fs.writeFileSync(path,JSON.stringify(journal));'
+      journal.entries=journal.entries.slice(0,{"login-abuse":8,"admin-recovery":6,"managed-activation":5}[process.env.SCENARIO]); fs.writeFileSync(path,JSON.stringify(journal));'
   fi
   migrate
   BRIXA_TEST_OWNER_URL="$owner_url" FULL_JOURNAL="$work/journal" ACTIVATION_SCENARIO="$mode" node --input-type=module <<'JS'
@@ -68,6 +68,7 @@ import { checkAdminRecovery } from "./tests/admin-recovery-contract.js";
 import { withPostgresAdministrator } from "./src/db/bootstrap.js";
 import { checkPasswordChange } from "./tests/change-password-contract.js";
 import { checkLogout } from "./tests/logout-contract.js";
+import { checkLoginAbuse } from "./tests/login-abuse-contract.js";
 import { checkLogin, pauseLoginLookup } from "./tests/login-contract.js";
 import { checkAccountActivation, checkAccountActivationRaces } from "./tests/account-activation-contract.js";
 import {
@@ -99,7 +100,42 @@ try {
   const database = drizzle(first, { schema });
   const other = drizzle(second, { schema });
   const privileged = drizzle(owner, { schema });
-  if (process.env.ACTIVATION_SCENARIO === "admin-recovery") {
+  if (process.env.ACTIVATION_SCENARIO === "login-abuse") {
+    await owner.query(
+      "INSERT INTO audit_log_system VALUES ($1, 'login_failed', NULL, 'before-0008', now())",
+      [randomUUID()],
+    );
+    const read = async (statement) => (await owner.query(statement)).rows;
+    const history = () => read("SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at");
+    const audit = () => read("SELECT * FROM audit_log_system ORDER BY id");
+    const before = await audit();
+    await owner.query("INSERT INTO login_abuse_counters VALUES (repeat('a', 64), 3, 2000000000000)");
+    const beforeCounters = await read("SELECT * FROM login_abuse_counters");
+    const previous = await history();
+    assert.equal(previous.length, 8);
+    await copyFile(process.env.FULL_JOURNAL, "drizzle/meta/_journal.json");
+    const run = () => migrate(privileged, { migrationsFolder: "drizzle" });
+    await run();
+    const applied = await history();
+    assert.equal(applied.length, 9);
+    assert.deepEqual(applied.slice(0, 8), previous);
+    assert.deepEqual(await read("SELECT * FROM login_abuse_counters"), beforeCounters);
+    await run();
+    assert.deepEqual(await history(), applied);
+    await checkRuntimeIdentity();
+    await checkLoginAbuse(database, other, (enabled) => owner.query(enabled
+      ? "ALTER TABLE login_abuse_counters ADD CONSTRAINT reject_abuse_update CHECK (hits = 0) NOT VALID"
+      : "ALTER TABLE login_abuse_counters DROP CONSTRAINT reject_abuse_update",
+    ));
+    for (const statement of [
+      "TRUNCATE login_abuse_counters",
+      "UPDATE login_identifier_reservations SET expires_at_ms=1",
+      "ALTER TABLE login_abuse_counters ADD COLUMN leak text",
+      "DELETE FROM audit_log_system",
+    ]) await assert.rejects(first.query(statement), { code: "42501" });
+    assert.deepEqual(await audit(), before);
+    console.log("PostgreSQL 17.4: límites persistentes, concurrencia, rollback, ACL y migración 0007 → 0008 comprobados con app_exec.");
+  } else if (process.env.ACTIVATION_SCENARIO === "admin-recovery") {
     const history = async () => (await owner.query("SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at")).rows;
     const permissions = async () => (await owner.query(
       "SELECT grantee, privilege_type FROM information_schema.table_privileges WHERE table_schema='public' AND table_name='audit_log_system' ORDER BY 1,2",
@@ -114,7 +150,7 @@ try {
         const migrateAudit = () => migrate(privileged, { migrationsFolder: "drizzle" });
         await migrateAudit();
         const after = await history();
-        assert.equal(after.length, 7);
+        assert.equal(after.length, 9);
         assert.deepEqual(after.slice(0, 6), oldHistory);
         assert.deepEqual(await permissions(), oldPermissions);
         await migrateAudit();
@@ -149,9 +185,9 @@ try {
     console.log("PostgreSQL 17.4: validación y logout auditado comprobados con app_exec.");
   } else if (process.env.ACTIVATION_SCENARIO === "login") {
     await checkRuntimeIdentity();
-    await checkLogin(privileged, database, database, other, pauseLoginLookup, (enabled) =>
+    await checkLogin(privileged, other, database, other, pauseLoginLookup, (enabled, event = "login_succeeded") =>
       owner.query(enabled
-        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_login CHECK (event <> 'login_succeeded') NOT VALID"
+        ? "ALTER TABLE audit_log_system ADD CONSTRAINT reject_login CHECK (event <> '" + event + "') NOT VALID"
         : "ALTER TABLE audit_log_system DROP CONSTRAINT reject_login"),
     );
     console.log("PostgreSQL 17.4: login con app_exec, auditoría, rollback y concurrencia comprobados.");
@@ -221,7 +257,7 @@ try {
     assert.deepEqual(await read(rowsSql), before);
     assert.deepEqual(await read(permissionsSql), permissions);
     const after = await read(historySql);
-    assert.equal(after.length, 7);
+    assert.equal(after.length, 9);
     assert.deepEqual(after.slice(0, 5), history);
     await migrateAudit();
     assert.deepEqual(await read(historySql), after);
@@ -314,7 +350,7 @@ try {
   const run = () => migrate(drizzle(owner), { migrationsFolder: "drizzle" });
   await run();
   const after = await read(journal);
-  assert.equal(after.length, 7);
+  assert.equal(after.length, 9);
   assert.deepEqual(after.slice(0, history.length), history);
   await run();
   assert.deepEqual(await read(journal), after);
@@ -471,7 +507,7 @@ try {
   await migrate(drizzle(owner), { migrationsFolder: "drizzle" });
   assert.deepEqual(await Promise.all(tables.map(read)), before);
   const after = await read(journal);
-  assert.equal(after.length, 7);
+  assert.equal(after.length, 9);
   assert.deepEqual(after.slice(0, 3), history);
   assert.deepEqual(await read("initial_administrator"), []);
   await checkRuntimeIdentity();
@@ -594,7 +630,7 @@ cp "$work/journal" drizzle/meta/_journal.json
 migrate
 migrate
 test "$(baseline)" = "$before"
-test "$(owner -c 'SELECT count(*) FROM drizzle.__drizzle_migrations')" = 3
+test "$(owner -c 'SELECT count(*) FROM drizzle.__drizzle_migrations')" = 9
 node --input-type=module <<'JS'
 import assert from "node:assert/strict";
 import {pool,checkRuntimeIdentity} from "./src/db/client.js";

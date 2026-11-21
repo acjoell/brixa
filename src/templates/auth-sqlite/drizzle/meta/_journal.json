@@ -50,6 +50,20 @@
       "when": 1795241177445,
       "tag": "0006_initial_admin_recovery_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795246501397,
+      "tag": "0007_login_abuse",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795247172211,
+      "tag": "0008_login_reservations",
+      "breakpoints": true
     }
   ]
 }

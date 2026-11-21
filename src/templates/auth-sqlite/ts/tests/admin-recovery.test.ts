@@ -42,7 +42,7 @@ it("recupera al administrador y conserva la auditoría SQLite al migrar desde 00
       async () => {
         await migrate(owner, { migrationsFolder: "drizzle" });
         const migrated = (await history()).rows;
-        assert.equal(migrated.length, 7);
+        assert.equal(migrated.length, 9);
         assert.deepEqual(migrated.slice(0, 6), priorHistory);
         await migrate(owner, { migrationsFolder: "drizzle" });
         assert.deepEqual((await history()).rows, migrated);

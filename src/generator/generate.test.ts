@@ -134,6 +134,7 @@ describe("persistencia de Auth", () => {
             ),
           ).toBe(auth && database === "postgres");
           expect(schema.includes("export const initialAdministrator")).toBe(auth);
+          expect(schema.includes("export const loginAbuseCounters")).toBe(auth);
           if (auth) {
             const journal = JSON.parse(
               await fs.readFile(path.join(outputDir, "drizzle/meta/_journal.json"), "utf8"),
@@ -150,6 +151,8 @@ describe("persistencia de Auth", () => {
               "0004_activation_tokens",
               "0005_platform_admin_audit",
               "0006_initial_admin_recovery_audit",
+              "0007_login_abuse",
+              "0008_login_reservations",
             ]);
             await fs.access(path.join(outputDir, "drizzle/meta/0006_snapshot.json"));
             await fs.access(path.join(outputDir, "drizzle/meta/0005_snapshot.json"));
@@ -372,6 +375,10 @@ describe("overlay criptográfico de Auth", () => {
       expect(example.includes("ACTIVATION_TOKEN_EXPIRY_HOURS=24\n")).toBe(auth);
       const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
       expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
+      expect(environment?.includes('LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"')).toBe(auth);
+      expect(example.includes("LOGIN_ABUSE_HMAC_KEY=\n")).toBe(auth);
+      expect(example.includes("LOGIN_IP_REQUEST_LIMIT=10\n")).toBe(auth);
+      expect(readme.includes("LOGIN_ABUSE_WINDOW_MINUTES")).toBe(auth);
       if (auth) {
         expect(environment).toContain('ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"');
         expect(environment).toContain('ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"');

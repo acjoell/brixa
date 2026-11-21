@@ -4,6 +4,7 @@ import type { ActivationDatabase } from "../db/activation-write.js";
 import { users } from "../db/schema.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import { emailSchema } from "./email.js";
+import { createLoginAbuseService } from "./login-abuse.js";
 import {
   hashPassword,
   needsPasswordRehash,
@@ -25,11 +26,22 @@ export class LoginError extends Error {
   }
 }
 
+export class LoginRateLimitedError extends Error {
+  readonly code = "LOGIN_RATE_LIMITED";
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterMs: number) {
+    super("LOGIN_RATE_LIMITED");
+    this.retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  }
+}
+
 export async function createLoginService(
   database: ActivationDatabase,
   env = process.env,
   clock = Date.now,
 ) {
+  const abuse = createLoginAbuseService(database, env);
   const config = parseSessionConfig(env);
   const dummy = await prepareDummyVerification();
   const writer = {
@@ -41,17 +53,40 @@ export async function createLoginService(
     email: unknown,
     password: unknown,
     requestId: string,
+    ip: string,
   ): Promise<string | null> {
     const identifier = emailSchema.safeParse(email);
-    const failure = { event: "login_failed" as const, actorId: null, requestId };
+    let reservation: { id: string; keyDigest: string } | undefined;
+    async function finish(failed: boolean) {
+      if (
+        !reservation ||
+        !(await abuse.finishIdentifier(reservation, failed ? { requestId } : null))
+      )
+        throw new LoginError();
+      reservation = undefined;
+    }
+
     async function reject() {
-      await writer.transaction((tx) => recordSystemAudit(tx, failure));
+      await finish(true);
       return null;
     }
 
     try {
-      if (!identifier.success || password === "" || !isPasswordWithinLimits(password))
-        return await reject();
+      const ipAdmission = await abuse.consumeIp(ip);
+      if (!ipAdmission.accepted) throw new LoginRateLimitedError(ipAdmission.retryAfterMs);
+      await abuse.cleanupExpired();
+
+      if (!identifier.success) {
+        await writer.transaction((tx) =>
+          recordSystemAudit(tx, { event: "login_failed", actorId: null, requestId }),
+        );
+        return null;
+      }
+      const admission = await abuse.reserveIdentifier(identifier.data);
+      if (!admission.accepted) throw new LoginRateLimitedError(admission.retryAfterMs);
+      reservation = admission.reservation;
+
+      if (password === "" || !isPasswordWithinLimits(password)) return await reject();
 
       const [candidate] = await readActivation(database, (connection) =>
         connection
@@ -76,6 +111,7 @@ export async function createLoginService(
       if (!verified) return await reject();
 
       const rehash = needsPasswordRehash(phc, verified) ? await hashPassword(password) : null;
+      await finish(false);
       const userId = candidate.id;
       return await withSystemAudit(
         writer,
@@ -97,7 +133,15 @@ export async function createLoginService(
       );
     } catch (error) {
       if (error instanceof SystemAuditDenied && error.event === "login_failed") return null;
-      if (error instanceof Argon2SaturatedError) throw error;
+      if (reservation) {
+        try {
+          await abuse.finishIdentifier(reservation, null);
+        } catch {
+          // No session can be issued here. The database expiry recovers the reservation.
+        }
+      }
+      if (error instanceof Argon2SaturatedError || error instanceof LoginRateLimitedError)
+        throw error;
       throw new LoginError();
     }
   };
