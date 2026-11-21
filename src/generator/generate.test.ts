@@ -123,6 +123,15 @@ describe("persistencia de Auth", () => {
             path.join(outputDir, "src/db/schema." + language),
             "utf8",
           );
+          expect(
+            await fs.access(path.join(outputDir, "src/auth/http." + language)).then(
+              () => true,
+              () => false,
+            ),
+          ).toBe(auth);
+          expect(
+            await fs.readFile(path.join(outputDir, "src/app." + language), "utf8"),
+          ).not.toContain("createAuthHttpApp");
           expect(schema.includes("export const users")).toBe(auth);
           expect(schema.includes("export const sessions")).toBe(auth);
           expect(schema.includes("export const activationTokens")).toBe(auth);
@@ -377,6 +386,15 @@ describe("overlay criptográfico de Auth", () => {
       expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
       expect(environment?.includes('LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"')).toBe(auth);
       expect(example.includes("LOGIN_ABUSE_HMAC_KEY=\n")).toBe(auth);
+      expect(environment?.includes('AUTH_TRUSTED_PROXIES: "${AUTH_TRUSTED_PROXIES-}"')).toBe(auth);
+      expect(example.includes("AUTH_TRUSTED_PROXIES=\n")).toBe(auth);
+      expect(
+        await fs.access(path.join(backend, "src/auth/http." + language)).then(
+          () => true,
+          () => false,
+        ),
+      ).toBe(auth);
+      expect(await read("src/app." + language)).not.toContain("createAuthHttpApp");
       expect(example.includes("LOGIN_IP_REQUEST_LIMIT=10\n")).toBe(auth);
       expect(readme.includes("LOGIN_ABUSE_WINDOW_MINUTES")).toBe(auth);
       if (auth) {

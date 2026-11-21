@@ -829,7 +829,7 @@ const AUTH_ENV_EXAMPLE =
   "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n" +
   "ACTIVATION_TOKEN_EXPIRY_HOURS=24\n" +
   "LOGIN_IDENTIFIER_FAILURE_LIMIT=5\nLOGIN_IP_REQUEST_LIMIT=10\nLOGIN_ABUSE_WINDOW_MINUTES=15\n" +
-  "LOGIN_ABUSE_HMAC_KEY=\n";
+  "LOGIN_ABUSE_HMAC_KEY=\nAUTH_TRUSTED_PROXIES=\n";
 
 async function composeDockerEnv(outputDir: string, options: UserOptions): Promise<void> {
   const composePath = path.join(outputDir, "compose.yaml");
@@ -856,7 +856,8 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
         '      LOGIN_IDENTIFIER_FAILURE_LIMIT: "${LOGIN_IDENTIFIER_FAILURE_LIMIT-5}"\n' +
         '      LOGIN_IP_REQUEST_LIMIT: "${LOGIN_IP_REQUEST_LIMIT-10}"\n' +
         '      LOGIN_ABUSE_WINDOW_MINUTES: "${LOGIN_ABUSE_WINDOW_MINUTES-15}"\n' +
-        '      LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"',
+        '      LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"\n' +
+        '      AUTH_TRUSTED_PROXIES: "${AUTH_TRUSTED_PROXIES-}"',
     );
     if (options.database === "postgres") {
       const runtimeLine = /^ {6}DATABASE_URL: .+$/gm;
@@ -1110,6 +1111,18 @@ async function applyAuthOverlay(
   await fs.appendFile(
     path.join(backendDir, "README.md"),
     `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n\n## Contadores de abuso de login\n\nConfigura \`LOGIN_IDENTIFIER_FAILURE_LIMIT\` (5), \`LOGIN_IP_REQUEST_LIMIT\` (10) y \`LOGIN_ABUSE_WINDOW_MINUTES\` (15) con enteros positivos hasta 2147483647. Genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\` y configura la misma clave secreta en todas las instancias que compartan BD. Cambiarla reinicia efectivamente los presupuestos existentes. Con Compose, define estas variables en el entorno o en el archivo \`.env\` de la raíz. La primera solicitud por IP o el primer fallo por identificador abren ventanas independientes. La última plaza se contabiliza y los rechazos posteriores no aplazan el vencimiento. Solo se almacenan claves HMAC, recuentos y vencimientos. SQLite en archivo utiliza el reloj del host compartido. El login consume primero el presupuesto de una IP validada y luego reserva una plaza por identificador durante 60 segundos. Los fallos confirmados y las reservas activas ocupan el presupuesto durante la admisión. Las reservas vencidas liberan su plaza y una verificación tardía no puede emitir sesión. En cada solicitud admitida por IP, la limpieza procesa hasta 100 contadores y 100 reservas vencidas. El adaptador HTTP deberá proporcionar una IP confiable y convertir el tiempo restante a Retry-After.\n`,
+  );
+  await fs.appendFile(
+    path.join(backendDir, "README.md"),
+    "\n## Adaptadores HTTP de Auth\n\n" +
+      "Los adaptadores de login, sesión, logout y cambio de contraseña se generan sin montar. " +
+      "La aplicación permanente esperará al transporte de sesión de ⑤-E. " +
+      "Al habilitarlos, monta la subaplicación antes del lector JSON general para aplicar su límite y sanear los errores de lectura.\n\n" +
+      "Deja `AUTH_TRUSTED_PROXIES` vacío si el backend recibe tráfico directamente. " +
+      "Detrás de un proxy, configura solo las IP literales de los saltos controlados, separadas por comas, en el entorno del backend o en el `.env` raíz de Compose. " +
+      "El proxy de entrada debe eliminar `X-Forwarded-For` del cliente y construir la cadena con IP verificadas. " +
+      "Restringe el acceso directo al backend para que solo los proxies previstos puedan alcanzarlo. " +
+      "Express camina desde el socket hasta el primer salto no confiable. No se admiten nombres, rangos ni conteos de saltos.\n",
   );
   if (composeRoot) {
     const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";
