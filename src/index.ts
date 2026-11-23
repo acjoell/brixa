@@ -35,23 +35,17 @@ export async function main(): Promise<number> {
     return 1;
   }
 
-  const { modality, language, database, docker, apiDocs, i18n, outputDir } = result.value;
+  const { modality, language, database, docker, apiDocs, i18n, auth, outputDir } = result.value;
 
-  const genResult = await generate({
-    modality,
-    language,
-    database,
-    docker,
-    apiDocs,
-    i18n,
-    outputDir,
-  });
+  const genResult = await generate(result.value);
 
   if (!genResult.ok) {
     console.error(`Error: ${formatGenerateError(genResult.error)}`);
     return 1;
   }
 
-  console.log(nextStepsMessage(outputDir, modality, database, docker, language, apiDocs, i18n));
+  console.log(
+    nextStepsMessage(outputDir, modality, database, docker, language, apiDocs, i18n, auth),
+  );
   return 0;
 }

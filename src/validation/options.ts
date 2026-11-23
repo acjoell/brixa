@@ -1,4 +1,4 @@
-import type { RawOptions, UserOptions, Result } from "../types.js";
+import type { Database, Modality, RawOptions, UserOptions, Result } from "../types.js";
 import {
   resolveTargetPath,
   validateTargetDir,
@@ -12,7 +12,11 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Razones de validación fallida. */
+export type AuthOptionsError =
+  { kind: "auth_requires_backend_database" } | { kind: "invalid_auth_transport" };
+
 export type ValidationError =
+  | AuthOptionsError
   | { kind: "invalid_modality"; received: unknown }
   | { kind: "invalid_language"; received: unknown }
   | { kind: "invalid_database"; received: unknown }
@@ -21,6 +25,36 @@ export type ValidationError =
 const VALID_MODALITIES = new Set(["frontend", "backend", "fullstack"]);
 const VALID_LANGUAGES = new Set(["js", "ts"]);
 const VALID_DATABASES = new Set(["none", "postgres", "sqlite"]);
+
+export const DEFAULT_AUTH_TRANSPORT = "cookie";
+const VALID_AUTH_TRANSPORTS = new Set([DEFAULT_AUTH_TRANSPORT, "bearer"]);
+
+export function canEnableAuth(modality: Modality, database: Database = "none"): boolean {
+  return modality !== "frontend" && database !== "none";
+}
+
+export function validateAuthOptions(
+  options: Pick<UserOptions, "modality" | "database" | "auth" | "authTransport">,
+): AuthOptionsError | undefined {
+  const { modality, database, auth, authTransport } = options;
+  if (auth && !canEnableAuth(modality, database)) {
+    return { kind: "auth_requires_backend_database" };
+  }
+  if (
+    authTransport !== undefined &&
+    (!auth ||
+      !VALID_AUTH_TRANSPORTS.has(authTransport) ||
+      (modality === "fullstack" && authTransport !== DEFAULT_AUTH_TRANSPORT))
+  ) {
+    return { kind: "invalid_auth_transport" };
+  }
+}
+
+export function formatAuthOptionsError(error: AuthOptionsError): string {
+  return error.kind === "auth_requires_backend_database"
+    ? "Auth requiere un backend con base de datos."
+    : "Usa cookies o Bearer con Auth en un backend independiente. Fullstack solo admite cookies.";
+}
 
 // ---------------------------------------------------------------------------
 // Validación pura de modalidad y lenguaje
@@ -37,10 +71,7 @@ const VALID_DATABASES = new Set(["none", "postgres", "sqlite"]);
  */
 export function validateOptions(
   raw: RawOptions,
-): Result<
-  Pick<UserOptions, "modality" | "language" | "database" | "docker" | "apiDocs" | "i18n">,
-  ValidationError
-> {
+): Result<Omit<UserOptions, "outputDir">, ValidationError> {
   if (!VALID_MODALITIES.has(raw.modality)) {
     return { ok: false, error: { kind: "invalid_modality", received: raw.modality } };
   }
@@ -54,6 +85,9 @@ export function validateOptions(
     return { ok: false, error: { kind: "invalid_database", received: raw.database } };
   }
 
+  const authError = validateAuthOptions(raw);
+  if (authError) return { ok: false, error: authError };
+
   const docker =
     raw.modality === "backend" || raw.modality === "fullstack" ? (raw.docker ?? false) : false;
 
@@ -65,7 +99,16 @@ export function validateOptions(
 
   return {
     ok: true,
-    value: { modality: raw.modality, language: raw.language, database, docker, apiDocs, i18n },
+    value: {
+      modality: raw.modality,
+      language: raw.language,
+      database,
+      docker,
+      apiDocs,
+      i18n,
+      auth: raw.auth,
+      authTransport: raw.authTransport,
+    },
   };
 }
 
@@ -109,12 +152,7 @@ export async function validateOptionsWithDir(
   return {
     ok: true,
     value: {
-      modality: baseResult.value.modality,
-      language: baseResult.value.language,
-      database: baseResult.value.database,
-      docker: baseResult.value.docker,
-      apiDocs: baseResult.value.apiDocs,
-      i18n: baseResult.value.i18n,
+      ...baseResult.value,
       outputDir: dirResult.value.resolved,
     },
   };
@@ -127,6 +165,9 @@ export async function validateOptionsWithDir(
 /** Convierte un ValidationError en un mensaje legible para el usuario. */
 export function formatValidationError(error: ValidationError): string {
   switch (error.kind) {
+    case "auth_requires_backend_database":
+    case "invalid_auth_transport":
+      return formatAuthOptionsError(error);
     case "invalid_modality":
       return `Modalidad no válida: "${String(error.received)}". Las opciones son: frontend, backend, fullstack.`;
     case "invalid_language":

@@ -1,5 +1,6 @@
 import { select, input, confirm } from "@inquirer/prompts";
 import type { RawOptions, Database } from "../types.js";
+import { canEnableAuth, DEFAULT_AUTH_TRANSPORT } from "../validation/options.js";
 
 /** Directorio de destino por defecto si el usuario no introduce ninguno. */
 const DEFAULT_OUTPUT_DIR = "./my-project";
@@ -66,12 +67,27 @@ export async function runPrompts(): Promise<RawOptions | null> {
       });
     }
 
+    const auth =
+      canEnableAuth(modality, database) &&
+      (await confirm({ message: "¿Autenticación (Auth)?", default: false }));
+    const authTransport =
+      auth && modality === "backend"
+        ? await select({
+            message: "¿Cómo se enviará la sesión de Auth?",
+            choices: [
+              { name: "Cookies", value: "cookie" as const },
+              { name: "Bearer (cabecera Authorization)", value: "bearer" as const },
+            ],
+            default: DEFAULT_AUTH_TRANSPORT,
+          })
+        : undefined;
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, database, docker, apiDocs, i18n, outputDir };
+    return { modality, language, database, docker, apiDocs, i18n, auth, authTransport, outputDir };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

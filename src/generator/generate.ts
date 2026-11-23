@@ -13,6 +13,12 @@ import { fileURLToPath } from "node:url";
 import { type UserOptions, type Modality, type Database, type Language } from "../types.js";
 import { isVerified, variantLabel } from "../verified-variants.js";
 import {
+  DEFAULT_AUTH_TRANSPORT,
+  formatAuthOptionsError,
+  validateAuthOptions,
+  type AuthOptionsError,
+} from "../validation/options.js";
+import {
   resolveInsertionPoints,
   cleanupInsertionPoints,
   KNOWN_FRONTEND_INSERTION_POINTS,
@@ -24,8 +30,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export type GenerateError =
-  | { kind: "auth_requires_backend_database" }
-  | { kind: "invalid_auth_transport" }
+  | AuthOptionsError
   | { kind: "unsupported_combination"; modality: string; language: string; database?: string }
   | { kind: "copy_error"; message: string };
 
@@ -1278,7 +1283,7 @@ async function applyAuthOverlay(
   await copyDir(path.join(persistence, language), backendDir, path.basename(backendDir));
   await copyDir(overlay, backendDir, path.basename(backendDir));
   if (options.apiDocs) await documentAuthRoutes(backendDir, options);
-  const mode = options.authTransport ?? "cookie";
+  const mode = options.authTransport ?? DEFAULT_AUTH_TRANSPORT;
   const origin =
     options.modality === "fullstack" ? "http://localhost:5173" : "http://localhost:3000";
   await appendEnvBlock(
@@ -1356,18 +1361,8 @@ async function applyAuthOverlay(
 export async function generate(options: UserOptions): Promise<GenerateResult> {
   const { modality, language, outputDir } = options;
   const database = options.database ?? "none";
-  if (options.auth && (modality === "frontend" || database === "none")) {
-    return { ok: false, error: { kind: "auth_requires_backend_database" } };
-  }
-
-  if (
-    options.authTransport !== undefined &&
-    (!options.auth ||
-      !["cookie", "bearer"].includes(options.authTransport) ||
-      (modality === "fullstack" && options.authTransport !== "cookie"))
-  ) {
-    return { ok: false, error: { kind: "invalid_auth_transport" } };
-  }
+  const authError = validateAuthOptions(options);
+  if (authError) return { ok: false, error: authError };
 
   const combinationKey =
     modality === "frontend"
@@ -1661,7 +1656,7 @@ async function composeBackendInsertionPoints(
               "const writer = sqliteActivationDatabase({ url: requirePersistentSqliteUrl(process.env.DATABASE_URL) });",
             ]
           : ["const writer = db;"]),
-        `await initializeAuthHttp(${JSON.stringify(options.authTransport ?? "cookie")}, ${JSON.stringify(name)}, db, writer);`,
+        `await initializeAuthHttp(${JSON.stringify(options.authTransport ?? DEFAULT_AUTH_TRANSPORT)}, ${JSON.stringify(name)}, db, writer);`,
       ]);
     }
     const result = Object.keys(insertions).length
@@ -1827,9 +1822,8 @@ El proxy de Vite es exclusivo para desarrollo local. El despliegue en producció
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
     case "auth_requires_backend_database":
-      return "Auth requiere un backend con base de datos.";
     case "invalid_auth_transport":
-      return "Usa cookies o Bearer con Auth en un backend independiente. Fullstack solo admite cookies.";
+      return formatAuthOptionsError(error);
     case "unsupported_combination": {
       const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace(/\+/g, " + ")).join(", ");
       const combo =
@@ -1858,15 +1852,31 @@ export function nextStepsMessage(
   language?: Language,
   apiDocs?: boolean,
   i18n?: boolean,
+  auth?: boolean,
 ): string {
   const name = path.basename(outputDir);
 
+  const variant =
+    modality && language
+      ? { modality, language, database, docker, apiDocs, i18n, auth }
+      : undefined;
   const experimentalWarning =
-    modality && language && !isVerified({ modality, language, database, docker, apiDocs, i18n })
+    variant && !isVerified(variant)
       ? "\n  Combinación experimental (" +
-        variantLabel({ modality, language, database, docker, apiDocs, i18n }) +
+        variantLabel(variant) +
         "). Si algo falla, abre un issue: https://github.com/acjoell/brixa/issues"
       : "";
+
+  if (auth) {
+    return [
+      "",
+      `✔ Proyecto creado en: ${outputDir}`,
+      `  cd ${name}`,
+      "  Sigue el README.md generado para configurar Auth, aplicar las migraciones y crear el administrador inicial.",
+      experimentalWarning,
+      "",
+    ].join("\n");
+  }
 
   if (modality === "fullstack") {
     const lines = [

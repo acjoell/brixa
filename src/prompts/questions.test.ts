@@ -43,6 +43,8 @@ describe("runPrompts", () => {
       docker: false,
       apiDocs: false,
       i18n: true,
+      auth: false,
+      authTransport: undefined,
       outputDir: "./my-app",
     });
   });
@@ -68,14 +70,20 @@ describe("runPrompts", () => {
       .mockResolvedValueOnce("backend")
       .mockResolvedValueOnce("js")
       .mockResolvedValueOnce("postgres");
-    confirmMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    confirmMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
     inputMock.mockResolvedValueOnce("/home/user/projects/api");
 
     const result = await runPrompts();
 
     expect(selectMock).toHaveBeenCalledTimes(3);
-    // Backend pregunta docker y apiDocs, pero NO i18n
-    expect(confirmMock).toHaveBeenCalledTimes(2);
+    expect(confirmMock).toHaveBeenCalledTimes(3);
+    expect(confirmMock).toHaveBeenLastCalledWith({
+      message: "¿Autenticación (Auth)?",
+      default: false,
+    });
     expect(result).toEqual({
       modality: "backend",
       language: "js",
@@ -83,8 +91,82 @@ describe("runPrompts", () => {
       docker: false,
       apiDocs: true,
       i18n: false,
+      auth: false,
+      authTransport: undefined,
       outputDir: "/home/user/projects/api",
     });
+  });
+
+  it.each(["backend", "fullstack"] as const)("omite Auth en %s sin BD", async (modality) => {
+    selectMock
+      .mockResolvedValueOnce(modality)
+      .mockResolvedValueOnce("ts")
+      .mockResolvedValueOnce("none");
+    confirmMock.mockResolvedValue(false);
+    inputMock.mockResolvedValue("./my-app");
+
+    await expect(runPrompts()).resolves.toMatchObject({ auth: false, authTransport: undefined });
+    expect(confirmMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: "¿Autenticación (Auth)?" }),
+    );
+  });
+
+  it.each(["cookie", "bearer"] as const)(
+    "permite seleccionar %s para Auth en backend",
+    async (mode) => {
+      selectMock
+        .mockResolvedValueOnce("backend")
+        .mockResolvedValueOnce("ts")
+        .mockResolvedValueOnce("sqlite")
+        .mockResolvedValueOnce(mode);
+      confirmMock
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      inputMock.mockResolvedValue("./my-app");
+
+      await expect(runPrompts()).resolves.toMatchObject({ auth: true, authTransport: mode });
+      expect(selectMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          default: "cookie",
+          choices: [
+            expect.objectContaining({ value: "cookie" }),
+            expect.objectContaining({ value: "bearer" }),
+          ],
+        }),
+      );
+    },
+  );
+
+  it("habilita Auth en fullstack sin preguntar por el transporte", async () => {
+    selectMock
+      .mockResolvedValueOnce("fullstack")
+      .mockResolvedValueOnce("ts")
+      .mockResolvedValueOnce("postgres");
+    confirmMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    inputMock.mockResolvedValue("./my-app");
+
+    await expect(runPrompts()).resolves.toMatchObject({ auth: true, authTransport: undefined });
+    expect(selectMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("cancela la generación desde la selección del transporte", async () => {
+    selectMock
+      .mockResolvedValueOnce("backend")
+      .mockResolvedValueOnce("ts")
+      .mockResolvedValueOnce("sqlite")
+      .mockRejectedValueOnce(Object.assign(new Error("cancelado"), { name: "ExitPromptError" }));
+    confirmMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await expect(runPrompts()).resolves.toBeNull();
+    expect(inputMock).not.toHaveBeenCalled();
   });
 
   it("cancela limpio si Ctrl+C ocurre en el tercer prompt (directorio)", async () => {

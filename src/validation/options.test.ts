@@ -98,6 +98,39 @@ describe("validateOptions", () => {
       expect(result.error.kind).toBe("invalid_language");
     }
   });
+
+  it.each([
+    [{ modality: "frontend", database: "sqlite", auth: true }, "auth_requires_backend_database"],
+    [{ modality: "backend", auth: true }, "auth_requires_backend_database"],
+    [{ modality: "fullstack", database: "none", auth: true }, "auth_requires_backend_database"],
+    [
+      { modality: "fullstack", database: "sqlite", auth: true, authTransport: "bearer" },
+      "invalid_auth_transport",
+    ],
+    [
+      { modality: "backend", database: "postgres", auth: false, authTransport: "cookie" },
+      "invalid_auth_transport",
+    ],
+  ] as const)("rechaza la configuración de Auth incompatible %j", (options, kind) => {
+    expect(validateOptions({ ...options, language: "ts", outputDir: "./app" })).toEqual({
+      ok: false,
+      error: { kind },
+    });
+  });
+
+  it("rechaza un transporte desconocido en ejecución", () => {
+    expect(
+      validateOptions({
+        modality: "backend",
+        database: "sqlite",
+        language: "ts",
+        outputDir: "./app",
+        auth: true,
+        // @ts-expect-error — valor inválido deliberado.
+        authTransport: "jwt",
+      }),
+    ).toMatchObject({ ok: false, error: { kind: "invalid_auth_transport" } });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,9 @@ npx brixa
 ```
 
 Requiere Node.js 24 o 26 en adelante. Brixa te hace preguntas guiadas y, antes de crear ningún archivo, muestra un resumen de lo que va a generar.
+
+En la versión de desarrollo, si eliges backend o aplicación completa con PostgreSQL o SQLite, puedes habilitar **Auth**. Está desactivada por defecto. Un backend independiente permite elegir cookies (opción predeterminada) o Bearer. Una aplicación completa usa cookies automáticamente. Sigue el README generado para configurar y arrancar el proyecto con Auth.
+
 ## Combinaciones verificadas
 
 `npm run verify:generated` genera, instala y comprueba **32 variantes** en un directorio temporal. Estas son las que existen hoy:

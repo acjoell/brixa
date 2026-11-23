@@ -13,7 +13,7 @@ export type Language = "js" | "ts";
 export type Database = "none" | "postgres" | "sqlite";
 
 /** Opciones crudas devueltas por el flujo de prompts. */
-export interface RawOptions {
+export interface RawOptions extends Pick<UserOptions, "auth" | "authTransport"> {
   modality: Modality;
   language: Language;
   database?: Database | undefined;
