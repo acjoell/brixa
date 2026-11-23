@@ -135,7 +135,19 @@ El comando usa el generador y recorre cuatro variantes con API Docs, en serie:
 
 Cada variante se instala en un directorio temporal, aplica sus migraciones y comprueba el arranque del backend generado. Las variantes fullstack también instalan y compilan el frontend y comprueban el proxy de Vite. A continuación se ejecuta el contrato de integración ⑤-G. PostgreSQL usa `app_exec` y un contenedor desechable por variante, con 1 CPU, 256 MiB de memoria y un área de datos temporal de hasta 128 MiB. SQLite usa un archivo temporal. Un fallo detiene la ejecución, limpia la variante e indica cuáles quedaron pendientes.
 
-El workflow **Verify Auth** se inicia manualmente desde GitHub Actions. Las comprobaciones HTTP locales simulan el protocolo reenviado por un proxy confiable. Queda pendiente abrir el enlace y completar la activación en un navegador contra el sitio configurado en `ACTIVATION_PAGE_URL`, detrás del terminador TLS real del despliegue.
+El workflow **Verify Auth** se inicia manualmente desde GitHub Actions. La matriz simula el protocolo reenviado por un proxy confiable.
+
+### Prueba focalizada de Auth con navegador y TLS
+
+En Linux, con las dependencias de Brixa instaladas, se necesitan Chromium ejecutable en modo headless, OpenSSL, Python 3, `libnss3` y acceso al registro npm o a una caché con las dependencias del backend generado. El arnés comprueba el acceso al backend desde las interfaces IPv4 que no son loopback.
+
+```bash
+node --import tsx scripts/verify-auth-https.js
+```
+
+Si Chromium no está en `PATH`, indica el ejecutable con `BRIXA_CHROMIUM`. Para usar exclusivamente la caché npm, antepón `npm_config_offline=true`. El arnés genera un fullstack TS con SQLite en archivo y cookies. Compila su backend y sirve una página de activación de prueba mediante un proxy HTTPS local. Usa una CA efímera instalada solo en el perfil temporal y dos nombres `.test` resueltos dentro del navegador. El backend y el proxy escuchan en loopback, con el host de prueba dentro del perímetro de confianza. Al terminar se eliminan proyecto, base, perfil y certificados temporales.
+
+Para repetir la comprobación en un despliegue, usa el navegador y el terminador reales con una cadena de certificados de confianza. Sirve la vista del cliente en `ACTIVATION_PAGE_URL` (HTTPS, sin query ni fragmento, del mismo origen que `AUTH_PUBLIC_ORIGIN` con cookies). Restringe el backend de modo que solo los intermediarios controlados puedan conectarse, configura sus IP exactas en `AUTH_TRUSTED_PROXIES` y comprueba que el borde reemplace las cabeceras reenviadas del cliente. Si hay otro proxy intermedio, comprueba que al backend llegue un solo `X-Forwarded-Proto: https`. Desde perfiles separados, emite y abre un enlace de prueba, confirma la activación y verifica la revocación de sesión, el rechazo CSRF, los atributos de cookie y la ausencia de secretos en los logs reales.
 
 ## Licencia
 
