@@ -11,7 +11,34 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { expect, it, vi } from "vitest";
 import { hashPassword } from "../src/auth/password-crypto.js";
 import { sqliteActivationDatabase } from "../src/db/activation-write.js";
+import { withSqliteAdministrator } from "../src/db/local-admin.js";
 import * as schema from "../src/db/schema.js";
+import { checkAuthLifecycle } from "./auth-lifecycle-contract.js";
+
+it("completa el ciclo Auth con cookies y SQLite en archivo", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "brixa-auth-lifecycle-"));
+  const url = "file:" + join(directory, "test.db");
+  const client = createClient({ url });
+  vi.resetModules();
+  vi.stubEnv("DATABASE_URL", url);
+  vi.stubEnv("ENABLE_API_DOCS", "true");
+  vi.stubEnv("ARGON2_MAX_CONCURRENT", "2");
+  vi.stubEnv("ARGON2_MAX_QUEUE", "8");
+  const database = drizzle(client, { schema });
+  try {
+    await migrate(database, { migrationsFolder: "drizzle" });
+    await checkAuthLifecycle(
+      "cookie",
+      database,
+      sqliteActivationDatabase({ url }),
+      withSqliteAdministrator,
+    );
+  } finally {
+    client.close();
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 15_000);
 
 for (const mode of ["cookie", "bearer"]) {
   it(`monta Auth con ${mode}, validación persistente y documentación condicionada`, async () => {

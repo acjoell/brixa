@@ -151,6 +151,7 @@ const groups = {
       "tests/account-activation-contract.ts",
       "tests/login-contract.ts",
       "tests/auth-http.test.ts",
+      "tests/auth-lifecycle-contract.ts",
       "tests/login-abuse-contract.ts",
       "tests/logout-contract.ts",
       "tests/change-password-contract.ts",

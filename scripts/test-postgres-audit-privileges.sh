@@ -2,7 +2,7 @@
 # Desde la raíz, con las dependencias del backend PostgreSQL ya instaladas.
 set -euo pipefail
 mode=${1:-upgrade}
-case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery|login-abuse) ;; *) exit 2 ;; esac
+case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery|login-abuse|auth-lifecycle) ;; *) exit 2 ;; esac
 script_dir=$(dirname "$(realpath "$0")")
 deps=$(realpath "${BRIXA_BACKEND_NODE_MODULES:?Directorio node_modules del backend generado}")
 test -d "$deps/pg"
@@ -14,10 +14,12 @@ cleanup() {
   rm -rf -- "$work"
 }
 trap cleanup EXIT
-export DEST="$work/backend"
+export DEST="$work/backend" BRIXA_POSTGRES_TEST_MODE="$mode"
 node --import tsx --input-type=module -e '
   import { generate } from "./src/generator/generate.ts";
-  const r = await generate({outputDir: process.env.DEST, modality:"backend",language:"js",database:"postgres",auth:true});
+  const lifecycle = process.env.BRIXA_POSTGRES_TEST_MODE === "auth-lifecycle";
+  const r = await generate({outputDir: process.env.DEST, modality:"backend",language:"js",database:"postgres",auth:true,
+    ...(lifecycle ? { apiDocs: true, authTransport: "bearer" } : {})});
   if (!r.ok) throw Error(JSON.stringify(r));'
 cd "$DEST"
 ln -s "$deps" node_modules
@@ -44,6 +46,25 @@ owner_url="postgresql://table_owner:$owner_password@127.0.0.1:$port/app"
 export DATABASE_URL="postgresql://app_exec:$runtime_password@127.0.0.1:$port/app"
 migrate() { MIGRATION_DATABASE_URL="$owner_url" node src/db/migrate.js; }
 test "$(admin -Atc 'SHOW server_version_num')" = 170004
+if [[ "$mode" == auth-lifecycle ]]; then
+  migrate
+  BRIXA_TEST_OWNER_URL="$owner_url" ENABLE_API_DOCS=true ARGON2_MAX_CONCURRENT=2 ARGON2_MAX_QUEUE=8 node --input-type=module <<'JS'
+import { checkRuntimeIdentity, db, pool } from "./src/db/client.js";
+import { withPostgresAdministrator } from "./src/db/bootstrap.js";
+import { checkAuthLifecycle } from "./tests/auth-lifecycle-contract.js";
+
+try {
+  await checkRuntimeIdentity();
+  await checkAuthLifecycle("bearer", db, db, (operation) =>
+    withPostgresAdministrator(operation, { MIGRATION_DATABASE_URL: process.env.BRIXA_TEST_OWNER_URL }),
+  );
+  console.log("PostgreSQL 17.4 / app_exec / Bearer: ciclo Auth integral aprobado.");
+} finally {
+  await pool.end();
+}
+JS
+  exit
+fi
 if [[ "$mode" == managed-activation || "$mode" == account-activation || "$mode" == login || "$mode" == logout || "$mode" == change-password || "$mode" == admin-recovery || "$mode" == login-abuse ]]; then
   if [[ "$mode" = managed-activation || "$mode" = admin-recovery || "$mode" = login-abuse ]]; then
     cp drizzle/meta/_journal.json "$work/journal"
