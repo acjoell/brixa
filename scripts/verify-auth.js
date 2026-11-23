@@ -23,7 +23,13 @@ export const AUTH_VARIANTS = [
   { modality: "fullstack", language: "js", database: "postgres", authTransport: "cookie" },
 ].map((variant) => ({ ...variant, auth: true, apiDocs: true }));
 
-async function runStep(label, cmd, args, cwd, { env, timeoutMs, signal, sensitive = false }) {
+export async function runStep(
+  label,
+  cmd,
+  args,
+  cwd,
+  { env, timeoutMs, signal, sensitive = false },
+) {
   const result = await executeCommand(cmd, args, cwd, {
     env,
     timeoutMs,
@@ -159,7 +165,11 @@ try {
 }
 `;
 
-async function verifyVariant(variant, signal) {
+export async function verifyVariant(
+  variant,
+  signal,
+  { checkInstall, checkBackend, installOnly } = {},
+) {
   signal?.throwIfAborted();
   const label = getVariantLabel(variant) + "+" + variant.authTransport;
   const workspace = await mkdtemp(path.join(tmpdir(), "brixa-verify-auth-"));
@@ -177,6 +187,8 @@ async function verifyVariant(variant, signal) {
         timeoutMs: 300_000,
         signal,
       });
+      await checkInstall?.(directory, { variant, backend: directory === backendDir, signal });
+      if (installOnly) continue;
       if (directory === frontendDir || variant.language === "ts") {
         await runStep("Compilación", "npm", ["run", "build"], directory, {
           timeoutMs: 120_000,
@@ -184,6 +196,7 @@ async function verifyVariant(variant, signal) {
         });
       }
     }
+    if (installOnly) return;
 
     // Las credenciales y ajustes del anfitrión no pertenecen a la fixture.
     const overrides = Object.fromEntries(
@@ -245,6 +258,7 @@ async function verifyVariant(variant, signal) {
         sensitive: true,
       },
     );
+    await checkBackend?.(backendDir, env);
   } finally {
     try {
       await postgres?.stop();

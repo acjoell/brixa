@@ -46,7 +46,7 @@ npx brixa
 
 Requiere Node.js 24 o 26 en adelante. Brixa te hace preguntas guiadas y, antes de crear ningún archivo, muestra un resumen de lo que va a generar.
 
-En la versión de desarrollo, si eliges backend o aplicación completa con PostgreSQL o SQLite, puedes habilitar **Auth**. Está desactivada por defecto. Un backend independiente permite elegir cookies (opción predeterminada) o Bearer. Una aplicación completa usa cookies automáticamente. Sigue el README generado para configurar y arrancar el proyecto con Auth.
+En la versión de desarrollo, si eliges backend o aplicación completa con PostgreSQL o SQLite, puedes habilitar **Auth**. Está desactivada por defecto. Un backend independiente permite elegir cookies (opción predeterminada) o Bearer. Una aplicación completa usa cookies automáticamente. Sigue el README generado para configurar y arrancar el proyecto con Auth. Consulta las combinaciones acreditadas en la sección de verificación de Auth.
 
 ## Combinaciones verificadas
 
@@ -74,7 +74,7 @@ Según la variante, la verificación comprueba:
 - Con documentación de API: que `/docs` devuelve 404 sin `ENABLE_API_DOCS` y que Swagger UI y sus recursos cargan cuando está activada.
 - Con internacionalización: coherencia de claves entre idiomas (`check:i18n`), renderizado en servidor en cada idioma, detección y persistencia del idioma, y presencia de las cadenas de ambos idiomas en `dist/`.
 
-El CLI permite cualquier combinación de las capacidades soportadas, pero marca como experimentales en el resumen previo aquellas que no aparecen en esta tabla.
+El CLI marca como experimentales las combinaciones que carecen de evidencia. La tabla anterior cubre la matriz base y la sección de Auth enumera sus variantes acreditadas.
 
 ## Limitaciones
 
@@ -139,6 +139,16 @@ El comando usa el generador y recorre cuatro variantes con API Docs, en serie:
 Cada variante se instala en un directorio temporal, aplica sus migraciones y comprueba el arranque del backend generado. Las variantes fullstack también instalan y compilan el frontend y comprueban el proxy de Vite. A continuación se ejecuta el contrato de integración ⑤-G. PostgreSQL usa `app_exec` y un contenedor desechable por variante, con 1 CPU, 256 MiB de memoria y un área de datos temporal de hasta 128 MiB. SQLite usa un archivo temporal. Un fallo detiene la ejecución, limpia la variante e indica cuáles quedaron pendientes.
 
 El workflow **Verify Auth** se inicia manualmente desde GitHub Actions. La matriz simula el protocolo reenviado por un proxy confiable.
+
+También está acreditado el **backend independiente JS + SQLite en archivo + cookies** por el contrato focalizado. Las cinco variantes llevan API Docs y se generan con Docker e i18n desactivados. Las demás combinaciones Auth siguen experimentales. Las matrices generales mantienen su alcance. Estos comandos repiten los controles de cierre sin ejecutar la matriz de cuatro ciclos:
+
+```bash
+node --import tsx scripts/verify-auth-final.js general
+node --import tsx scripts/verify-auth-final.js optional
+BRIXA_AUTH_NODE_IMAGE=node:24-bookworm-slim node --import tsx scripts/verify-auth-final.js backend
+```
+
+`general` audita dependencias instaladas con acceso al registro npm y aplica las pruebas focalizadas de HTTP 500, CORS, CSP y redacción. `optional` verifica el fallo de arranque cuando falta el binario compatible de Argon2id. En instalaciones Auth incluye las dependencias opcionales. `backend` ejecuta el ciclo del backend con cookies, la prueba de memoria y la comparación de tiempos de login. Para la prueba de memoria, usa Linux con Docker y cgroup v2 y una imagen local Node 24 de la misma arquitectura y libc que el host. La imagen del ejemplo debe estar disponible de antemano. El contenedor del backend usa 1 CPU, 256 MiB y carece de acceso a la red exterior.
 
 ### Prueba focalizada de Auth con navegador y TLS
 

@@ -845,9 +845,11 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - De los 76 pares válidos, las 32 variantes verificadas cubren **73 pares (96,05%)**.
 - Los **3 pares sin cubrir** son: `database=postgres & i18n=true`, `docker=true & i18n=true` y `apiDocs=true & i18n=true`. La causa es que en `VERIFIED_VARIANTS` solo 2 variantes activan i18n (`frontend+ts+i18n` y `fullstack+js+sqlite+i18n`), ambas con `docker: false`, `apiDocs: false`, y con bases de datos `none` y `sqlite`. Ninguna variante verificada combina `i18n: true` con `postgres`, `docker` o `apiDocs`.
 
-**Decisión:** El CLI no bloquea las combinaciones no verificadas, pero las identifica como EXPERIMENTALES en el resumen previo a la generación y en el mensaje final. Hay una lista única de variantes verificadas (`src/verified-variants.ts`) y el arnés comprueba que coincide exactamente con sus variantes; si difieren, falla.
+**Decisión:** El CLI no bloquea las combinaciones no verificadas, pero las identifica como EXPERIMENTALES en el resumen previo a la generación y en el mensaje final. Los inventarios se mantienen en `src/verified-variants.ts`. El arnés general comprueba la coincidencia exacta de su lista base y falla si difiere.
 
 **Consecuencias:** Los usuarios mantienen la libertad de elegir. Al añadir una variante al arnés hay que añadirla a la lista. P-005 se reformula: las combinaciones declaradas como soportadas pasan la verificación y el resto son experimentales.
+
+**Acreditación de Auth v1:** `verify:auth` y los contratos focalizados aportan la evidencia integral especializada. Cada combinación acreditada conserva los controles aplicables de seguridad general y la auditoría de sus instalaciones con el umbral `moderate`. El inventario de Auth identifica el transporte efectivo y las capacidades exactas. Las matrices generales conservan sus listas y las demás combinaciones con Auth siguen experimentales.
 
 ---
 
@@ -1023,7 +1025,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Estado:** Confirmada en alcance (2026-11-04; registrada el 2026-11-07).
 
-**Decisión:** Cada capacidad de seguridad llega con pruebas positivas y negativas. Se distinguen `verify:generated` (matriz base), `verify:security` (pruebas profundas) y `verify:all` (ambas; una publicación lo exige en verde). Las mutaciones y los controles negativos viven en el arnés de Brixa sobre copias temporales y no forman parte del proyecto generado. Una combinación con autenticación, RBAC o multitenancy que no haya superado `verify:security` se marca EXPERIMENTAL (D-053).
+**Decisión:** Cada capacidad de seguridad llega con pruebas positivas y negativas. Se distinguen `verify:generated` (matriz base), `verify:security` (pruebas profundas) y `verify:all` (ambas; una publicación lo exige en verde). Las mutaciones y los controles negativos viven en el arnés de Brixa sobre copias temporales y no forman parte del proyecto generado. RBAC y multitenancy requieren `verify:security`. Auth v1 usa la verificación especializada y los controles generales focalizados de D-053. Las combinaciones sin la evidencia exigida se marcan EXPERIMENTALES.
 
 **Motivo:** Ninguna capacidad se considera segura por compilar, generar archivos o pasar `verify:generated`.
 
@@ -1568,6 +1570,8 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
   - Comportamiento en contenedores con memoria restringida.
   - Compatibilidad de binarios nativos y manejo de instalaciones sin dependencias opcionales.
   - Batería de pruebas: hashing, verificación, Unicode, manipulación PHC y rehash.
+
+**Evidencia de implementación:** D-102 fija los límites PHC y la capacidad de la cola. T-014a verificó el backend bajo un límite de memoria explícito, la carencia de binarios sin dependencias opcionales y la comparación de latencias de login. Véanse SECURITY §14 y [T-014a](TASKS_POST_MVP.md#t-014a--autenticación-seleccionable).
 
 **Motivo:** La evaluación empírica de INV-01 e INV-07 demostró que hashes no validados con $m$ excesivo saturan instantáneamente la memoria del proceso, y que la concurrencia descontrolada agota los límites del contenedor. Los controles establecidos mitigan DoS por memoria, DoS por CPU, enumeración por timing y desbordamiento de entrada.
 

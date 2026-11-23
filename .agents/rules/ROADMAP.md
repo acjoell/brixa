@@ -144,6 +144,8 @@ Estas capacidades no deben tratarse como simples fragmentos de código. Cada una
 
 **Criterio de salida:** cada capacidad tiene un alcance explícito, controles aplicados a las operaciones pertinentes y pruebas negativas que comprueban que el acceso no autorizado se rechaza.
 
+**Auth backend y generador:** T-014a registra las combinaciones acreditadas mediante verificación especializada. Las vistas corresponden a T-014a-ui y la validación de la topología TLS y la URL de activación se realiza en cada despliegue público.
+
 **Evolución de Auth después de T-014a:** D-111 establece la dirección de las extensiones [T-024 a T-028](TASKS_POST_MVP.md#extensiones-futuras-de-auth-d-111). El alcance y estado de cada tarea se mantienen en ese registro.
 
 ### Fase 6 — Publicación y mantenimiento

@@ -1,11 +1,63 @@
 import { describe, it, expect } from "vitest";
 import {
   VERIFIED_VARIANTS,
+  VERIFIED_AUTH_VARIANTS,
   VERIFIED_SECURITY_VARIANTS,
   isVerified,
   isSecurityVerified,
   variantLabel,
 } from "./verified-variants.js";
+import { nextStepsMessage } from "./generator/generate.js";
+
+describe("acreditación exacta de Auth", () => {
+  it("mantiene las cinco combinaciones integrales separadas de los inventarios generales", () => {
+    expect(VERIFIED_AUTH_VARIANTS.map(variantLabel)).toEqual([
+      "backend+js+postgres+docs+auth+bearer",
+      "backend+ts+sqlite+docs+auth+bearer",
+      "fullstack+ts+sqlite+docs+auth+cookie",
+      "fullstack+js+postgres+docs+auth+cookie",
+      "backend+js+sqlite+docs+auth+cookie",
+    ]);
+    for (const variant of VERIFIED_AUTH_VARIANTS) {
+      expect(isVerified(variant)).toBe(true);
+      expect(isSecurityVerified(variant)).toBe(true);
+      const { modality, language, database, authTransport } = variant;
+      expect(
+        nextStepsMessage(
+          "project",
+          modality,
+          database,
+          false,
+          language,
+          true,
+          false,
+          true,
+          authTransport,
+        ),
+      ).not.toContain("experimental");
+    }
+  });
+
+  it("reconoce las cookies implícitas y conserva como experimentales los otros flags", () => {
+    const variant = {
+      modality: "backend",
+      language: "js",
+      database: "sqlite",
+      apiDocs: true,
+      auth: true,
+    } as const;
+    expect(isVerified(variant)).toBe(true);
+    for (const changed of [
+      { ...variant, authTransport: "bearer" },
+      { ...variant, apiDocs: false },
+      { ...variant, docker: true },
+      { ...variant, i18n: true },
+    ] as const) {
+      expect(isVerified(changed)).toBe(false);
+      expect(isSecurityVerified(changed)).toBe(false);
+    }
+  });
+});
 
 describe("VERIFIED_VARIANTS", () => {
   it("tiene exactamente 32 entradas", () => {

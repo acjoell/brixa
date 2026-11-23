@@ -35,7 +35,8 @@ export async function main(): Promise<number> {
     return 1;
   }
 
-  const { modality, language, database, docker, apiDocs, i18n, auth, outputDir } = result.value;
+  const { modality, language, database, docker, apiDocs, i18n, auth, authTransport, outputDir } =
+    result.value;
 
   const genResult = await generate(result.value);
 
@@ -45,7 +46,17 @@ export async function main(): Promise<number> {
   }
 
   console.log(
-    nextStepsMessage(outputDir, modality, database, docker, language, apiDocs, i18n, auth),
+    nextStepsMessage(
+      outputDir,
+      modality,
+      database,
+      docker,
+      language,
+      apiDocs,
+      i18n,
+      auth,
+      authTransport,
+    ),
   );
   return 0;
 }

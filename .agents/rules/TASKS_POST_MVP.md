@@ -36,7 +36,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 - Ninguna capacidad se considera segura porque compile, genere archivos o pase `verify:generated`. Solo cuenta lo comprobado por pruebas negativas.
 - Cada capacidad de seguridad llega con sus pruebas positivas y negativas. No se añaden después.
-- Una combinación con autenticación, RBAC o multitenancy que no haya superado `verify:security` se marca EXPERIMENTAL (D-053).
+- Las combinaciones sin la evidencia exigida se marcan EXPERIMENTALES (D-053). Para Auth v1 se exige la evidencia especializada más los controles generales focalizados. RBAC y multitenancy conservan la exigencia de `verify:security`.
 - Las mutaciones y los controles negativos viven en el arnés de Brixa sobre copias temporales. No forman parte del proyecto que recibe el usuario (ver sección 6).
 - Brixa no promete proteger código que el desarrollador escriba sin usar los mecanismos que genera.
 - Las rutas de archivos solo se citan con su procedencia. Lo demás figura como «por determinar».
@@ -138,6 +138,7 @@ Las mutaciones no son una dependencia del proyecto generado. Los nombres de los 
 - `verify:generated`: matriz base (generación, instalación y funcionamiento básico).
 - `verify:security`: pruebas profundas de las capacidades de seguridad.
 - `verify:all`: ambas baterías. Una publicación exige `verify:all` en verde. Los cambios ejecutan las baterías que tocan.
+- `verify:auth`: ciclo especializado de Auth v1. T-014a registra los contratos adicionales y los resultados de los controles generales aplicados de forma focalizada.
 
 ### 6.3 Matriz provisional de `verify:security`
 
@@ -561,7 +562,7 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 ### T-014a — Autenticación seleccionable
 
-**Estado:** EN PROGRESO (①–④ aceptadas. Etapa ⑤ pendiente de inicio).
+**Estado:** COMPLETADA (backend y generador; ①–⑤, CLI público y verificación final acreditados).
 **Aprobación:** Aprobado (núcleo común; cookies en fullstack y selección en backend sin mezcla simultánea, D-089; hash de contraseñas resuelto por D-091 a D-093). Parámetros temporales de sesión resueltos por D-101. Cambio de contraseña, recuperación privilegiada y protección contra abuso aprobados en D-108 a D-110.
 **Dependencias:** T-014-0, T-017b, T-018 y T-023 (derivador y verify:sync en verde antes de implementar plantillas de Auth en ambas variantes). Decisiones de diseño consolidadas en D-080 a D-098. La composición de backend base requerida (`app`, `index`, `package.json`) ya está disponible y verificada (D-069, D-077, D-078).
 
@@ -572,7 +573,7 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 **Alcance común:**
 - Núcleo de identidad y gestión de cuentas compartido; sin duplicar tablas de usuarios ni la lógica de cuentas.
 - Sesiones opacas generadas con 32 bytes criptográficamente aleatorios y hashes SHA-256 en base de datos como único modelo de v1, sin JWT (D-087). Validación y revocación en servidor; token sin identidad, roles ni organización; núcleo común para cookies y Bearer.
-- Hash de contraseñas: **resuelto por D-091 a D-093 (P-009)** tras INV-01 e INV-07. Argon2id mediante `@node-rs/argon2` versión exacta `2.2.2` en backends generados con Auth; `engines.node: "^24.0.0 || >=26.0.0"` inalterado sin alternativas en `node:crypto`, bcrypt ni scrypt y con paridad JS/TS (D-091); parámetros explícitos `m=19456 KiB, t=2, p=1, outputLen=32`, salt aleatorio de 16 bytes, formato PHC canónico en Base64 convencional sin padding (no Base64URL) y rehash tras login válido (D-092); y controles de seguridad obligatorios: asincronía estricta en HTTP, validación defensiva previa de parámetros PHC para evitar DoS por memoria/CPU, verificación simulada (dummy) contra enumeración por tiempo, limitador de concurrencia acotado independiente del rate limiting, y política de entrada de 128 caracteres / 512 bytes UTF-8 (D-093). Quedan como pendientes técnicos de concreción en diseño/implementación los límites numéricos defensivos exactos y pruebas en Docker / sin dependencias opcionales.
+- Hash de contraseñas: **resuelto por D-091 a D-093 (P-009)** tras INV-01 e INV-07. Argon2id mediante `@node-rs/argon2` versión exacta `2.2.2` en backends generados con Auth; `engines.node: "^24.0.0 || >=26.0.0"` inalterado sin alternativas en `node:crypto`, bcrypt ni scrypt y con paridad JS/TS (D-091); parámetros explícitos `m=19456 KiB, t=2, p=1, outputLen=32`, salt aleatorio de 16 bytes, formato PHC canónico en Base64 convencional sin padding (no Base64URL) y rehash tras login válido (D-092); y controles de seguridad obligatorios: asincronía estricta en HTTP, validación defensiva previa de parámetros PHC para evitar DoS por memoria/CPU, verificación simulada (dummy) contra enumeración por tiempo, limitador de concurrencia acotado independiente del rate limiting, y política de entrada de 128 caracteres / 512 bytes UTF-8 (D-093). D-102 concreta los límites defensivos y la cola. La evidencia de memoria restringida y de instalación sin opcionales se registra abajo.
 - Ciclo de vida de sesión con expiración deslizante por inactividad (30 min por defecto) y límite absoluto e improrrogable (12 h desde creación); revocación efectiva inmediata; actualización diferida de actividad en BD con umbral de 60 segundos; sin rotación periódica en v1 (D-088, D-101).
 - Cookies de sesión con configuración estricta: `HttpOnly`, `Secure` (obligatorio en producción; excepción explícita con aviso visible únicamente en `NODE_ENV=development` sobre localhost), `SameSite=Lax`, `Path=/`, sin `Domain`, prefijo `__Host-` únicamente si cumple requisitos acumulativos, y nombre específico por proyecto (D-089, D-099).
 - Proveedor de identidad interno exclusivo en v1 (D-100).
@@ -616,7 +617,19 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 **Pruebas positivas:** flujo completo en cada modalidad; renovación según la decisión; cierre de sesión.
 **Pruebas negativas (SECURITY §11):** no autenticado accede a recurso protegido; credencial caducada, revocada o manipulada; usuario deshabilitado con credencial viva; enumeración de cuentas por mensaje o por tiempo; fuerza bruta con respuesta 429 y **recuperación del acceso tras la espera** (sin bloqueo permanente); solicitud entre orígenes sin CSRF (cookie); contraseña actual incorrecta al intentar cambiarla, sesión inválida y revocación de sesiones de otros clientes tras cambio o recuperación; rollback conjunto si falla la auditoría de cualquiera de las operaciones; CLI de recuperación no reactiva una cuenta deshabilitada; la credencial en reposo no aparece en la base de datos en claro; contraseña por encima del máximo rechazada; campos como `role` o `isActive` enviados por el cliente sin efecto; ninguna respuesta ni registro contiene hashes o secretos.
-**Verificaciones:** batería local, `verify:generated` y `verify:security` en las variantes de la sección 6.3 que incluyan autenticación.
+**Verificaciones:** batería local, `verify:auth` y contratos focalizados para Auth v1. Se mantienen el alcance de las matrices `verify:generated` y `verify:security` y la exigencia de `verify:all` para publicar. Cada variante acreditada pasó los controles generales aplicables con Auth y la auditoría de su instalación, conforme a D-053 y D-065.
+
+| Modalidad | Lenguaje | BD | Transporte | Evidencia integral |
+|---|---|---|---|---|
+| Backend | JS | PostgreSQL 17.4 | Bearer | `verify:auth` con `app_exec` |
+| Backend | TS | SQLite en archivo | Bearer | `verify:auth` |
+| Fullstack | TS | SQLite en archivo | Cookies | `verify:auth` y Chromium 156 con proxy TLS local |
+| Fullstack | JS | PostgreSQL 17.4 | Cookies | `verify:auth` con `app_exec` |
+| Backend | JS | SQLite en archivo | Cookies | Contrato ⑤-G, arranque generado, CSRF, rechazo de Bearer y revocación HTTP |
+
+Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la generación. El contenedor de prueba para el backend independiente mide recursos del proceso y se aplica a esa variante generada sin Docker. Las demás combinaciones siguen experimentales. Los cinco backends pasan HTTP 500 saneado, CORS, CSP y redacción. `npm audit --audit-level=moderate` pasó en los cinco backends y dos frontends generados, sin hallazgos en el informe del registro npm. La prueba de 256 MiB, la carga nativa omitida y la comparación de 100 pares de latencias se reproducen con `scripts/verify-auth-final.js`. Los resultados y límites se registran en SECURITY §3 y §14.
+
+**Pendientes externos al cierre backend/generador:** T-014a-ui conserva la vista definitiva de activación y la experiencia de autenticación. Cada despliegue público debe verificar su navegador, TLS, aislamiento del backend, proxies confiables y su `ACTIVATION_PAGE_URL` real. Safari queda fuera de la evidencia local.
 
 **Riesgos y limitaciones (reportado en INV-03b):** los navegadores no aíslan cookies por puerto en `localhost`, mitigado mediante nombre específico de cookie por proyecto (D-089); `__Host-` exige `Secure`, `Path=/` y ausencia de `Domain`; Nginx no reescribe el `Path` de `Set-Cookie`; Safari no está verificado. La cookie `Secure` no se envía por HTTP fuera de `localhost` y los proyectos generados no terminan TLS; el comportamiento de cada navegador debe comprobarse.
 
@@ -624,7 +637,7 @@ Las referencias a correcciones sin commit, CI pendiente y auditoría bloqueada e
 
 ### T-014a-ui — Vistas de autenticación (aplicación completa)
 
-**Estado:** BLOQUEADA (por T-014a y T-017a-ui)
+**Estado:** PENDIENTE (prerrequisitos T-014a y T-017a-ui completos).
 **Aprobación:** Aprobado (arquitectura frontend: React Router declarativo condicionado a Auth, componentes pequeños, presentación separada de la lógica, accesibilidad explícita, D-090). Estilos y pruebas de componentes pendientes.
 **Dependencias:** T-014a, T-017a-ui.
 

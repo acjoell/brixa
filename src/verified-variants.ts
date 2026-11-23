@@ -1,40 +1,27 @@
 /**
  * Brixa — combinaciones verificadas por el arnés de integración.
  *
- * Debe coincidir exactamente con la lista VARIANTS de scripts/verify-generated.js.
- * Toda combinación que el CLI genera pero que no aparezca aquí se muestra como
- * EXPERIMENTAL en el resumen previo a la generación.
+ * La lista base coincide con VARIANTS de scripts/verify-generated.js.
+ * Las combinaciones Auth disponen de evidencia especializada (D-053).
  */
 
+import { DEFAULT_AUTH_TRANSPORT } from "./validation/options.js";
+import type { UserOptions } from "./types.js";
+
 /** Representa los flags opcionales de una variante verificada. */
-interface VerifiedVariant {
-  modality: string;
-  language: string;
-  database?: string;
-  docker?: boolean;
-  apiDocs?: boolean;
-  i18n?: boolean;
-}
+type VerifiedVariant = Omit<UserOptions, "outputDir">;
 
 /**
  * Genera el nombre de variante en el mismo formato que el arnés
  * (p. ej. "fullstack+js+sqlite+i18n").
  */
-export function variantLabel(opts: {
-  auth?: boolean | undefined;
-  modality: string;
-  language: string;
-  database?: string | undefined;
-  docker?: boolean | undefined;
-  apiDocs?: boolean | undefined;
-  i18n?: boolean | undefined;
-}): string {
-  const parts = [opts.modality, opts.language];
+export function variantLabel(opts: VerifiedVariant): string {
+  const parts: string[] = [opts.modality, opts.language];
   if (opts.database && opts.database !== "none") parts.push(opts.database);
   if (opts.docker) parts.push("docker");
   if (opts.apiDocs) parts.push("docs");
   if (opts.i18n) parts.push("i18n");
-  if (opts.auth) parts.push("auth");
+  if (opts.auth) parts.push("auth", opts.authTransport ?? DEFAULT_AUTH_TRANSPORT);
   return parts.join("+");
 }
 
@@ -79,19 +66,25 @@ export const VERIFIED_VARIANTS: readonly VerifiedVariant[] = [
 
 const _verifiedSet = new Set(VERIFIED_VARIANTS.map(variantLabel));
 
+/** Ciclo Auth y controles generales focalizados acreditados (T-014a). */
+export const VERIFIED_AUTH_VARIANTS: readonly VerifiedVariant[] = (
+  [
+    { modality: "backend", language: "js", database: "postgres", authTransport: "bearer" },
+    { modality: "backend", language: "ts", database: "sqlite", authTransport: "bearer" },
+    { modality: "fullstack", language: "ts", database: "sqlite", authTransport: "cookie" },
+    { modality: "fullstack", language: "js", database: "postgres", authTransport: "cookie" },
+    { modality: "backend", language: "js", database: "sqlite", authTransport: "cookie" },
+  ] as const
+).map((variant) => ({ ...variant, auth: true, apiDocs: true }));
+
+const verifiedAuthSet = new Set(VERIFIED_AUTH_VARIANTS.map(variantLabel));
+
 /**
- * Devuelve true si la combinación dada está entre las 32 verificadas por el arnés.
+ * Devuelve true para una combinación exacta con evidencia de generación y funcionamiento.
  */
-export function isVerified(opts: {
-  auth?: boolean | undefined;
-  modality: string;
-  language: string;
-  database?: string | undefined;
-  docker?: boolean | undefined;
-  apiDocs?: boolean | undefined;
-  i18n?: boolean | undefined;
-}): boolean {
-  return _verifiedSet.has(variantLabel(opts));
+export function isVerified(opts: VerifiedVariant): boolean {
+  const label = variantLabel(opts);
+  return opts.auth ? verifiedAuthSet.has(label) : _verifiedSet.has(label);
 }
 
 /**
@@ -109,14 +102,7 @@ const _verifiedSecuritySet = new Set(VERIFIED_SECURITY_VARIANTS.map(variantLabel
 /**
  * Devuelve true si la combinación dada está entre las verificadas por el arnés de seguridad.
  */
-export function isSecurityVerified(opts: {
-  auth?: boolean | undefined;
-  modality: string;
-  language: string;
-  database?: string | undefined;
-  docker?: boolean | undefined;
-  apiDocs?: boolean | undefined;
-  i18n?: boolean | undefined;
-}): boolean {
-  return _verifiedSecuritySet.has(variantLabel(opts));
+export function isSecurityVerified(opts: VerifiedVariant): boolean {
+  const label = variantLabel(opts);
+  return opts.auth ? verifiedAuthSet.has(label) : _verifiedSecuritySet.has(label);
 }

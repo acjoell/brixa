@@ -66,6 +66,7 @@ Si se selecciona autenticación, la implementación debe incluir un flujo funcio
 - **Mitigación de enumeración por temporización:** Cuando una cuenta no existe en el inicio de sesión, el backend ejecuta una verificación simulada con un hash Argon2id dummy preparado en memoria para igualar los tiempos de respuesta.
 - **Rehash transparente:** Se ejecuta exclusivamente tras una autenticación exitosa si los parámetros almacenados difieren de los vigentes pero están dentro de los límites defensivos permitidos.
 - **Entrada acotada:** Contraseñas entrantes limitadas a un máximo de 128 caracteres y 512 bytes UTF-8 (D-093).
+- **Binarios nativos:** las instalaciones Auth conservan las dependencias opcionales de plataforma de `@node-rs/argon2`. Sin el binario compatible, el backend falla antes de escuchar, sin algoritmo alternativo. Este resultado se verificó en Linux x86-64 con Node 24.22.1 y una instalación aislada `--omit=optional`.
 
 ### Cambio de contraseña y recuperación privilegiada (D-108, D-109)
 
@@ -325,6 +326,8 @@ Los cambios de dependencias deben evaluarse y verificarse con las pruebas dispon
 
 ## 11. Pruebas y verificación de seguridad (D-097)
 
+Para Auth v1, `verify:auth` y los contratos focalizados acreditan el ciclo, las pruebas positivas y negativas y los controles generales aplicables (D-053, D-065). En las instalaciones generadas se exige auditoría npm con umbral `moderate`, HTTP 500 saneado, redacción, rechazo CORS de `Origin: null` y CSP restrictiva. El [registro de T-014a](TASKS_POST_MVP.md#t-014a--autenticación-seleccionable) conserva resultados por combinación exacta. Las matrices y la exigencia de `verify:all` para publicar se mantienen.
+
 Cuando existan controles de autenticación, autorización o multitenancy, las pruebas deben cubrir tanto el acceso permitido como el denegado.
 
 ### Auditoría estructural de RLS (D-097)
@@ -439,12 +442,12 @@ Este apartado describe las garantías reales del endurecimiento de seguridad de 
 
 **Diferencia conocida:** `X-Frame-Options` es `DENY` en la SPA y `SAMEORIGIN` en el backend (Helmet por defecto). Pendiente de unificar.
 
-### Lo que no existe todavía
+### Límites de la plantilla base y controles del overlay Auth
 
-- `trust proxy`: no configurado en plantilla base; Express utiliza `trust proxy: false` por defecto para prevenir IP spoofing; su parametrización por topología y verificación de `X-Forwarded-Proto` se formaliza para Auth y cookies de sesión en T-014a (D-089, D-099).
-- Rate limiting / protección de abuso: no implementado en plantilla base (el rate limiting de autenticación, activación y registro corresponde a T-014a conforme a D-086, D-093, D-102 y D-107).
+- `trust proxy`: no configurado en plantilla base; Express utiliza `trust proxy: false` por defecto para prevenir IP spoofing; el overlay Auth añade `AUTH_TRUSTED_PROXIES` y comprueba el protocolo reenviado desde intermediarios explícitos (D-089, D-099).
+- Rate limiting / protección de abuso: el overlay Auth incorpora los límites de login y activación (D-107 y D-110). La plantilla base carece de contadores.
 - HSTS: no activado (responsabilidad del operador en el proxy de terminación TLS).
-- Autenticación, RBAC, multitenancy: especificación arquitectónica completada en T-014-0; implementación de plantillas pendiente sujeta a T-023 y T-018.
+- Auth v1 se ofrece mediante overlay en las variantes acreditadas de T-014a. RBAC, multitenancy y las vistas de Auth conservan sus respectivos criterios y tareas.
 
 ---
 
@@ -471,6 +474,7 @@ Ninguna protección se considera infalible. La seguridad del sistema se basa en 
 - **Impacto:** Descubrimiento de cuentas válidas para dirigir ataques dirigidos de fuerza bruta o phishing.
 - **Controles aprobados (D-071, D-093, D-102, D-107):** Mensajes de error genéricos y uniformes ante credenciales inválidas (contrato uniforme D-071). Mitigación estricta de temporización: cuando la cuenta solicitada no existe, el backend ejecuta una verificación simulada utilizando un hash Argon2id dummy precargado en memoria con los mismos parámetros ($m=19456$, $t=2$, $p=1$), igualando el tiempo de respuesta respecto a una cuenta existente. Respuestas idénticas en el flujo de activación ante tokens inválidos, expirados o inexistentes.
 - **Verificaciones necesarias:** Pruebas estadísticas de temporización midiendo la latencia de login entre usuarios existentes e inexistentes; pruebas de aserción comprobando que el cuerpo y código HTTP de respuesta son idénticos.
+- **Evidencia focalizada:** 100 pares HTTP locales, en orden aleatorio por par tras 10 calentamientos por grupo, con SQLite en archivo, misma contraseña incorrecta y parámetros Argon2id base. Ambos grupos dieron el mismo cuerpo y HTTP 401. Los percentiles p05/mediana/p95 fueron 18,544/20,186/22,201 ms para la cuenta existente y 18,178/19,961/24,071 ms para la inexistente. La diferencia mediana pareada fue 0,302 ms (IC bootstrap 95 % de 0,066 a 0,562 ms); una medición previa fue 0,080 ms (IC de −0,301 a 0,286 ms).
 - **Riesgo residual:** La temporización de redes y pequeñas fluctuaciones en la consulta de base de datos previa al hash pueden introducir variaciones mínimas; el mecanismo mitiga la brecha macroscópica de tiempo de hashing (~60 ms), pero no garantiza aislamiento de tiempo absoluto frente a mediciones de laboratorio en red local.
 - **Estado:** Mitigación definida.
 
@@ -480,6 +484,7 @@ Ninguna protección se considera infalible. La seguridad del sistema se basa en 
 - **Impacto:** Denegación de servicio (DoS) global para todos los usuarios de la aplicación.
 - **Controles aprobados (D-093, D-102):** Validación defensiva previa del string PHC antes de llamar a `verify()`: límites estrictos ($m \le 65536\text{ KiB}$, $t \le 4$, $p \le 2$, longitud $\le 512$ bytes). Hashes fuera de rango se descartan sin ejecutar Argon2id. Limitador de concurrencia local por proceso acotado a 2 operaciones simultáneas y cola máxima de 8 peticiones; saturación rechazada de inmediato con HTTP 503 y `Retry-After: 5`. Rate limiting HTTP independiente (HTTP 429 con `Retry-After`) por IP e identificador según D-110.
 - **Verificaciones necesarias:** Pruebas de carga enviando más de 10 peticiones concurrentes de autenticación comprobando la respuesta 503; pruebas unitarias con hashes manipulados ($m=1\text{ GB}$, $t=100$) verificando rechazo instantáneo sin consumo de memoria.
+- **Evidencia focalizada:** backend independiente JS con SQLite en archivo y cookies, 1 CPU y cgroup v2 con límite de 256 MiB. Una ráfaga de 36 solicitudes de verificación HTTP produjo 24 respuestas 401 y 12 respuestas 503 con `Retry-After: 5`; el siguiente login válido devolvió 204. Pico del cgroup 131,3 MiB, RSS máximo del backend 149,3 MiB, 0 OOM y 0 reinicios. El límite es del entorno de prueba. La medición cubre el perfil base y deja sin medir el peor caso de todos los PHC admitidos.
 - **Riesgo residual:** El limitador de concurrencia es local al proceso. En despliegues distribuidos multi-instancia, la capacidad total agregada crece con el número de réplicas. Ataques distribuidos masivos (DDoS) requieren mitigación perimetral (WAF/Ingress).
 - **Estado:** Mitigación definida.
 

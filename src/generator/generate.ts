@@ -1853,12 +1853,13 @@ export function nextStepsMessage(
   apiDocs?: boolean,
   i18n?: boolean,
   auth?: boolean,
+  authTransport?: UserOptions["authTransport"],
 ): string {
   const name = path.basename(outputDir);
 
   const variant =
     modality && language
-      ? { modality, language, database, docker, apiDocs, i18n, auth }
+      ? { modality, language, database, docker, apiDocs, i18n, auth, authTransport }
       : undefined;
   const experimentalWarning =
     variant && !isVerified(variant)
