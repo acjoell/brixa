@@ -103,6 +103,7 @@ const groups = {
       "tests/login.test.ts",
       "tests/login-abuse.test.ts",
       "tests/auth-http-sqlite.test.ts",
+      "tests/activation-http.test.ts",
       "tests/logout.test.ts",
       "tests/change-password.test.ts",
       "tests/admin-recovery.test.ts",

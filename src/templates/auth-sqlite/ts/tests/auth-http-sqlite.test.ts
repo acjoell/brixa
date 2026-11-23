@@ -24,6 +24,7 @@ for (const mode of ["cookie", "bearer"] as const) {
     let server: ReturnType<typeof import("../src/app.js").app.listen> | undefined;
     const env = {
       AUTH_PUBLIC_ORIGIN: "https://app.example.test",
+      ACTIVATION_PAGE_URL: "https://app.example.test/activate",
       AUTH_TRUSTED_PROXIES: "127.0.0.1, 2001:db8::2",
       LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
       LOGIN_IP_REQUEST_LIMIT: "20",

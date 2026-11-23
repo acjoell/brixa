@@ -383,6 +383,8 @@ describe("overlay criptográfico de Auth", () => {
         ),
       ).toBe(auth);
       expect(example.includes("ACTIVATION_TOKEN_EXPIRY_HOURS=24\n")).toBe(auth);
+      expect(example.includes("ACTIVATION_PAGE_URL=\n")).toBe(auth);
+      expect(environment?.includes('ACTIVATION_PAGE_URL: "${ACTIVATION_PAGE_URL-}"')).toBe(auth);
       const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
       expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
       expect(environment?.includes('LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"')).toBe(auth);
@@ -450,6 +452,10 @@ describe("overlay criptográfico de Auth", () => {
         "/auth/session",
         "/auth/logout",
         "/auth/password",
+        "/auth/register",
+        "/auth/activation/revoke",
+        "/auth/activation/regenerate",
+        "/auth/activate",
       ]);
       expect(spec.servers).toEqual(modality === "fullstack" ? [{ url: "/api" }] : undefined);
       expect(spec.paths["/auth/session"].get.security).toEqual(

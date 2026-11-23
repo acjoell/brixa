@@ -24,6 +24,17 @@ function fixture() {
       logout: () => Promise.resolve(false),
     },
     changePassword: () => Promise.resolve(false),
+    activation: {
+      managed: {
+        registerAccount: () => Promise.reject(new Error("unexpected registration")),
+        revokeActivationToken: () => Promise.reject(new Error("unexpected revocation")),
+        regenerateActivationToken: () => Promise.reject(new Error("unexpected regeneration")),
+      },
+      activateAccount: () => Promise.resolve(false),
+      consumeIp: () => Promise.resolve({ accepted: false, blocked: true, retryAfterMs: 1000 }),
+      cleanupExpired: () => Promise.resolve(0),
+      link: () => "",
+    },
   };
   return { login, transport, services };
 }

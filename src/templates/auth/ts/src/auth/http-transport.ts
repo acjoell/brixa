@@ -65,7 +65,10 @@ export function createAuthHttpTransport(
   mode: "cookie" | "bearer",
   cookieName: string,
   env: NodeJS.ProcessEnv,
-): AuthHttpTransport & { protect: NonNullable<AuthHttpTransport["protect"]> } {
+): AuthHttpTransport & {
+  protect: NonNullable<AuthHttpTransport["protect"]>;
+  publicOrigin: string | undefined;
+} {
   const result = configSchema.safeParse(env);
   if (!result.success) {
     throw formatConfigError(String(result.error.issues[0].path[0]), result.error);
@@ -96,6 +99,7 @@ export function createAuthHttpTransport(
   }
 
   return {
+    publicOrigin: origin,
     protect(req, res, next) {
       const socket = req.socket;
       const forwardedProto =

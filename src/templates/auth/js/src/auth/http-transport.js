@@ -92,6 +92,7 @@ export function createAuthHttpTransport(mode, cookieName, env) {
   }
 
   return {
+    publicOrigin: origin,
     protect(req, res, next) {
       const socket = req.socket;
       const forwardedProto =

@@ -829,7 +829,7 @@ const COMPOSE_AUTH_MARKER = "# @@INSERT:auth-env@@";
 const AUTH_ENV_EXAMPLE =
   "# Argon2id por proceso (0 en cola desactiva la espera)\nARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n" +
   "SESSION_IDLE_TIMEOUT_MINUTES=30\nSESSION_MAX_LIFETIME_HOURS=12\n" +
-  "ACTIVATION_TOKEN_EXPIRY_HOURS=24\n" +
+  "ACTIVATION_TOKEN_EXPIRY_HOURS=24\nACTIVATION_PAGE_URL=\n" +
   "LOGIN_IDENTIFIER_FAILURE_LIMIT=5\nLOGIN_IP_REQUEST_LIMIT=10\nLOGIN_ABUSE_WINDOW_MINUTES=15\n" +
   "LOGIN_ABUSE_HMAC_KEY=\nAUTH_TRUSTED_PROXIES=\n";
 
@@ -855,6 +855,7 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
         '      SESSION_IDLE_TIMEOUT_MINUTES: "${SESSION_IDLE_TIMEOUT_MINUTES-30}"\n' +
         '      SESSION_MAX_LIFETIME_HOURS: "${SESSION_MAX_LIFETIME_HOURS-12}"\n' +
         '      ACTIVATION_TOKEN_EXPIRY_HOURS: "${ACTIVATION_TOKEN_EXPIRY_HOURS-24}"\n' +
+        '      ACTIVATION_PAGE_URL: "${ACTIVATION_PAGE_URL-}"\n' +
         '      LOGIN_IDENTIFIER_FAILURE_LIMIT: "${LOGIN_IDENTIFIER_FAILURE_LIMIT-5}"\n' +
         '      LOGIN_IP_REQUEST_LIMIT: "${LOGIN_IP_REQUEST_LIMIT-10}"\n' +
         '      LOGIN_ABUSE_WINDOW_MINUTES: "${LOGIN_ABUSE_WINDOW_MINUTES-15}"\n' +
@@ -1191,6 +1192,57 @@ async function documentAuthRoutes(backendDir: string, options: UserOptions) {
         },
       },
     },
+    "/auth/register": {
+      post: {
+        summary: "Registrar una identidad como administrador global",
+        ...secured,
+        ...csrf,
+        requestBody: requestBody({ email: { type: "string", format: "email" } }),
+        responses: {
+          ...rejected,
+          200: { description: "Identidad existente, sin enlace nuevo" },
+          201: { description: "Identidad pendiente y enlace privado de activación" },
+        },
+      },
+    },
+    "/auth/activation/revoke": {
+      post: {
+        summary: "Revocar el enlace pendiente como administrador global",
+        ...secured,
+        ...csrf,
+        requestBody: requestBody({ userId: { type: "string", format: "uuid" } }),
+        responses: { ...rejected, 204: noContent },
+      },
+    },
+    "/auth/activation/regenerate": {
+      post: {
+        summary: "Regenerar el enlace como administrador global",
+        ...secured,
+        ...csrf,
+        requestBody: requestBody({ userId: { type: "string", format: "uuid" } }),
+        responses: {
+          ...rejected,
+          200: { description: "Enlace privado nuevo" },
+          409: { description: "La cuenta no está pendiente" },
+        },
+      },
+    },
+    "/auth/activate": {
+      post: {
+        summary: "Establecer la contraseña inicial sin iniciar sesión",
+        ...csrf,
+        requestBody: requestBody({
+          token: { type: "string", minLength: 43, maxLength: 43 },
+          password: credential,
+        }),
+        responses: {
+          ...rejected,
+          204: noContent,
+          429: { description: "Límite de activación alcanzado", ...retry },
+          503: { description: "Hash saturado", ...retry },
+        },
+      },
+    },
   });
   await fs.writeFile(file, JSON.stringify(spec, null, 2) + "\n", "utf8");
 }
@@ -1266,7 +1318,14 @@ async function applyAuthOverlay(
       "Deja `AUTH_TRUSTED_PROXIES` vacío para conexiones directas. Detrás de un proxy, configura solo las IP literales de los saltos controlados, separadas por comas. " +
       "El proxy de entrada debe eliminar `X-Forwarded-For` y `X-Forwarded-Proto` del cliente. Construye la cadena con IP verificadas y entrega un único valor `https` al backend si la conexión pública se estableció mediante TLS. " +
       "Si TLS termina antes del Nginx de fullstack, limita el acceso a su listener al terminador confiable y configura allí el valor https de X-Forwarded-Proto para las conexiones reenviadas por ese terminador. Restringe el acceso directo al backend. " +
-      "Express camina desde el socket hasta el primer salto no confiable. No se admiten nombres, rangos ni conteos de saltos.\n",
+      "Express camina desde el socket hasta el primer salto no confiable. No se admiten nombres, rangos ni conteos de saltos.\n\n" +
+      "Configura `ACTIVATION_PAGE_URL` con la URL HTTPS de la vista de activación que sirve tu cliente, sin query ni fragmento. " +
+      "En modo cookie debe compartir `AUTH_PUBLIC_ORIGIN`. HTTP se permite únicamente en ese origen local de desarrollo. " +
+      "Con Compose, define la variable en el `.env` raíz. El backend genera la API y el enlace. La vista del cliente se integra por separado.\n\n" +
+      "Un administrador autenticado puede enviar `{email}` a `POST /auth/register`. Una identidad nueva devuelve 201 con `activationUrl` y `expiresAt`. Un alta repetida devuelve 200 sin otro enlace. " +
+      "Usa `POST /auth/activation/revoke` o `POST /auth/activation/regenerate` con el `userId` de destino para gestionar enlaces pendientes. Comparte el enlace solo por un canal privado. " +
+      "La vista lee `token` del fragmento y lo retira de la barra de direcciones. Solo al confirmar, envía `{token,password}` en JSON a `POST /auth/activate`. Abrir el enlace no consume el token. " +
+      "Las mutaciones en modo cookie también requieren el encabezado CSRF indicado arriba. La activación devuelve 204 sin iniciar sesión y tiene un presupuesto persistente independiente de 10 solicitudes por IP cada 15 minutos.\n",
   );
   if (composeRoot) {
     const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";

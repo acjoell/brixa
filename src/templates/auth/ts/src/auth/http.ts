@@ -4,11 +4,15 @@ import express from "express";
 import type { ErrorRequestHandler, Request, Response } from "express";
 import { z } from "zod";
 import { notFoundHandler, parseInput, ValidationError } from "../errors.js";
+import type { createAccountActivationService } from "./activate-account.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import type { createPasswordChangeService } from "./change-password.js";
 import { emailSchema } from "./email.js";
 import { LoginRateLimitedError } from "./login.js";
 import type { createLoginService } from "./login.js";
+import type { createLoginAbuseService } from "./login-abuse.js";
+import { ManagedActivationError } from "./managed-activation.js";
+import type { createManagedActivationService } from "./managed-activation.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
 import { tokenDigest } from "./sessions.js";
 import type { createSessionService } from "./sessions.js";
@@ -17,6 +21,13 @@ type Services = {
   login: Awaited<ReturnType<typeof createLoginService>>;
   sessions: Pick<ReturnType<typeof createSessionService>, "validateSession" | "logout">;
   changePassword: ReturnType<typeof createPasswordChangeService>;
+  activation: {
+    managed: ReturnType<typeof createManagedActivationService>;
+    activateAccount: ReturnType<typeof createAccountActivationService>;
+    consumeIp: ReturnType<typeof createLoginAbuseService>["consumeActivationIp"];
+    cleanupExpired: ReturnType<typeof createLoginAbuseService>["cleanupExpired"];
+    link(token: string): string;
+  };
 };
 
 export type AuthHttpTransport = {
@@ -28,6 +39,9 @@ export type AuthHttpTransport = {
 
 const password = z.string().min(1).refine(isPasswordWithinLimits);
 const credentials = z.strictObject({ email: emailSchema, password });
+const registration = z.strictObject({ email: emailSchema });
+const activationConfirmation = z.strictObject({ token: z.string(), password });
+const activationTarget = z.strictObject({ userId: z.uuid() });
 const passwordChange = z.strictObject({ currentPassword: password, newPassword: password });
 
 export function trustProxy(raw: string | undefined) {
@@ -55,13 +69,26 @@ function unauthorized(res: Response) {
   res.status(401).json({ error: "Unauthorized" });
 }
 
+function clientIp(req: Request): string {
+  if (!req.ip || isIP(req.ip) === 0 || req.ip.includes("%")) throw badRequest;
+  return req.ip;
+}
+
 const handleError: ErrorRequestHandler = (error: unknown, _req, res, next) => {
   if (res.headersSent) {
     next(new Error("AUTH_HTTP_FAILED"));
     return;
   }
-  if (error === badRequest || error instanceof ValidationError) {
+  if (
+    error === badRequest ||
+    error instanceof ValidationError ||
+    (error instanceof ManagedActivationError && error.code === "INVALID_INPUT")
+  ) {
     res.status(400).json({ error: "Bad Request" });
+  } else if (error instanceof ManagedActivationError && error.code === "FORBIDDEN") {
+    res.status(403).json({ error: "Forbidden" });
+  } else if (error instanceof ManagedActivationError && error.code === "ACCOUNT_NOT_PENDING") {
+    res.status(409).json({ error: "Conflict" });
   } else if (error instanceof LoginRateLimitedError) {
     res
       .set("Retry-After", String(error.retryAfterSeconds))
@@ -119,8 +146,7 @@ export function createAuthHttpApp(
 
   app.post("/login", json, async (req, res) => {
     const { email, password } = parseInput(credentials, req.body);
-    if (!req.ip || isIP(req.ip) === 0 || req.ip.includes("%")) throw badRequest;
-    const token = await services.login(email, password, requestId(res), req.ip);
+    const token = await services.login(email, password, requestId(res), clientIp(req));
     if (!token) return unauthorized(res);
     await transport.establishSession(res, token);
   });
@@ -149,6 +175,72 @@ export function createAuthHttpApp(
     await transport.clearSession(res);
     res.status(204).end();
   });
+
+  const { activation } = services;
+
+  app.post("/register", json, async (req, res) => {
+    const session = await authenticated(req, res);
+    if (!session) return;
+    const { email } = parseInput(registration, req.body);
+    const result = await activation.managed.registerAccount(
+      { userId: session.userId, requestId: requestId(res) },
+      email,
+    );
+    if (!result.created) {
+      res.json({ created: false, userId: result.userId });
+      return;
+    }
+    res.status(201).json({
+      created: true,
+      userId: result.userId,
+      activationUrl: activation.link(result.token),
+      expiresAt: result.expiresAt,
+    });
+  });
+
+  app.post("/activation/revoke", json, async (req, res) => {
+    const session = await authenticated(req, res);
+    if (!session) return;
+    const { userId } = parseInput(activationTarget, req.body);
+    await activation.managed.revokeActivationToken(
+      { userId: session.userId, requestId: requestId(res) },
+      userId,
+    );
+    res.status(204).end();
+  });
+
+  app.post("/activation/regenerate", json, async (req, res) => {
+    const session = await authenticated(req, res);
+    if (!session) return;
+    const { userId } = parseInput(activationTarget, req.body);
+    const result = await activation.managed.regenerateActivationToken(
+      { userId: session.userId, requestId: requestId(res) },
+      userId,
+    );
+    res.json({ activationUrl: activation.link(result.token), expiresAt: result.expiresAt });
+  });
+
+  app.post(
+    "/activate",
+    async (req, res, next) => {
+      const admission = await activation.consumeIp(clientIp(req));
+      if (!admission.accepted) {
+        res
+          .set("Retry-After", String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))))
+          .status(429)
+          .json({ error: "Too Many Requests" });
+        return;
+      }
+      await activation.cleanupExpired();
+      next();
+    },
+    json,
+    async (req, res) => {
+      const { token, password } = parseInput(activationConfirmation, req.body);
+      if (!(await activation.activateAccount(token, password, requestId(res)))) throw badRequest;
+      res.status(204).end();
+    },
+  );
 
   app.use(notFoundHandler);
   app.use(handleError);

@@ -68,7 +68,7 @@ export function createLoginAbuseService(
   const key = Buffer.from(secret, "hex");
   const windowMs = minutes * 60_000;
 
-  const digest = (kind: "ip" | "identifier", value: string) =>
+  const digest = (kind: "ip" | "identifier" | "activation-ip", value: string) =>
     createHmac("sha256", key)
       .update(kind + ":" + value)
       .digest("hex");
@@ -124,22 +124,23 @@ export function createLoginAbuseService(
     tx: Write,
     keyDigest: string,
     row: Awaited<ReturnType<typeof lockCounter>>,
+    durationMs = windowMs,
   ) {
     const active = row.expiresAtMs > row.now;
     const hits = active ? row.hits + 1 : 1;
-    const expiresAtMs = active ? row.expiresAtMs : row.now + windowMs;
+    const expiresAtMs = active ? row.expiresAtMs : row.now + durationMs;
     await tx.update(counters).set({ hits, expiresAtMs }).where(eq(counters.keyDigest, keyDigest));
     return { hits, expiresAtMs };
   }
 
-  async function consume(keyDigest: string, limit: number) {
+  async function consume(keyDigest: string, limit: number, durationMs = windowMs) {
     return storage(() =>
       withActivationWrite(database, async (tx) => {
         const row = await lockCounter(tx, keyDigest);
         const current = state(row.hits, row.expiresAtMs - row.now, limit);
         if (current.blocked) return { accepted: false, ...current };
 
-        const { hits, expiresAtMs } = await addHit(tx, keyDigest, row);
+        const { hits, expiresAtMs } = await addHit(tx, keyDigest, row, durationMs);
         return { accepted: true, ...state(hits, expiresAtMs - row.now, limit) };
       }),
     );
@@ -207,6 +208,9 @@ export function createLoginAbuseService(
 
   return {
     consumeIp: (ip: string) => consume(digest("ip", canonicalIp(ip)), ipLimit),
+    // Separate key and fixed window. Activation never spends the login budget.
+    consumeActivationIp: (ip: string) =>
+      consume(digest("activation-ip", canonicalIp(ip)), 10, 15 * 60_000),
     // Status is a snapshot. Call consumeIp to decide and account for IP admission.
     ipStatus: (ip: string) => status(digest("ip", canonicalIp(ip)), ipLimit),
     // Records an observed failure. This does not reserve a slot before verification.
