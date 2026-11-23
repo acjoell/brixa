@@ -81,15 +81,16 @@ export function restoreFile(filePath, originalBuffer) {
  * @param {string} cmd
  * @param {string[]} args
  * @param {string} cwd
- * @param {{ env?: Record<string, string>, timeoutMs?: number, shell?: boolean }} options
+ * @param {{ env?: Record<string, string>, timeoutMs?: number, shell?: boolean, signal?: AbortSignal }} options
  * @returns {Promise<{ exitCode: number | null, signal: string | null, stdout: string, stderr: string, timedOut: boolean, durationMs: number }>}
  */
 export async function executeCommand(
   cmd,
   args,
   cwd,
-  { env = {}, timeoutMs = 60_000, shell = process.platform === "win32" } = {},
+  { env = {}, timeoutMs = 60_000, shell = process.platform === "win32", signal } = {},
 ) {
+  signal?.throwIfAborted();
   const isWindows = process.platform === "win32";
   const actualCmd = isWindows && cmd === "npm" ? "npm.cmd" : cmd;
   const childEnv = { ...process.env, ...env };
@@ -110,8 +111,7 @@ export async function executeCommand(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const stop = () => {
       try {
         if (isWindows) {
           execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
@@ -121,6 +121,11 @@ export async function executeCommand(
       } catch {
         // Ignorar si el proceso ya terminó
       }
+    };
+    signal?.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
@@ -131,12 +136,13 @@ export async function executeCommand(
       stderr += chunk.toString();
     });
 
-    child.on("close", (code, signal) => {
+    child.on("close", (code, exitSignal) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
       const durationMs = performance.now() - startTime;
       resolve({
         exitCode: code,
-        signal,
+        signal: exitSignal,
         spawnError,
         stdout,
         stderr,

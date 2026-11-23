@@ -101,7 +101,14 @@ export function printVerificationReport(report) {
   console.log(JSON.stringify(report, null, 2));
 }
 
-export async function runReportedVerification(declared, selected, verify, mode = "all") {
+export async function runReportedVerification(
+  declared,
+  selected,
+  verify,
+  mode = "all",
+  report = (outcomes) =>
+    printVerificationReport(verificationReport(declared, selected, outcomes, mode)),
+) {
   const outcomes = [];
   try {
     for (const [index, variant] of selected.entries()) {
@@ -117,6 +124,6 @@ export async function runReportedVerification(declared, selected, verify, mode =
       }
     }
   } finally {
-    printVerificationReport(verificationReport(declared, selected, outcomes, mode));
+    report(outcomes);
   }
 }

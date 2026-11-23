@@ -21,6 +21,7 @@
  * Sin estos flags conserva la verificación integral estricta.
  */
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -133,7 +134,7 @@ export function prepareDependencies(projectDir, mode = "all") {
 }
 
 /** Cierra un proceso de forma limpia y fuerza el cierre de todo el árbol en Windows si es necesario. */
-async function stopProcess(child) {
+export async function stopProcess(child) {
   if (!child || child.killed || child.exitCode !== null) return;
 
   if (process.platform === "win32") {
@@ -186,7 +187,7 @@ async function getFreePort() {
 }
 
 /** Arranca el servidor backend en puerto efímero (PORT=0) y devuelve el proceso y el puerto asignado. */
-async function startBackendServer(
+export async function startBackendServer(
   projectDir,
   entryPoint = path.join("dist", "index.js"),
   extraEnv = {},
@@ -241,13 +242,16 @@ async function startBackendServer(
       clearTimeout(timeout);
       reject(new Error(`El servidor backend terminó prematuramente con código ${code}`));
     });
+  }).catch(async (error) => {
+    await stopProcess(child);
+    throw error;
   });
 
   return { child, port, stdoutLines, stderrLines };
 }
 
 /** Arranca el servidor de desarrollo de Vite sin usar npm run, con puerto libre, --strictPort y BACKEND_URL. */
-async function startViteServer(frontendDir, backendPort, backendLogs = null) {
+export async function startViteServer(frontendDir, backendPort, backendLogs = null) {
   const vitePort = await getFreePort();
   const viteBin = path.join(frontendDir, "node_modules", "vite", "bin", "vite.js");
 
@@ -547,34 +551,67 @@ function isDockerAvailable() {
   }
 }
 
-async function startPostgresContainer() {
+export async function startPostgresContainer({ auth = false } = {}) {
   const port = await getFreePort();
   const containerName = `brixa-pg-verify-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const user = "brixa_test";
-  const pass = "brixa_pass";
+  const pass = auth ? randomBytes(24).toString("hex") : "brixa_pass";
   const db = "brixa_db";
 
   console.log(`\nIniciando contenedor PostgreSQL desechable en 127.0.0.1:${port}...`);
-  execFileSync(
-    "docker",
-    [
-      "run",
-      "-d",
-      "--name",
-      containerName,
-      "--rm",
-      "-e",
-      `POSTGRES_USER=${user}`,
-      "-e",
-      `POSTGRES_PASSWORD=${pass}`,
-      "-e",
-      `POSTGRES_DB=${db}`,
-      "-p",
-      `127.0.0.1:${port}:5432`,
-      "postgres:17-alpine",
-    ],
-    { stdio: "inherit" },
-  );
+  const stop = async () => {
+    console.log(`\nDeteniendo contenedor PostgreSQL ${containerName}...`);
+    try {
+      execFileSync("docker", ["stop", containerName], {
+        stdio: "ignore",
+        ...(auth ? { timeout: 15_000 } : {}),
+      });
+    } catch {
+      if (auth) {
+        execFileSync("docker", ["rm", "-f", "-v", containerName], {
+          stdio: "ignore",
+          timeout: 15_000,
+        });
+      }
+    }
+  };
+  try {
+    execFileSync(
+      "docker",
+      [
+        "run",
+        "-d",
+        "--name",
+        containerName,
+        "--rm",
+        "-e",
+        `POSTGRES_USER=${user}`,
+        "-e",
+        auth ? "POSTGRES_PASSWORD" : `POSTGRES_PASSWORD=${pass}`,
+        "-e",
+        `POSTGRES_DB=${db}`,
+        "-p",
+        `127.0.0.1:${port}:5432`,
+        ...(auth
+          ? [
+              "--pull=never",
+              "--memory=256m",
+              "--cpus=1",
+              "--tmpfs",
+              "/var/lib/postgresql/data:rw,size=128m",
+            ]
+          : []),
+        auth ? "postgres:17.4-alpine" : "postgres:17-alpine",
+      ],
+      {
+        stdio: "inherit",
+        ...(auth ? { timeout: 30_000, env: { ...process.env, POSTGRES_PASSWORD: pass } } : {}),
+      },
+    );
+  } catch (error) {
+    if (auth && error.code === "ETIMEDOUT") await stop();
+    throw error;
+  }
 
   const databaseUrl = `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}`;
 
@@ -582,8 +619,10 @@ async function startPostgresContainer() {
   let ready = false;
   while (Date.now() - startTime < 30000) {
     try {
-      execFileSync("docker", ["exec", containerName, "pg_isready", "-U", user, "-d", db], {
+      const host = auth ? ["-h", "127.0.0.1"] : [];
+      execFileSync("docker", ["exec", containerName, "pg_isready", ...host, "-U", user, "-d", db], {
         stdio: "ignore",
+        ...(auth ? { timeout: 3000 } : {}),
       });
       ready = true;
       break;
@@ -593,26 +632,13 @@ async function startPostgresContainer() {
   }
 
   if (!ready) {
-    try {
-      execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
-    } catch {
-      // ignore
-    }
+    await stop();
     throw new Error("Timeout esperando a que el contenedor PostgreSQL esté listo");
   }
 
   console.log("✔ Contenedor PostgreSQL iniciado y listo para pruebas");
 
-  const stop = async () => {
-    console.log(`\nDeteniendo contenedor PostgreSQL ${containerName}...`);
-    try {
-      execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
-    } catch {
-      // Ignorar si ya terminó
-    }
-  };
-
-  return { databaseUrl, stop, containerName, user, pass, port };
+  return { databaseUrl, stop, containerName, user, pass, port, database: db };
 }
 
 export async function setupPostgres() {

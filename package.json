@@ -47,6 +47,7 @@
     "test": "vitest run",
     "verify:generated": "node scripts/verify-generated.js",
     "verify:security": "node scripts/verify-security.js",
+    "verify:auth": "node --import tsx scripts/verify-auth.js",
     "verify:all": "npm run verify:generated && npm run verify:security",
     "verify:generated:functional": "node scripts/verify-generated.js --functional-only",
     "verify:generated:audit": "node scripts/verify-generated.js --audit-only",

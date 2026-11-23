@@ -115,6 +115,28 @@ La documentación de diseño, las decisiones y las tareas del proyecto están en
 
 Lee [CONTRIBUTING.md](CONTRIBUTING.md). Las vulnerabilidades se reportan según [SECURITY.md](SECURITY.md), no en issues públicos.
 
+### Verificación independiente de Auth
+
+Con Node 24 o 26, dependencias de Brixa instaladas, acceso al registro npm y Docker disponible:
+
+```bash
+docker pull postgres:17.4-alpine
+npm run verify:auth
+```
+
+El comando usa el generador y recorre cuatro variantes con API Docs, en serie:
+
+| Modalidad | Lenguaje | Base de datos | Transporte |
+|---|---|---|---|
+| Backend | JS | PostgreSQL | Bearer |
+| Backend | TS | SQLite | Bearer |
+| Fullstack | TS | SQLite | cookies |
+| Fullstack | JS | PostgreSQL | cookies |
+
+Cada variante se instala en un directorio temporal, aplica sus migraciones y comprueba el arranque del backend generado. Las variantes fullstack también instalan y compilan el frontend y comprueban el proxy de Vite. A continuación se ejecuta el contrato de integración ⑤-G. PostgreSQL usa `app_exec` y un contenedor desechable por variante, con 1 CPU, 256 MiB de memoria y un área de datos temporal de hasta 128 MiB. SQLite usa un archivo temporal. Un fallo detiene la ejecución, limpia la variante e indica cuáles quedaron pendientes.
+
+El workflow **Verify Auth** se inicia manualmente desde GitHub Actions. Las comprobaciones HTTP locales simulan el protocolo reenviado por un proxy confiable. Queda pendiente abrir el enlace y completar la activación en un navegador contra el sitio configurado en `ACTIVATION_PAGE_URL`, detrás del terminador TLS real del despliegue.
+
 ## Licencia
 
 El código de Brixa (el CLI y las plantillas) se distribuye bajo la licencia [AGPL-3.0](LICENSE.md).
