@@ -155,3 +155,117 @@ it("rechaza proxies ambiguos o abiertos", () => {
     );
   }
 });
+
+it("no acepta TLS de un proxy no declarado y toma el primer salto no confiable", async () => {
+  const { createAuthHttpTransport } = await import("../src/auth/http-transport.js");
+  const { login, services } = fixture();
+  login.mockResolvedValue(null);
+  const origin = "https://app.example.test";
+  const env = { AUTH_PUBLIC_ORIGIN: origin, NODE_ENV: "production" };
+  const parent = express();
+  parent.set("trust proxy", true);
+  for (const [path, AUTH_TRUSTED_PROXIES] of [
+    ["/direct", ""],
+    ["/proxy", "127.0.0.1, 2001:db8::3"],
+  ]) {
+    const config = { ...env, AUTH_TRUSTED_PROXIES };
+    parent.use(
+      path,
+      createAuthHttpApp(services, createAuthHttpTransport("cookie", "test", config), config),
+    );
+  }
+  const server = parent.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const base = "http://127.0.0.1:" + server.address().port;
+    const headers = {
+      Origin: origin,
+      "X-Requested-With": "XMLHttpRequest",
+      "X-Forwarded-Proto": "https",
+      "X-Forwarded-For": "203.0.113.9, 2001:db8::2, 2001:db8::3",
+    };
+    expect((await fetch(base + "/direct/login", post(credentials, headers))).status).toBe(403);
+    expect(
+      (
+        await fetch(
+          base + "/proxy/login",
+          post(credentials, {
+            ...headers,
+            "X-Forwarded-Proto": "https, http",
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    expect(login).not.toHaveBeenCalled();
+    const response = await fetch(base + "/proxy/login", post(credentials, headers));
+    expect(response.status).toBe(401);
+    expect(login).toHaveBeenLastCalledWith(
+      credentials.email,
+      credentials.password,
+      response.headers.get("X-Request-Id"),
+      "2001:db8::2",
+    );
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("permite HTTP explícito solo para desarrollo local y emite la cookie sin prefijo seguro", async () => {
+  const { createAuthHttpTransport } = await import("../src/auth/http-transport.js");
+  const { login, services } = fixture();
+  const config = {
+    AUTH_PUBLIC_ORIGIN: "http://localhost:5173",
+    AUTH_TRUSTED_PROXIES: "127.0.0.1",
+    NODE_ENV: "development",
+  };
+  expect(() =>
+    createAuthHttpTransport("cookie", "test", { ...config, NODE_ENV: "production" }),
+  ).toThrow("AUTH_PUBLIC_ORIGIN");
+  expect(() =>
+    createAuthHttpTransport("cookie", "test", {
+      ...config,
+      AUTH_PUBLIC_ORIGIN: "http://app.example.test",
+    }),
+  ).toThrow("AUTH_PUBLIC_ORIGIN");
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  let transport;
+  try {
+    transport = createAuthHttpTransport("cookie", "test", config);
+    expect(warning).toHaveBeenCalledOnce();
+  } finally {
+    warning.mockRestore();
+  }
+  login.mockResolvedValue("a".repeat(64));
+  const server = createAuthHttpApp(services, transport, config).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const url = "http://127.0.0.1:" + server.address().port;
+    const response = await fetch(
+      url + "/login",
+      post(credentials, {
+        Origin: config.AUTH_PUBLIC_ORIGIN,
+        "X-Requested-With": "XMLHttpRequest",
+      }),
+    );
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Set-Cookie")).toMatch(/^test=[a-f0-9]{64};/);
+    expect(response.headers.get("Set-Cookie")).toContain("HttpOnly");
+    expect(response.headers.get("Set-Cookie")).not.toContain("Secure");
+
+    for (const protocol of ["https", "https, http"]) {
+      const proxied = await fetch(
+        url + "/login",
+        post(credentials, {
+          Origin: config.AUTH_PUBLIC_ORIGIN,
+          "X-Requested-With": "XMLHttpRequest",
+          "X-Forwarded-Proto": protocol,
+        }),
+      );
+      expect(proxied.status).toBe(403);
+      expect(proxied.headers.get("Set-Cookie")).toBeNull();
+    }
+    expect(login).toHaveBeenCalledOnce();
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+});

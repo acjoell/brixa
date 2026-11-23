@@ -10,7 +10,7 @@ if (!openapiSpec.openapi || !openapiSpec.info || !openapiSpec.paths) {
   );
 }
 
-export function setupApiDocs(app) {
+export function setupApiDocs(app, guard) {
   if (process.env.ENABLE_API_DOCS === "true") {
     const swaggerCsp = helmet.contentSecurityPolicy({
       useDefaults: false,
@@ -27,11 +27,13 @@ export function setupApiDocs(app) {
       },
     });
 
+    if (guard) app.use("/docs", guard);
     app.use("/docs", swaggerCsp);
 
     // Redirección relativa para /docs sin barra final (compatible con localhost, proxy Vite y nginx)
     app.get("/docs", (req, res, next) => {
       if (!req.path.endsWith("/")) {
+        if (guard) return res.redirect(301, "docs/");
         const qIndex = req.originalUrl.indexOf("?");
         const query = qIndex !== -1 ? req.originalUrl.slice(qIndex) : "";
         return res.redirect(301, "docs/" + query);

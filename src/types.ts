@@ -28,6 +28,7 @@ export interface RawOptions {
 export interface UserOptions {
   /** Activa el overlay de Auth al componer el backend. */
   auth?: boolean | undefined;
+  authTransport?: "cookie" | "bearer" | undefined;
   modality: Modality;
   language: Language;
   database?: Database | undefined;

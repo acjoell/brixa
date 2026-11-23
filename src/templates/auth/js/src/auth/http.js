@@ -12,13 +12,11 @@ import { LoginRateLimitedError } from "./login.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
 import { tokenDigest } from "./sessions.js";
 
-// The selected transport supplies session delivery and proof extraction in ⑤-E.
-
 const password = z.string().min(1).refine(isPasswordWithinLimits);
 const credentials = z.strictObject({ email: emailSchema, password });
 const passwordChange = z.strictObject({ currentPassword: password, newPassword: password });
 
-function trustProxy(raw) {
+export function trustProxy(raw) {
   const peers = new BlockList();
   const unspecified = new BlockList();
   unspecified.addAddress("0.0.0.0");
@@ -86,6 +84,8 @@ export function createAuthHttpApp(services, transport, env = process.env) {
     res.set("Cache-Control", "no-store").set("X-Request-Id", randomUUID());
     next();
   });
+
+  if (transport.protect) app.use(transport.protect);
 
   const requestId = (res) => String(res.getHeader("X-Request-Id"));
 

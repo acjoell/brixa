@@ -21,6 +21,7 @@
 export const KNOWN_INSERTION_POINTS: ReadonlySet<string> = new Set([
   "imports",
   "routes",
+  "beforeJson",
   "startup",
 ]);
 

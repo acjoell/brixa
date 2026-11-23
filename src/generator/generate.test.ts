@@ -129,9 +129,10 @@ describe("persistencia de Auth", () => {
               () => false,
             ),
           ).toBe(auth);
-          expect(
-            await fs.readFile(path.join(outputDir, "src/app." + language), "utf8"),
-          ).not.toContain("createAuthHttpApp");
+          const app = await fs.readFile(path.join(outputDir, "src/app." + language), "utf8");
+          expect(app.includes('app.use("/auth", authRoutes);')).toBe(auth);
+          if (auth)
+            expect(app.indexOf('app.use("/auth"')).toBeLessThan(app.indexOf("express.json"));
           expect(schema.includes("export const users")).toBe(auth);
           expect(schema.includes("export const sessions")).toBe(auth);
           expect(schema.includes("export const activationTokens")).toBe(auth);
@@ -394,7 +395,10 @@ describe("overlay criptográfico de Auth", () => {
           () => false,
         ),
       ).toBe(auth);
-      expect(await read("src/app." + language)).not.toContain("createAuthHttpApp");
+      const app = await read("src/app." + language);
+      expect(app.includes('app.use("/auth", authRoutes);')).toBe(auth);
+      expect(app.includes("setupApiDocs(app, protectApiDocs);")).toBe(auth && apiDocs);
+      expect(environment?.includes('AUTH_PUBLIC_ORIGIN: "${AUTH_PUBLIC_ORIGIN-}"')).toBe(auth);
       expect(example.includes("LOGIN_IP_REQUEST_LIMIT=10\n")).toBe(auth);
       expect(readme.includes("LOGIN_ABUSE_WINDOW_MINUTES")).toBe(auth);
       if (auth) {
@@ -407,6 +411,52 @@ describe("overlay criptográfico de Auth", () => {
       }
     },
   );
+
+  it("selecciona Bearer solo en backend y documenta las rutas por modalidad", async () => {
+    const outputDir = await mkTmp("transporte");
+    const options = {
+      outputDir,
+      language: "ts",
+      database: "sqlite",
+      auth: true,
+      apiDocs: true,
+    } as const;
+    expect(await generate({ ...options, modality: "fullstack", authTransport: "bearer" })).toEqual({
+      ok: false,
+      error: { kind: "invalid_auth_transport" },
+    });
+    for (const [modality, authTransport] of [
+      ["backend", "bearer"],
+      ["fullstack", "cookie"],
+    ] as const) {
+      const target = path.join(outputDir, modality);
+      const backend = modality === "fullstack" ? path.join(target, "backend") : target;
+      expect(await generate({ ...options, outputDir: target, modality, authTransport })).toEqual({
+        ok: true,
+      });
+      const startup = await fs.readFile(path.join(backend, "src/index.ts"), "utf8");
+      expect(startup).toMatch(
+        new RegExp(`initializeAuthHttp\\("${authTransport}", "brixa-session-[a-f0-9]{20}"`),
+      );
+      expect(startup.indexOf("await initializeAuthHttp")).toBeLessThan(
+        startup.indexOf("app.listen("),
+      );
+      const spec = JSON.parse(
+        await fs.readFile(path.join(backend, "src/docs/openapi.json"), "utf8"),
+      );
+      expect(Object.keys(spec.paths)).toEqual([
+        "/health",
+        "/auth/login",
+        "/auth/session",
+        "/auth/logout",
+        "/auth/password",
+      ]);
+      expect(spec.servers).toEqual(modality === "fullstack" ? [{ url: "/api" }] : undefined);
+      expect(spec.paths["/auth/session"].get.security).toEqual(
+        authTransport === "bearer" ? [{ session: [] }] : undefined,
+      );
+    }
+  });
 
   it.each([
     ["backend", "js", true],

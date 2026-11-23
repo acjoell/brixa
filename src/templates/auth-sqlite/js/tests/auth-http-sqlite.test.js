@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 
 import { tmpdir } from "node:os";
@@ -7,166 +8,239 @@ import { join } from "node:path";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { expect, it } from "vitest";
-import { app } from "../src/app.js";
-import { getArgon2Limiter } from "../src/auth/argon2-limiter.js";
-import { createPasswordChangeService } from "../src/auth/change-password.js";
-import { createAuthHttpApp } from "../src/auth/http.js";
-import { createLoginService } from "../src/auth/login.js";
+import { expect, it, vi } from "vitest";
 import { hashPassword } from "../src/auth/password-crypto.js";
-import { createSessionService } from "../src/auth/sessions.js";
 import { sqliteActivationDatabase } from "../src/db/activation-write.js";
 import * as schema from "../src/db/schema.js";
 
-it("integra adaptadores con SQLite y un transporte interno de prueba", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "brixa-auth-http-"));
-  const url = "file:" + join(directory, "test.db");
-  const client = createClient({ url });
-  const db = drizzle(client, { schema });
-  const writer = sqliteActivationDatabase({ url });
-  const env = {
-    LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
-    LOGIN_IP_REQUEST_LIMIT: "20",
-  };
-  const userId = randomUUID();
-  const email = "user@example.test";
-  const password = "test-password";
-  const replacement = "replacement-password";
-  let now = Date.now();
-  const clock = () => now;
-  let token;
-  const servers = [];
-  const baseUrl = async (application) => {
-    const server = application.listen(0, "127.0.0.1");
-    servers.push(server);
-    await once(server, "listening");
-    return "http://127.0.0.1:" + server.address().port;
-  };
-  try {
-    await migrate(db, { migrationsFolder: "drizzle" });
-    await db.insert(schema.users).values({
-      id: userId,
-      canonicalIdentifier: email,
-      status: "active",
-      passwordHash: await hashPassword(password),
-      createdAt: new Date(now),
-      updatedAt: new Date(now),
-    });
-    const auth = createAuthHttpApp(
-      {
-        login: await createLoginService(writer, env, clock),
-        sessions: createSessionService(db, env, clock),
-        changePassword: createPasswordChangeService(writer, env, clock),
-      },
-      {
-        // Simulated transport. Credentials never cross the HTTP wire in this fixture.
-        readToken: () => token,
-        establishSession: (res, value) => {
-          token = value;
-          res.status(204).end();
-        },
-        clearSession: () => {
-          token = undefined;
-        },
-      },
-      {},
-    );
-    const base = await baseUrl(auth);
-    const post = (route, data) =>
-      fetch(
-        base + route,
-        data === undefined
-          ? { method: "POST" }
-          : {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(data),
-            },
-      );
-    const session = () => fetch(base + "/session");
-    const wrong = await post("/login", { email, password: "incorrect" });
-    const absent = "absent@example.test";
-    const missing = await post("/login", { email: absent, password });
-    expect(wrong.status).toBe(401);
-    expect(missing.status).toBe(401);
-    expect(await wrong.text()).toBe(await missing.text());
-
-    const limiter = getArgon2Limiter();
-    const gate = Promise.withResolvers();
-    const tasks = Array.from({ length: 10 }, () => limiter(() => gate.promise));
+for (const mode of ["cookie", "bearer"]) {
+  it(`monta Auth con ${mode}, validación persistente y documentación condicionada`, async () => {
+    vi.resetModules();
+    vi.stubEnv("ENABLE_API_DOCS", "true");
+    const directory = await mkdtemp(join(tmpdir(), "brixa-auth-http-"));
+    const url = "file:" + join(directory, "test.db");
+    const client = createClient({ url });
+    const db = drizzle(client, { schema });
+    let server;
+    const env = {
+      AUTH_PUBLIC_ORIGIN: "https://app.example.test",
+      AUTH_TRUSTED_PROXIES: "127.0.0.1, 2001:db8::2",
+      LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
+      LOGIN_IP_REQUEST_LIMIT: "20",
+    };
+    const userId = randomUUID();
+    const email = "user@example.test";
+    const password = "test-password";
+    const replacement = "replacement-password";
+    const proxy = {
+      "X-Forwarded-Proto": "https",
+      "X-Forwarded-For": "2001:db8::3, 2001:db8::2",
+    };
+    const csrf = {
+      Origin: env.AUTH_PUBLIC_ORIGIN,
+      "X-Requested-With": "XMLHttpRequest",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
+    };
     try {
-      const response = await post("/login", { email, password });
-      expect(response.status).toBe(503);
-      expect(response.headers.get("Retry-After")).toBe("5");
-    } finally {
-      gate.resolve();
-      await Promise.allSettled(tasks);
-    }
-
-    const success = await post("/login", { email, password });
-    expect(success.status).toBe(204);
-    expect(await success.text()).toBe("");
-    expect(token).toMatch(/^[a-f0-9]{64}$/);
-    const first = token;
-    expect(await (await session()).json()).toEqual({ userId });
-    expect((await post("/logout")).status).toBe(204);
-    expect(token).toBeUndefined();
-    token = first;
-    expect((await session()).status).toBe(401);
-    token = "not-a-session";
-    expect((await session()).status).toBe(401);
-
-    expect((await post("/login", { email, password })).status).toBe(204);
-    const second = token;
-    const passwordChange = await post("/password", {
-      currentPassword: password,
-      newPassword: replacement,
-    });
-    expect(passwordChange.status).toBe(204);
-    token = second;
-    expect((await session()).status).toBe(401);
-
-    expect((await post("/login", { email, password: replacement })).status).toBe(204);
-    now += 30 * 60_000;
-    expect((await session()).status).toBe(401);
-
-    for (let attempt = 0; attempt < 4; attempt++) {
-      expect((await post("/login", { email: absent, password })).status).toBe(401);
-    }
-    const limited = await post("/login", { email: absent, password });
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
-
-    const events = await db.select().from(schema.auditLogSystem);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          event: "login_succeeded",
-          requestId: success.headers.get("X-Request-Id"),
-        }),
-        expect.objectContaining({
-          event: "password_changed",
-          requestId: passwordChange.headers.get("X-Request-Id"),
-        }),
-      ]),
-    );
-    const audit = JSON.stringify(events);
-    for (const secret of [password, replacement, first, second])
-      if (secret) expect(audit).not.toContain(secret);
-
-    // The generated parent has no transport and does not mount Auth.
-    const unmounted = await baseUrl(app);
-    for (const route of ["login", "session", "logout", "password"]) {
-      const response = await fetch(unmounted + "/auth/" + route, {
-        method: route === "session" ? "GET" : "POST",
+      await migrate(db, { migrationsFolder: "drizzle" });
+      await db.insert(schema.users).values({
+        id: userId,
+        canonicalIdentifier: email,
+        status: "active",
+        passwordHash: await hashPassword(password),
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
-      expect(response.status).toBe(404);
+      const { app } = await import("../src/app.js");
+      const { initializeAuthHttp } = await import("../src/auth/http-runtime.js");
+      await initializeAuthHttp(mode, "brixa-example", db, sqliteActivationDatabase({ url }), env);
+      server = app.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      const base = "http://127.0.0.1:" + server.address().port;
+      const get = (path, auth = {}) =>
+        fetch(base + path, { headers: { ...proxy, ...auth }, redirect: "manual" });
+      const post = (path, body, auth = {}, origin = csrf) =>
+        fetch(base + "/auth" + path, {
+          method: "POST",
+          headers: {
+            ...proxy,
+            ...origin,
+            ...auth,
+            ...(body ? { "Content-Type": "application/json" } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+
+      const docs = existsSync("src/docs/openapi.json");
+      for (const path of [
+        "/docs",
+        "/docs/",
+        "/docs/swagger-ui-init.js",
+        "/docs/swagger-ui.css",
+        "/DOCS/swagger-ui-bundle.js",
+      ]) {
+        expect((await get(path)).status).toBe(docs ? 401 : 404);
+      }
+      expect((await get("/openapi.json")).status).toBe(404);
+      expect((await fetch(base + "/auth/session")).status).toBe(403);
+      expect((await get("/auth/session")).status).toBe(401);
+      expect((await get("/auth/session", { Authorization: "Bearer x" })).status).toBe(401);
+      expect((await post("/login", { email })).status).toBe(400);
+
+      if (mode === "cookie") {
+        for (const rejected of [
+          {},
+          { ...csrf, Origin: "https://foreign.example.test", Referer: env.AUTH_PUBLIC_ORIGIN },
+          { ...csrf, Origin: "null", "X-Forwarded-Host": "null" },
+          { ...csrf, "Sec-Fetch-Site": "cross-site" },
+          { ...csrf, "X-Requested-With": "wrong" },
+        ]) {
+          expect((await post("/login", { email, password }, {}, rejected)).status).toBe(403);
+        }
+      }
+
+      const absent = "absent@example.test";
+      const incorrect = await post("/login", { email, password: "incorrect" });
+      const missing = await post("/login", { email: absent, password });
+      expect(incorrect.status).toBe(401);
+      expect(missing.status).toBe(401);
+      expect(await incorrect.text()).toBe(await missing.text());
+
+      const { getArgon2Limiter: runtimeLimiter } = await import("../src/auth/argon2-limiter.js");
+      const gate = Promise.withResolvers();
+      const tasks = Array.from({ length: 10 }, () => runtimeLimiter()(() => gate.promise));
+      try {
+        const saturated = await post("/login", { email, password });
+        expect(saturated.status).toBe(503);
+        expect(saturated.headers.get("Retry-After")).toBe("5");
+      } finally {
+        gate.resolve();
+        await Promise.allSettled(tasks);
+      }
+
+      async function login(value) {
+        const response = await post(
+          "/login",
+          { email, password: value },
+          {},
+          {
+            Referer: env.AUTH_PUBLIC_ORIGIN + "/login",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        );
+        const cookie = response.headers.get("Set-Cookie");
+        let auth;
+        if (mode === "cookie") {
+          expect(response.status).toBe(204);
+          expect(await response.text()).toBe("");
+          expect(cookie).toMatch(/^__Host-brixa-example=[a-f0-9]{64};/);
+          expect(cookie).toContain("Max-Age=43200");
+          for (const attr of ["HttpOnly", "Secure", "SameSite=Lax", "Path=/", "Expires="])
+            expect(cookie).toContain(attr);
+          expect(cookie).not.toContain("Domain=");
+          auth = { Cookie: cookie.split(";")[0] };
+        } else {
+          expect(response.status).toBe(200);
+          expect(cookie).toBeNull();
+          const { token } = await response.json();
+          expect(token).toMatch(/^[a-f0-9]{64}$/);
+          auth = { Authorization: "Bearer " + token };
+        }
+        return { auth, id: response.headers.get("X-Request-Id") };
+      }
+
+      const { auth: first, id } = await login(password);
+      const session = await get("/auth/session", first);
+      expect(await session.json()).toEqual({ userId });
+      expect(session.headers.get("Cache-Control")).toBe("no-store");
+      if (docs) {
+        for (const path of ["/docs/", "/docs/swagger-ui-init.js", "/docs/swagger-ui.css"]) {
+          const response = await get(path, first);
+          expect(response.status).toBe(200);
+          expect(response.headers.get("Cache-Control")).toBe("no-store");
+        }
+        const credential = (first.Cookie ?? first.Authorization).slice(-64);
+        const redirect = await get("/docs?token=" + credential, first);
+        expect(redirect.status).toBe(301);
+        expect(redirect.headers.get("Location")).toBe("docs/");
+        expect(await redirect.text()).not.toContain(credential);
+        for (const path of ["/docs/", "/docs/swagger-ui-init.js"]) {
+          expect(await (await get(path, first)).text()).not.toContain(credential);
+        }
+      }
+
+      const mixed = {
+        Authorization: "Bearer " + "a".repeat(64),
+        Cookie: "__Host-brixa-example=" + "a".repeat(64),
+        ...first,
+      };
+      expect((await get("/auth/session", mixed)).status).toBe(401);
+      if (mode === "cookie") {
+        expect((await post("/logout", undefined, first, {})).status).toBe(403);
+        expect(
+          (await get("/auth/session", { Cookie: first.Cookie + "; " + first.Cookie })).status,
+        ).toBe(401);
+      } else {
+        expect(
+          (
+            await get("/auth/session", {
+              Authorization: first.Authorization + ", " + first.Authorization,
+            })
+          ).status,
+        ).toBe(401);
+      }
+      const logout = await post("/logout", undefined, first);
+      expect(logout.status).toBe(204);
+      if (mode === "cookie") {
+        expect(logout.headers.get("Set-Cookie")).toMatch(
+          /^__Host-brixa-example=; Path=\/; Expires=Thu, 01 Jan 1970 .*; HttpOnly; Secure; SameSite=Lax$/,
+        );
+      }
+      expect((await get("/auth/session", first)).status).toBe(401);
+      if (docs) expect((await get("/docs/swagger-ui-init.js", first)).status).toBe(401);
+
+      const { auth: second } = await login(password);
+      const changed = await post(
+        "/password",
+        {
+          currentPassword: password,
+          newPassword: replacement,
+        },
+        second,
+      );
+      expect(changed.status).toBe(204);
+      expect((await get("/auth/session", second)).status).toBe(401);
+      await login(replacement);
+      for (let attempt = 0; attempt < 4; attempt++)
+        expect((await post("/login", { email: absent, password })).status).toBe(401);
+      const limited = await post("/login", { email: absent, password });
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+
+      const events = await db.select().from(schema.auditLogSystem);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: "login_succeeded", requestId: id }),
+          expect.objectContaining({
+            event: "password_changed",
+            requestId: changed.headers.get("X-Request-Id"),
+          }),
+        ]),
+      );
+      for (const secret of [
+        password,
+        replacement,
+        ...Object.values(first),
+        ...Object.values(second),
+      ])
+        expect(JSON.stringify(events)).not.toContain(secret.slice(-64));
+    } finally {
+      if (server) await new Promise((resolve) => server?.close(() => resolve()));
+      client.close();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
     }
-  } finally {
-    await Promise.all(
-      servers.map((server) => new Promise((resolve) => server.close(() => resolve()))),
-    );
-    client.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-}, 15_000);
+  }, 15_000);
+}

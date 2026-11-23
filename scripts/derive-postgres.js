@@ -133,6 +133,8 @@ const groups = {
       "src/auth/email.ts",
       "src/auth/login.ts",
       "src/auth/http.ts",
+      "src/auth/http-transport.ts",
+      "src/auth/http-runtime.ts",
       "src/auth/login-abuse.ts",
       "src/auth/change-password.ts",
       "src/auth/recover-admin.ts",

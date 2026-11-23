@@ -1,4 +1,4 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
 import spec from "./openapi.json" with { type: "json" };
@@ -18,7 +18,7 @@ if (!openapiSpec.openapi || !openapiSpec.info || !openapiSpec.paths) {
   );
 }
 
-export function setupApiDocs(app: Express): void {
+export function setupApiDocs(app: Express, guard?: RequestHandler): void {
   if (process.env.ENABLE_API_DOCS === "true") {
     const swaggerCsp = helmet.contentSecurityPolicy({
       useDefaults: false,
@@ -35,11 +35,13 @@ export function setupApiDocs(app: Express): void {
       },
     });
 
+    if (guard) app.use("/docs", guard);
     app.use("/docs", swaggerCsp);
 
     // Redirección relativa para /docs sin barra final (compatible con localhost, proxy Vite y nginx)
     app.get("/docs", (req: Request, res: Response, next: NextFunction) => {
       if (!req.path.endsWith("/")) {
+        if (guard) return res.redirect(301, "docs/");
         const qIndex = req.originalUrl.indexOf("?");
         const query = qIndex !== -1 ? req.originalUrl.slice(qIndex) : "";
         return res.redirect(301, "docs/" + query);

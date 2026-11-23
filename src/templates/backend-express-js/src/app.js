@@ -58,6 +58,7 @@ app.use((req, res, next) => {
   return corsMiddleware(req, res, next);
 });
 
+// @@INSERT:beforeJson@@
 app.use(express.json({ limit: "100kb" }));
 
 app.get("/health", (_req, res) => {

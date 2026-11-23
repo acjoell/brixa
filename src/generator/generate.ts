@@ -6,6 +6,7 @@
  * Aplica overlays opcionales (proxy fullstack, persistencia con PostgreSQL y Drizzle ORM).
  * Sin dependencias externas ni motor de plantillas.
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ import {
 
 export type GenerateError =
   | { kind: "auth_requires_backend_database" }
+  | { kind: "invalid_auth_transport" }
   | { kind: "unsupported_combination"; modality: string; language: string; database?: string }
   | { kind: "copy_error"; message: string };
 
@@ -857,7 +859,8 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
         '      LOGIN_IP_REQUEST_LIMIT: "${LOGIN_IP_REQUEST_LIMIT-10}"\n' +
         '      LOGIN_ABUSE_WINDOW_MINUTES: "${LOGIN_ABUSE_WINDOW_MINUTES-15}"\n' +
         '      LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"\n' +
-        '      AUTH_TRUSTED_PROXIES: "${AUTH_TRUSTED_PROXIES-}"',
+        '      AUTH_TRUSTED_PROXIES: "${AUTH_TRUSTED_PROXIES-}"\n' +
+        '      AUTH_PUBLIC_ORIGIN: "${AUTH_PUBLIC_ORIGIN-}"',
     );
     if (options.database === "postgres") {
       const runtimeLine = /^ {6}DATABASE_URL: .+$/gm;
@@ -872,7 +875,12 @@ async function composeDockerEnv(outputDir: string, options: UserOptions): Promis
       }
     }
     await fs.writeFile(composePath, updated, "utf8");
-    if (options.modality === "fullstack") await appendEnvBlock(envPath, AUTH_ENV_EXAMPLE, "auth");
+    if (options.modality === "fullstack")
+      await appendEnvBlock(
+        envPath,
+        AUTH_ENV_EXAMPLE + "AUTH_PUBLIC_ORIGIN=https://app.example.test\n",
+        "auth",
+      );
   }
   await cleanupComposeInsertionPoints(composePath);
 }
@@ -1073,10 +1081,125 @@ async function copyAuthMigrations(source: string, destination: string): Promise<
   await fs.cp(source, destination, { recursive: true, force: false });
 }
 
+async function documentAuthRoutes(backendDir: string, options: UserOptions) {
+  const file = path.join(backendDir, "src/docs/openapi.json");
+  const spec = JSON.parse(await fs.readFile(file, "utf8")) as {
+    paths: Record<string, unknown>;
+    servers?: { url: string }[];
+    components?: Record<string, unknown>;
+  };
+  const bearer = options.authTransport === "bearer";
+  if (options.modality === "fullstack") spec.servers = [{ url: "/api" }];
+  if (bearer)
+    spec.components = {
+      ...spec.components,
+      securitySchemes: {
+        session: { type: "http", scheme: "bearer" },
+      },
+    };
+  const credential = { type: "string", format: "password", maxLength: 128 };
+  const requestBody = (properties: Record<string, unknown>) => ({
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          properties,
+          required: Object.keys(properties),
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+  const jsonResponse = (key: string) => ({
+    description: "Operación completada",
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          properties: { [key]: { type: "string" } },
+          required: [key],
+        },
+      },
+    },
+  });
+  const rejected = {
+    400: { description: "Solicitud inválida" },
+    401: { description: "Credenciales o sesión no válidas" },
+    403: { description: "Petición rechazada por las protecciones del transporte" },
+    500: { description: "Error interno" },
+  };
+  const noContent = { description: "Operación completada sin cuerpo" };
+  const retry = { headers: { "Retry-After": { schema: { type: "integer", minimum: 1 } } } };
+  const secured = bearer
+    ? { security: [{ session: [] }] }
+    : { description: "Requiere la cookie de sesión." };
+  const csrf = bearer
+    ? {}
+    : {
+        parameters: [
+          {
+            name: "X-Requested-With",
+            in: "header",
+            required: true,
+            schema: { type: "string", enum: ["XMLHttpRequest"], default: "XMLHttpRequest" },
+          },
+        ],
+      };
+  Object.assign(spec.paths, {
+    "/auth/login": {
+      post: {
+        summary: "Iniciar sesión",
+        ...csrf,
+        requestBody: requestBody({
+          email: { type: "string", format: "email" },
+          password: credential,
+        }),
+        responses: {
+          ...rejected,
+          ...(bearer ? { 200: jsonResponse("token") } : { 204: noContent }),
+          429: { description: "Límite de intentos alcanzado", ...retry },
+          503: { description: "Verificación saturada", ...retry },
+        },
+      },
+    },
+    "/auth/session": {
+      get: {
+        summary: "Consultar la sesión",
+        ...secured,
+        responses: { ...rejected, 200: jsonResponse("userId") },
+      },
+    },
+    "/auth/logout": {
+      post: {
+        summary: "Cerrar sesión",
+        ...secured,
+        ...csrf,
+        responses: { ...rejected, 204: noContent },
+      },
+    },
+    "/auth/password": {
+      post: {
+        summary: "Cambiar la contraseña",
+        ...secured,
+        ...csrf,
+        requestBody: requestBody({ currentPassword: credential, newPassword: credential }),
+        responses: {
+          ...rejected,
+          204: noContent,
+          503: { description: "Verificación saturada", ...retry },
+        },
+      },
+    },
+  });
+  await fs.writeFile(file, JSON.stringify(spec, null, 2) + "\n", "utf8");
+}
+
 async function applyAuthOverlay(
   backendDir: string,
   language: Language,
   database: Database,
+  options: UserOptions,
   composeRoot?: string,
 ): Promise<void> {
   const overlay = path.join(templatesDir(), "auth", language);
@@ -1102,7 +1225,18 @@ async function applyAuthOverlay(
   await copyAuthMigrations(path.join(persistence, "drizzle"), path.join(backendDir, "drizzle"));
   await copyDir(path.join(persistence, language), backendDir, path.basename(backendDir));
   await copyDir(overlay, backendDir, path.basename(backendDir));
-  await appendEnvBlock(path.join(backendDir, ".env.example"), AUTH_ENV_EXAMPLE, "auth");
+  if (options.apiDocs) await documentAuthRoutes(backendDir, options);
+  const mode = options.authTransport ?? "cookie";
+  const origin =
+    options.modality === "fullstack" ? "http://localhost:5173" : "http://localhost:3000";
+  await appendEnvBlock(
+    path.join(backendDir, ".env.example"),
+    AUTH_ENV_EXAMPLE +
+      (composeRoot === backendDir
+        ? "AUTH_PUBLIC_ORIGIN=https://app.example.test\n"
+        : `NODE_ENV=development\nAUTH_PUBLIC_ORIGIN=${origin}\n`),
+    "auth",
+  );
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
   const postgres = database === "postgres";
   const local = postgres
@@ -1110,18 +1244,28 @@ async function applyAuthOverlay(
     : "Configura `DATABASE_URL` con la misma ruta SQLite en archivo que usa el backend.";
   await fs.appendFile(
     path.join(backendDir, "README.md"),
-    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n\n## Contadores de abuso de login\n\nConfigura \`LOGIN_IDENTIFIER_FAILURE_LIMIT\` (5), \`LOGIN_IP_REQUEST_LIMIT\` (10) y \`LOGIN_ABUSE_WINDOW_MINUTES\` (15) con enteros positivos hasta 2147483647. Genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\` y configura la misma clave secreta en todas las instancias que compartan BD. Cambiarla reinicia efectivamente los presupuestos existentes. Con Compose, define estas variables en el entorno o en el archivo \`.env\` de la raíz. La primera solicitud por IP o el primer fallo por identificador abren ventanas independientes. La última plaza se contabiliza y los rechazos posteriores no aplazan el vencimiento. Solo se almacenan claves HMAC, recuentos y vencimientos. SQLite en archivo utiliza el reloj del host compartido. El login consume primero el presupuesto de una IP validada y luego reserva una plaza por identificador durante 60 segundos. Los fallos confirmados y las reservas activas ocupan el presupuesto durante la admisión. Las reservas vencidas liberan su plaza y una verificación tardía no puede emitir sesión. En cada solicitud admitida por IP, la limpieza procesa hasta 100 contadores y 100 reservas vencidas. El adaptador HTTP deberá proporcionar una IP confiable y convertir el tiempo restante a Retry-After.\n`,
+    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n\n## Contadores de abuso de login\n\nConfigura \`LOGIN_IDENTIFIER_FAILURE_LIMIT\` (5), \`LOGIN_IP_REQUEST_LIMIT\` (10) y \`LOGIN_ABUSE_WINDOW_MINUTES\` (15) con enteros positivos hasta 2147483647. Genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\` y configura la misma clave secreta en todas las instancias que compartan BD. Cambiarla reinicia efectivamente los presupuestos existentes. Con Compose, define estas variables en el entorno o en el archivo \`.env\` de la raíz. La primera solicitud por IP o el primer fallo por identificador abren ventanas independientes. La última plaza se contabiliza y los rechazos posteriores no aplazan el vencimiento. Solo se almacenan claves HMAC, recuentos y vencimientos. SQLite en archivo utiliza el reloj del host compartido. El login consume primero el presupuesto de una IP validada y luego reserva una plaza por identificador durante 60 segundos. Los fallos confirmados y las reservas activas ocupan el presupuesto durante la admisión. Las reservas vencidas liberan su plaza y una verificación tardía no puede emitir sesión. En cada solicitud admitida por IP, la limpieza procesa hasta 100 contadores y 100 reservas vencidas. El adaptador HTTP proporciona una IP confiable y convierte el tiempo restante a Retry-After.\n`,
   );
   await fs.appendFile(
     path.join(backendDir, "README.md"),
-    "\n## Adaptadores HTTP de Auth\n\n" +
-      "Los adaptadores de login, sesión, logout y cambio de contraseña se generan sin montar. " +
-      "La aplicación permanente esperará al transporte de sesión de ⑤-E. " +
-      "Al habilitarlos, monta la subaplicación antes del lector JSON general para aplicar su límite y sanear los errores de lectura.\n\n" +
-      "Deja `AUTH_TRUSTED_PROXIES` vacío si el backend recibe tráfico directamente. " +
-      "Detrás de un proxy, configura solo las IP literales de los saltos controlados, separadas por comas, en el entorno del backend o en el `.env` raíz de Compose. " +
-      "El proxy de entrada debe eliminar `X-Forwarded-For` del cliente y construir la cadena con IP verificadas. " +
-      "Restringe el acceso directo al backend para que solo los proxies previstos puedan alcanzarlo. " +
+    "\n## Auth HTTP\n\n" +
+      "El backend monta `/auth/login`, `/auth/session`, `/auth/logout` y `/auth/password`. " +
+      (options.modality === "fullstack"
+        ? "Desde el frontend utiliza `/api/auth/…` en el mismo origen. "
+        : "") +
+      (mode === "cookie"
+        ? "El login devuelve 204 y fija una cookie HttpOnly. Envía `X-Requested-With: XMLHttpRequest` en las mutaciones mediante fetch y conserva las cookies del mismo origen. El navegador proporciona Origin o Referer. "
+        : "El login devuelve `{ token }`. Envía `Authorization: Bearer <token>` al consultar la sesión, cerrar sesión o cambiar la contraseña. ") +
+      "Si habilitas API Docs, utiliza una sesión válida para `/docs/` y todos sus recursos. " +
+      (mode === "bearer"
+        ? "Cada petición de documentación requiere la cabecera Authorization, incluidas las de recursos estáticos. "
+        : "") +
+      "\n\nConfigura `AUTH_PUBLIC_ORIGIN` con el origen público canónico, sin barra final. " +
+      "HTTPS es obligatorio salvo desarrollo explícito con `NODE_ENV=development`, origen localhost o 127.0.0.1 y conexión local. " +
+      "Para Compose configura el origen HTTPS público en el `.env` raíz. Si utilizas varios orígenes de desarrollo, ajusta el origen configurado al puerto que realmente utiliza Vite.\n\n" +
+      "Deja `AUTH_TRUSTED_PROXIES` vacío para conexiones directas. Detrás de un proxy, configura solo las IP literales de los saltos controlados, separadas por comas. " +
+      "El proxy de entrada debe eliminar `X-Forwarded-For` y `X-Forwarded-Proto` del cliente. Construye la cadena con IP verificadas y entrega un único valor `https` al backend si la conexión pública se estableció mediante TLS. " +
+      "Si TLS termina antes del Nginx de fullstack, limita el acceso a su listener al terminador confiable y configura allí el valor https de X-Forwarded-Proto para las conexiones reenviadas por ese terminador. Restringe el acceso directo al backend. " +
       "Express camina desde el socket hasta el primer salto no confiable. No se admiten nombres, rangos ni conteos de saltos.\n",
   );
   if (composeRoot) {
@@ -1155,6 +1299,15 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
   const database = options.database ?? "none";
   if (options.auth && (modality === "frontend" || database === "none")) {
     return { ok: false, error: { kind: "auth_requires_backend_database" } };
+  }
+
+  if (
+    options.authTransport !== undefined &&
+    (!options.auth ||
+      !["cookie", "bearer"].includes(options.authTransport) ||
+      (modality === "fullstack" && options.authTransport !== "cookie"))
+  ) {
+    return { ok: false, error: { kind: "invalid_auth_transport" } };
   }
 
   const combinationKey =
@@ -1242,6 +1395,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
           backendDest,
           language,
           database,
+          options,
           options.docker ? outputDir : undefined,
         );
       await cleanupUnresolvedFrontendInsertionPoints(frontendDest, language);
@@ -1304,6 +1458,7 @@ export async function generate(options: UserOptions): Promise<GenerateResult> {
           outputDir,
           language,
           database,
+          options,
           options.docker ? outputDir : undefined,
         );
       await composeBackendInsertionPoints(outputDir, options);
@@ -1403,6 +1558,9 @@ async function composeBackendInsertionPoints(
     const content = await fs.readFile(file, "utf8");
     const cleaned = cleanupInsertionPoints(content);
     const insertions: InsertionMap = {};
+    const add = (point: string, contributor: string, lines: string[]) => {
+      (insertions[point] ??= []).push({ contributor, lines });
+    };
     const contributors = [];
     if (options.apiDocs) contributors.push("api-docs");
     if (options.auth && basename === "index") contributors.push("auth");
@@ -1412,10 +1570,44 @@ async function composeBackendInsertionPoints(
       const overlay = path.join(templatesDir(), contributor, options.language);
       for (const point of ["imports", basename === "app" ? "routes" : "startup"]) {
         const lines = await readFragment(overlay, `${basename}.${point}`);
-        (insertions[point] ??= []).push({ contributor, lines });
+        if (options.auth && basename === "app" && point === "routes") {
+          lines[0] = "setupApiDocs(app, protectApiDocs);";
+        }
+        add(point, contributor, lines);
       }
     }
-    const result = contributors.length ? resolveInsertionPoints(content, insertions) : cleaned;
+    if (options.auth && basename === "app") {
+      add("imports", "auth", [
+        options.apiDocs
+          ? 'import { authRoutes, protectApiDocs } from "./auth/http-runtime.js";'
+          : 'import { authRoutes } from "./auth/http-runtime.js";',
+      ]);
+      add("beforeJson", "auth", ['app.use("/auth", authRoutes);']);
+    }
+    if (options.auth && basename === "index") {
+      const name =
+        "brixa-session-" +
+        createHash("sha256")
+          .update(path.basename(path.resolve(options.outputDir)))
+          .digest("hex")
+          .slice(0, 20);
+      const sqlite = options.database === "sqlite";
+      add("startup", "http-auth", [
+        'const { initializeAuthHttp } = await import("./auth/http-runtime.js");',
+        'const { db } = await import("./db/client.js");',
+        ...(sqlite
+          ? [
+              'const { sqliteActivationDatabase } = await import("./db/activation-write.js");',
+              'const { requirePersistentSqliteUrl } = await import("./db/local-admin.js");',
+              "const writer = sqliteActivationDatabase({ url: requirePersistentSqliteUrl(process.env.DATABASE_URL) });",
+            ]
+          : ["const writer = db;"]),
+        `await initializeAuthHttp(${JSON.stringify(options.authTransport ?? "cookie")}, ${JSON.stringify(name)}, db, writer);`,
+      ]);
+    }
+    const result = Object.keys(insertions).length
+      ? resolveInsertionPoints(content, insertions)
+      : cleaned;
     if (result !== content) await fs.writeFile(file, result, "utf8");
   }
 }
@@ -1577,6 +1769,8 @@ export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
     case "auth_requires_backend_database":
       return "Auth requiere un backend con base de datos.";
+    case "invalid_auth_transport":
+      return "Usa cookies o Bearer con Auth en un backend independiente. Fullstack solo admite cookies.";
     case "unsupported_combination": {
       const supported = SUPPORTED_COMBINATIONS.map((k) => k.replace(/\+/g, " + ")).join(", ");
       const combo =

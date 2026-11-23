@@ -19,8 +19,8 @@ type Services = {
   changePassword: ReturnType<typeof createPasswordChangeService>;
 };
 
-// The selected transport supplies session delivery and proof extraction in ⑤-E.
 export type AuthHttpTransport = {
+  protect?: express.RequestHandler;
   readToken(req: Request): unknown;
   establishSession(res: Response, token: string): void | Promise<void>;
   clearSession(res: Response): void | Promise<void>;
@@ -30,7 +30,7 @@ const password = z.string().min(1).refine(isPasswordWithinLimits);
 const credentials = z.strictObject({ email: emailSchema, password });
 const passwordChange = z.strictObject({ currentPassword: password, newPassword: password });
 
-function trustProxy(raw: string | undefined) {
+export function trustProxy(raw: string | undefined) {
   const peers = new BlockList();
   const unspecified = new BlockList();
   unspecified.addAddress("0.0.0.0");
@@ -102,6 +102,8 @@ export function createAuthHttpApp(
     res.set("Cache-Control", "no-store").set("X-Request-Id", randomUUID());
     next();
   });
+
+  if (transport.protect) app.use(transport.protect);
 
   const requestId = (res: Response) => String(res.getHeader("X-Request-Id"));
 
