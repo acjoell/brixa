@@ -7,6 +7,7 @@ import http from "node:http";
 import https from "node:https";
 import { networkInterfaces, tmpdir } from "node:os";
 import path from "node:path";
+import { URL, URLSearchParams } from "node:url";
 import { generate } from "../src/generator/generate.ts";
 import { startBackendServer, stopProcess } from "./verify-generated.js";
 
@@ -22,7 +23,10 @@ function command(label, executable, args, options = {}) {
   try {
     execFileSync(executable, args, { timeout: 120_000, stdio: "pipe", ...options });
   } catch (error) {
-    throw new Error(`${label}: ${error.code ?? error.status ?? error.signal}.`);
+    const { code, status, signal } = error;
+    const cause = { code, status, signal };
+    // eslint-disable-next-line preserve-caught-error -- La salida del subproceso puede contener secretos.
+    throw new Error(`${label}: ${code ?? status ?? signal}.`, { cause });
   }
 }
 

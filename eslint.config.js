@@ -29,6 +29,7 @@ export default tseslint.config(
   },
   {
     files: ["scripts/**/*.js"],
+    ignores: ["scripts/fixtures/auth-https/activation-fixture.js"],
     languageOptions: {
       globals: {
         process: "readonly",
@@ -36,6 +37,19 @@ export default tseslint.config(
         setTimeout: "readonly",
         clearTimeout: "readonly",
         fetch: "readonly",
+      },
+    },
+  },
+  {
+    files: ["scripts/fixtures/auth-https/activation-fixture.js"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        fetch: "readonly",
+        history: "readonly",
+        location: "readonly",
+        URLSearchParams: "readonly",
+        window: "readonly",
       },
     },
   },
