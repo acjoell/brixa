@@ -247,7 +247,7 @@ describe("cleanupInsertionPoints", () => {
     );
   });
 
-  it("KNOWN_INSERTION_POINTS contiene exactamente imports, routes y startup", () => {
-    expect([...KNOWN_INSERTION_POINTS].sort()).toEqual(["imports", "routes", "startup"]);
+  it("KNOWN_INSERTION_POINTS contiene exactamente beforeJson, imports, routes y startup", () => {
+    expect([...KNOWN_INSERTION_POINTS].sort()).toEqual(["beforeJson", "imports", "routes", "startup"]);
   });
 });
