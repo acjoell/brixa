@@ -64,8 +64,9 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-017b | COMPLETADA (2026-11-17; D-070, D-071, D-073, D-074, D-075 y D-076/T-022) | T-017a, INV-02 |
 | T-013e | PENDIENTE | D-052 y cobertura existente de T-013d |
 | T-018 | COMPLETADA | Implementación e integración completadas; CI normal aprobado y CI Full con SV-5, Docker y PostgreSQL aprobado según confirmación del desarrollador |
-| T-014a | EN PROGRESO (①–④ aceptadas, ⑤ pendiente) | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
-| T-014a-ui | BLOQUEADA | T-014a, T-017a-ui |
+| T-014a | COMPLETADA (backend y generador; ①–⑤, CLI público y verificación final acreditados) | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
+| T-029 | EN PROGRESO (CI multiplataforma del nuevo SHA pendiente) | T-017a-ui y T-023 (completadas); D-112 |
+| T-014a-ui | PENDIENTE (tras T-029) | T-014a, T-017a-ui y T-029 |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
 | T-014c | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018; decisiones de arquitectura RLS consolidadas en D-094 a D-097 y D-104 (comprobación de sintaxis Drizzle Kit pendiente en implementación) |
@@ -73,7 +74,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 **Orden de ejecución propuesto (actualizado):**
 
-T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b ✔ → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
+T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b ✔ → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a ✔ → T-029 → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
 
 - T-014c y T-014b1 no dependen entre sí. El orden lineal es de conveniencia, no una restricción técnica.
 - T-017a y T-017a-ui ya están completadas; la incorporación de T-023 no altera ni reabre la composición de overlays existente, sino que se integra con el mecanismo existente.
@@ -635,15 +636,45 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 
 ---
 
+### T-029 — Modernización del frontend base
+
+**Estado:** EN PROGRESO. Implementación y validación local aprobadas. Cierre pendiente del CI multiplataforma del nuevo SHA.
+**Aprobación:** Aprobada en D-112.
+**Dependencias:** T-017a-ui y T-023 (completadas). Precede a T-014a-ui porque la base visual se genera también en proyectos sin Auth.
+
+**Objetivo:** modernizar las vistas frontend existentes en frontend independiente y fullstack. Incorporar Tailwind CSS v4 al stack base React + Vite y una bienvenida funcional con identidad visual de Brixa fácilmente reemplazable.
+
+**Criterios de aceptación:**
+- Tailwind CSS v4 está presente en las variantes React TS y JS, con o sin Auth, sin un selector nuevo en el CLI.
+- Las vistas existentes son minimalistas, funcionales, profesionales, responsive y accesibles, con HTML semántico y componentes React propios. La organización por funcionalidad y la separación de responsabilidades siguen D-112.
+- Se conservan la composición de overlays, i18n opcional y la derivación JS de D-098. La bienvenida de proyectos sin Auth carece de infraestructura Auth.
+- Verificar compilación, lint, sincronización TS/JS y funcionamiento de la bienvenida generada, incluida su composición con i18n.
+
+
+**Evidencia de aceptación**
+
+- **Stack base.** Las plantillas React TS y JS fijan `tailwindcss` y `@tailwindcss/vite` en 4.3.5 e importan tema y utilidades sin Preflight. Las pruebas de generación comprueban su inclusión en frontend independiente y fullstack, su composición con i18n y el proxy, y su ausencia en backend independiente. Auth compone sobre la misma base React. El responsable confirmó que una utilidad de Tailwind funcionó en un proyecto generado.
+- **Bienvenida y temas.** El responsable aprobó el rediseño de escritorio y móvil con identidad de Brixa y los temas Sistema, Claro y Oscuro. Los logotipos se sirven desde `public/brand`. El selector usa controles HTML nativos con etiquetas localizadas y foco visible. El agente comprobó en Chromium las variantes de escritorio y móvil, el contraste, el teclado, la composición EN/ES, la selección manual, la persistencia de la preferencia visual, la vuelta a Sistema y su respuesta a cambios del sistema, incluso con almacenamiento inválido o bloqueado. Un script local aplica la preferencia antes de React bajo la CSP existente.
+- **Composición y paridad.** Se mantienen los overlays, el i18n opcional y la derivación determinista según D-098, incluido el script de tema distribuido en ambas variantes. La bienvenida base carece de infraestructura Auth. El agente verificó compilación, lint y sincronización TS/JS mediante las comprobaciones ordinarias.
+- **Docker y Nginx.** El responsable confirmó la validación manual del proyecto temporal. Esta evidencia corresponde a la comprobación anterior al incremento de temas.
+- **Regresión i18n V2.** El renderizado con `react-dom/server` falló porque `App` leía `document.title` durante el renderizado, y el selector de tema también accedía al DOM al inicializar su estado. El punto de entrada del navegador ahora pasa el nombre generado y la preferencia inicial como props. V2 verifica el renderizado sin DOM con el contenido actual, y V4 comprueba ambos títulos localizados en el build. Después de la corrección, el agente verificó V1–V4 en `frontend+ts+i18n` y `fullstack+js+sqlite+i18n`.
+- **Matriz integral.** El responsable confirmó que la ejecución final de `npm run verify:generated` pasó después de corregir V2.
+
+**Pendiente de cierre:** verificar el CI multiplataforma del nuevo SHA. T-014a-ui sigue como siguiente tarea.
+
+---
+
 ### T-014a-ui — Vistas de autenticación (aplicación completa)
 
-**Estado:** PENDIENTE (prerrequisitos T-014a y T-017a-ui completos).
-**Aprobación:** Aprobado (arquitectura frontend: React Router declarativo condicionado a Auth, componentes pequeños, presentación separada de la lógica, accesibilidad explícita, D-090). Estilos y pruebas de componentes pendientes.
-**Dependencias:** T-014a, T-017a-ui.
+**Estado:** PENDIENTE (T-014a y T-017a-ui completas; se implementa tras T-029).
+**Aprobación:** Arquitectura, diseño y modalidades aprobados en D-090, D-112 y D-113. Herramientas de pruebas pendientes.
+**Dependencias:** T-014a, T-017a-ui y T-029.
 
 **Objetivo:** vistas funcionales, accesibles y fáciles de modificar. Solo en aplicación completa; en backend solo se generan los endpoints.
 
-**Alcance consolidado (D-090):**
+**Alcance consolidado (D-090 y D-113):**
+- Pregunta del CLI solo para fullstack con Auth. **Aplicación privada** (predeterminada) genera login, activación y área protegida, sin landing pública. **Landing pública + aplicación protegida** añade una landing al mismo flujo.
+- Ambas modalidades reutilizan el núcleo Auth y la base visual de T-029. Conservan cookies y controles CSRF según D-089 y D-103, activación según D-107 y derivación según D-098. Elegir una landing no habilita el registro público.
 - React Router en modo declarativo adoptado cuando fullstack incluya Auth; proyectos sin Auth no incorporan router obligatorio.
 - Estado de sesión centralizado con 4 estados explícitos: verificación inicial (cargando), autenticado, no autenticado y error de comunicación.
 - Recuperación de sesión mediante consulta al backend; ninguna credencial almacenada en JavaScript (`localStorage`/`sessionStorage`).
@@ -652,9 +683,10 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 - Accesibilidad explícita obligatoria (CODE_STANDARDS §12): actualización dinámica de `document.title`, gestión de foco del teclado en navegación y anuncios de cambio de ruta para lectores de pantalla.
 - Pruebas reales de navegación, redirecciones, recargas de página y accesibilidad.
 
-**Áreas afectadas:** **[L]** plantillas de frontend y overlay i18n. Rutas nuevas: por determinar.
+**Áreas afectadas:** CLI, composición del generador, plantillas frontend y overlay i18n. Rutas nuevas por determinar.
 
 **Criterios de aceptación:**
+- La pregunta aparece exclusivamente en fullstack con Auth, selecciona por defecto la aplicación privada y solo la segunda opción genera la landing pública. Ambas generan login, activación y área protegida con el mismo núcleo Auth.
 - Disponible en JavaScript y TypeScript.
 - Con i18n activo, las vistas usan sus claves; sin i18n, texto fijo, sin duplicar vistas.
 - Accesibilidad obligatoria: etiquetas, teclado, estados de error y carga, foco dinámico y anuncios de ruta (D-090).
@@ -857,7 +889,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 1. **Identidad externa en T-014c.** Resuelta por D-100: Auth v1 opera únicamente con identidad interna propia de Brixa; proveedores externos (OAuth, OIDC, SSO) quedan fuera de alcance en v1 manteniendo desacoplamiento arquitectónico para extensiones futuras.
 2. **Administrador de plataforma entre organizaciones.** Resuelta por D-084 y D-085: administración de plataforma estrictamente separada de la organizacional, sin acceso global automático a datos de organizaciones ni bypass genérico de RLS; aprovisionamiento local seguro sin panel global en v1.
 3. **Propiedades desconocidas en validación** (descartar o rechazar). Tras INV-02.
-4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; estilos y pruebas específicas pendientes de INV-05a e INV-06 (P-017).
+4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; diseño y stack base confirmados en D-112, modalidades de entrada confirmadas en D-113. Quedan por concretar las herramientas de pruebas de componentes y navegador (P-017), las rutas UI y las versiones exactas de las nuevas dependencias.
 5. **Versión de `package.json` en `main`** tras el tag (P-016). Por defecto: versión de preparación.
 6. **T-013e.** Asignación resuelta en D-052. La implementación de N1–N7 queda pendiente en T-013e.
 7. **Relación con la decisión de validar `DATABASE_URL` sin que el servidor lo importe.** Tras INV-02.

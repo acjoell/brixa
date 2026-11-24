@@ -2125,6 +2125,88 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/db
   });
 });
 
+describe("composición de Tailwind CSS en proyectos generados", () => {
+  it.each([
+    { modality: "frontend", language: "ts", i18n: false },
+    { modality: "frontend", language: "js", i18n: false },
+    { modality: "fullstack", language: "ts", i18n: true },
+    { modality: "fullstack", language: "js", i18n: true },
+  ] as const)("incluye Tailwind en $modality $language", async ({ modality, language, i18n }) => {
+    const dest = await mkTmp(`tailwind-${modality}-${language}`);
+    expect(await generate({ modality, language, i18n, outputDir: dest })).toMatchObject({
+      ok: true,
+    });
+
+    const frontend = modality === "fullstack" ? path.join(dest, "frontend") : dest;
+    const pkg = JSON.parse(await fs.readFile(path.join(frontend, "package.json"), "utf-8"));
+    expect(pkg.devDependencies).toMatchObject({
+      "@tailwindcss/vite": "4.3.5",
+      tailwindcss: "4.3.5",
+    });
+
+    const vite = await fs.readFile(path.join(frontend, `vite.config.${language}`), "utf-8");
+    expect(vite).toMatch(/import tailwindcss from ['"]@tailwindcss\/vite['"]/);
+    expect(vite).toContain("plugins: [react(), tailwindcss()]");
+    expect(vite).not.toContain("@@INSERT:");
+
+    const css = await fs.readFile(path.join(frontend, "src", "index.css"), "utf-8");
+    expect(css).toMatch(/@import ['"]tailwindcss\/theme\.css['"] layer\(theme\)/);
+    expect(css).toMatch(/@import ['"]tailwindcss\/utilities\.css['"] layer\(utilities\)/);
+    expect(css).not.toMatch(/@import ['"]tailwindcss(?:\/preflight(?:\.css)?)?['"]/);
+
+    const mainExt = language === "ts" ? "tsx" : "jsx";
+    const main = await fs.readFile(path.join(frontend, "src", `main.${mainExt}`), "utf-8");
+    expect(main).toMatch(/import ['"]\.\/index\.css['"]/);
+    expect(main).toContain("projectName={document.title}");
+    expect(main).toContain(
+      "initialThemePreference={document.documentElement.dataset.themePreference}",
+    );
+
+    const html = await fs.readFile(path.join(frontend, "index.html"), "utf-8");
+    expect(html).toContain('href="%BASE_URL%brand/logo.png"');
+    expect(html).toContain('<script src="%BASE_URL%theme-init.js" blocking="render"></script>');
+    await expect(
+      fs.access(path.join(frontend, "public", "theme-init.js")),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(path.join(frontend, "_scripts"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(html).toContain(
+      `<title>${path.basename(dest)}${modality === "fullstack" ? "-frontend" : ""}</title>`,
+    );
+    for (const asset of ["logo.png", "logo-transparent.png"]) {
+      await expect(
+        fs.access(path.join(frontend, "public", "brand", asset)),
+      ).resolves.toBeUndefined();
+    }
+
+    if (modality === "fullstack") {
+      expect(vite).toContain("proxy:");
+      expect(vite).toContain("BACKEND_URL");
+      expect(main).toContain(`import './i18n.${language}'`);
+      expect(pkg.dependencies).toHaveProperty("i18next");
+      const locale = JSON.parse(
+        await fs.readFile(path.join(frontend, "src", "locales", "es.json"), "utf-8"),
+      );
+      expect(locale.launchpad.edit).toContain(`src/App.${mainExt}`);
+    } else {
+      expect(vite).not.toContain("proxy:");
+    }
+  });
+
+  it("excluye Tailwind del backend independiente", async () => {
+    const dest = await mkTmp("tailwind-backend");
+    expect(await generate({ modality: "backend", language: "ts", outputDir: dest })).toMatchObject({
+      ok: true,
+    });
+    const manifest = await fs.readFile(path.join(dest, "package.json"), "utf-8");
+    expect(manifest).not.toContain("tailwindcss");
+    await expect(fs.access(path.join(dest, "vite.config.ts"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+});
+
 describe("composición limpia de frontend (main, App, vite.config)", () => {
   it("frontend ts sin i18n elimina marcadores en main y vite.config, manteniendo App con texto base", async () => {
     const dest = await mkTmp("frontend-clean-no-i18n");
@@ -2149,7 +2231,7 @@ describe("composición limpia de frontend (main, App, vite.config)", () => {
 
     const useAppContent = await fs.readFile(path.join(dest, "src", "useAppContent.tsx"), "utf-8");
     expect(useAppContent).toContain("LanguageSelector: () => null");
-    expect(useAppContent).toContain("Get started");
+    expect(useAppContent).toContain("Build from a solid foundation.");
   });
 
   it("frontend ts con i18n inyecta import en main y no deja marcadores", async () => {

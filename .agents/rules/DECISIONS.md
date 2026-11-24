@@ -2041,6 +2041,39 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ---
 
+### D-112 — Stack y diseño del frontend React generado
+
+**Estado:** Confirmada por el responsable e implementada en T-029. Cierre de T-029 pendiente del CI multiplataforma del nuevo SHA.
+
+**Contexto:** La bienvenida y las interfaces iniciales necesitan una base visual común para todas las variantes que generan frontend React.
+
+**Decisión:**
+- Tailwind CSS v4 forma parte del stack base React + Vite de frontend independiente y fullstack, con o sin Auth. Se incluye automáticamente, sin opción adicional del CLI.
+- Rediseñar las vistas frontend existentes con un estilo minimalista, funcional, profesional, responsive y accesible. Incorporar la identidad visual de Brixa en la bienvenida y las interfaces iniciales con un branding fácilmente reemplazable.
+- Usar componentes React propios con HTML semántico, sin bibliotecas de UI por defecto. Organizar el código por funcionalidad (feature-first) y aplicar SOLID y Clean Architecture de forma pragmática, con responsabilidades separadas y reutilización justificada. Evitar capas artificiales e infraestructura anticipada.
+- Ofrecer Sistema (predeterminado), Claro y Oscuro en la bienvenida. Sistema sigue los cambios de `prefers-color-scheme` y la selección manual tiene prioridad. Persistir en `localStorage` únicamente la preferencia visual del tema y volver a Sistema si el valor es inválido o el almacenamiento no está disponible.
+- Aplicar el tema antes del primer renderizado con un script local compatible con la CSP existente. Usar un selector accesible con etiquetas localizadas y logotipos locales apropiados para cada fondo.
+- Aplicar D-079 para la composición y D-098 para el código aplicativo y las pruebas. TypeScript sigue siendo la fuente canónica y JavaScript se deriva de ella.
+
+**Motivo:** Ofrecer una base coherente y personalizable para la bienvenida y las vistas Auth, manteniendo la composición de capacidades opcionales.
+
+---
+
+### D-113 — Modalidad de entrada para fullstack con Auth
+
+**Estado:** Confirmada por el responsable. Implementación pendiente en T-014a-ui.
+
+**Contexto:** Los proyectos fullstack con Auth pueden comenzar en una aplicación privada o presentar una landing pública antes del área protegida.
+
+**Decisión:**
+- Preguntar por la modalidad exclusivamente cuando se genere fullstack con Auth. Ofrecer **Aplicación privada** (predeterminada), con login, activación y área protegida, sin landing pública, y **Landing pública + aplicación protegida**, que añade una landing pública al mismo flujo.
+- Compartir el núcleo Auth en ambas modalidades. La elección solo compone la interfaz, mantiene los contratos D-089, D-090, D-103 y D-107 y es independiente del registro público contemplado en D-086.
+- Los proyectos React sin Auth generan una bienvenida funcional, sin infraestructura Auth. El backend independiente conserva su alcance de API.
+
+**Motivo:** Adaptar el acceso inicial al tipo de aplicación con una sola implementación de autenticación.
+
+---
+
 ## 5. Cuestiones pendientes
 
 - P-002: confirmación definitiva de versiones de dependencias de proyectos generados. El baseline de Node.js `^24.0.0 || >=26.0.0` queda verificado en la CI con Node 24 y 26 (D-055). Ver además P-008 y D-066.

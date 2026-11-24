@@ -144,7 +144,11 @@ Estas capacidades no deben tratarse como simples fragmentos de código. Cada una
 
 **Criterio de salida:** cada capacidad tiene un alcance explícito, controles aplicados a las operaciones pertinentes y pruebas negativas que comprueban que el acceso no autorizado se rechaza.
 
-**Auth backend y generador:** T-014a registra las combinaciones acreditadas mediante verificación especializada. Las vistas corresponden a T-014a-ui y la validación de la topología TLS y la URL de activación se realiza en cada despliegue público.
+**Auth backend y generador.** T-014a está completada y registra las combinaciones acreditadas mediante verificación especializada.
+
+**Modernización del frontend base.** T-029 incorporó Tailwind CSS v4, renovó la bienvenida de los proyectos React generados e incluyó los temas Sistema, Claro y Oscuro (D-112). El cierre queda pendiente del CI multiplataforma del nuevo SHA. T-014a-ui sigue como siguiente tarea.
+
+**Vistas Auth.** T-014a-ui reutiliza la base modernizada y añade al CLI de fullstack con Auth la elección entre aplicación privada (predeterminada) y landing pública con aplicación protegida (D-113). Cada despliegue público valida su topología TLS y su URL de activación.
 
 **Evolución de Auth después de T-014a:** D-111 establece la dirección de las extensiones [T-024 a T-028](TASKS_POST_MVP.md#extensiones-futuras-de-auth-d-111). El alcance y estado de cada tarea se mantienen en ese registro.
 

@@ -1,20 +1,31 @@
 {
+  "nav": {
+    "label": "Recursos del proyecto",
+    "docs": "Documentación"
+  },
   "home": {
-    "title": "Comenzar",
-    "edit": "Edita <codeFile>src/App.tsx</codeFile> y guarda para probar <codeHmr>HMR</codeHmr>",
-    "counter": "El contador es {{val}}"
+    "title": "Construye sobre una base sólida.",
+    "subtitle": "Tu proyecto Brixa está listo. Abre la plantilla, personalízala y desarrolla tu primera funcionalidad.",
+    "start": "Empezar a desarrollar"
   },
-  "docs": {
-    "title": "Documentación",
-    "subtitle": "Tus dudas, resueltas",
-    "exploreVite": "Explorar Vite",
-    "learnMore": "Aprender más"
+  "launchpad": {
+    "title": "Guía rápida de desarrollo",
+    "stack": "Stack base",
+    "entry": "Vista inicial",
+    "edit": "Edita <codeFile>src/App.tsx</codeFile> y guarda para probar <codeHmr>HMR</codeHmr>.",
+    "next": "Build de producción",
+    "build": "Compila el proyecto para desplegarlo."
   },
-  "social": {
-    "title": "Conéctate con nosotros",
-    "subtitle": "Únete a la comunidad de Vite"
+  "footer": {
+    "tagline": "Generado con Brixa."
   },
   "selector": {
     "label": "Idioma"
+  },
+  "theme": {
+    "label": "Apariencia",
+    "system": "Sistema",
+    "light": "Claro",
+    "dark": "Oscuro"
   }
 }

@@ -1,18 +1,24 @@
 import type { ReactNode } from 'react'
 
 export type MessageKey =
+  | 'nav.label'
+  | 'nav.docs'
   | 'home.title'
-  | 'home.edit'
-  | 'home.counter'
-  | 'docs.title'
-  | 'docs.subtitle'
-  | 'docs.exploreVite'
-  | 'docs.learnMore'
-  | 'social.title'
-  | 'social.subtitle'
+  | 'home.subtitle'
+  | 'home.start'
+  | 'launchpad.title'
+  | 'launchpad.stack'
+  | 'launchpad.entry'
+  | 'launchpad.next'
+  | 'launchpad.build'
+  | 'footer.tagline'
+  | 'theme.label'
+  | 'theme.system'
+  | 'theme.light'
+  | 'theme.dark'
 
 export interface AppContent {
   LanguageSelector: () => ReactNode
-  t: (key: MessageKey, params?: { val?: number }) => string
+  t: (key: MessageKey) => string
   EditInstruction: () => ReactNode
 }

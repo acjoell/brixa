@@ -31,10 +31,7 @@ function getLeaves(obj, prefix = "") {
 }
 
 function cleanVal(str) {
-  return str
-    .replace(/<[^>]+>/g, "")
-    .replace(/\{\{val\}\}/g, "0")
-    .trim();
+  return str.replace(/<[^>]+>/g, "").trim();
 }
 
 const req = createRequire(path.join(frontendDir, "package.json"));
@@ -67,25 +64,37 @@ try {
     React.createElement(I18nextProvider, { i18n }, React.createElement(App)),
   );
   const htmlEnText = htmlEn.replace(/<[^>]+>/g, "");
+  const projectName = "V2 generated project";
 
   await i18n.changeLanguage("es");
   const htmlEs = renderToString(
-    React.createElement(I18nextProvider, { i18n }, React.createElement(App)),
+    React.createElement(I18nextProvider, { i18n }, React.createElement(App, { projectName })),
   );
   const htmlEsText = htmlEs.replace(/<[^>]+>/g, "");
+  if (!htmlEsText.includes(projectName)) {
+    throw new Error("[V2 SSR es] No se renderizó el nombre del proyecto recibido por App");
+  }
 
   const enLeaves = getLeaves(enJson);
-  for (const { val } of enLeaves) {
+  for (const { key, val } of enLeaves) {
     const cleaned = cleanVal(val);
-    if (!htmlEnText.includes(cleaned)) {
+    const present =
+      key === "nav.label"
+        ? htmlEn.includes(`aria-label="${cleaned}"`)
+        : htmlEnText.includes(cleaned);
+    if (!present) {
       throw new Error(`[V2 SSR en] Valor no encontrado en HTML: "${cleaned}"`);
     }
   }
 
   const esLeaves = getLeaves(esJson);
-  for (const { val } of esLeaves) {
+  for (const { key, val } of esLeaves) {
     const cleaned = cleanVal(val);
-    if (!htmlEsText.includes(cleaned)) {
+    const present =
+      key === "nav.label"
+        ? htmlEs.includes(`aria-label="${cleaned}"`)
+        : htmlEsText.includes(cleaned);
+    if (!present) {
       throw new Error(`[V2 SSR es] Valor no encontrado en HTML: "${cleaned}"`);
     }
   }
@@ -94,7 +103,7 @@ try {
     const cleanedEn = cleanVal(enLeaves[i].val);
     const cleanedEs = cleanVal(esLeaves[i].val);
     if (cleanedEn !== cleanedEs) {
-      if (htmlEsText.includes(cleanedEn)) {
+      if (htmlEsText.includes(cleanedEn) || htmlEs.includes(`aria-label="${cleanedEn}"`)) {
         throw new Error(
           `[V2 SSR es] Valor inglés ("${cleanedEn}") encontrado indebidamente en HTML español`,
         );
@@ -103,10 +112,10 @@ try {
   }
 
   for (const { key } of enLeaves) {
-    if (htmlEnText.includes(key)) {
+    if (htmlEnText.includes(key) || htmlEn.includes(`aria-label="${key}"`)) {
       throw new Error(`[V2 SSR en] Clave de traducción visible como texto: "${key}"`);
     }
-    if (htmlEsText.includes(key)) {
+    if (htmlEsText.includes(key) || htmlEs.includes(`aria-label="${key}"`)) {
       throw new Error(`[V2 SSR es] Clave de traducción visible como texto: "${key}"`);
     }
   }

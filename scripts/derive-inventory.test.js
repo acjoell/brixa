@@ -20,7 +20,7 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
   const snapshot = new Map();
   for (const [base, count] of [
     ["backend-express-js", 9],
-    ["frontend-react-js", 4],
+    ["frontend-react-js", 6],
     ["database-sqlite/js", 5],
     ["api-docs/js", 7],
     ["auth/js", 42],
@@ -41,6 +41,9 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
       await fs.unlink(file(relative));
     }
   }
+  const prepaint = "frontend-react-ts/public/theme-init.js";
+  snapshot.set(prepaint, await read(prepaint));
+  await fs.unlink(file(prepaint));
   await expect(syncTemplates(directory)).rejects.toThrow("desincronizado");
   await syncTemplates(directory, true);
   await syncTemplates(directory, true);

@@ -5,10 +5,10 @@ export function useAppContent() {
   const { t } = useTranslation();
   return {
     LanguageSelector,
-    t: (key, params) => t(key, params),
+    t: (key) => t(key),
     EditInstruction: () => (
       <Trans
-        i18nKey="home.edit"
+        i18nKey="launchpad.edit"
         components={{
           codeFile: <code />,
           codeHmr: <code />,

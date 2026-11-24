@@ -45,20 +45,23 @@ function verifyV4DistStrings(frontendDir) {
     throw new Error("No se encontraron archivos JS en dist/assets/");
   }
 
-  let foundEn = false;
-  let foundEs = false;
-
-  for (const jsFile of jsFiles) {
-    const content = fs.readFileSync(path.join(assetsDir, jsFile), "utf-8");
-    if (content.includes("Get started")) foundEn = true;
-    if (content.includes("Comenzar")) foundEs = true;
+  const titles = ["en", "es"].map((language) => {
+    const localeFile = path.join(frontendDir, "src", "locales", `${language}.json`);
+    const title = JSON.parse(fs.readFileSync(localeFile, "utf-8")).home?.title;
+    if (typeof title !== "string" || !title.trim()) {
+      throw new Error(`[V4 ${language}] Falta el título de bienvenida home.title`);
+    }
+    return { language, title };
+  });
+  if (titles[0].title === titles[1].title) {
+    throw new Error("[V4] Los títulos de bienvenida en inglés y español deben ser distintos");
   }
 
-  if (!foundEn) {
-    throw new Error("Cadena distintiva de inglés ('Get started') no encontrada en dist/assets/");
-  }
-  if (!foundEs) {
-    throw new Error("Cadena distintiva de español ('Comenzar') no encontrada en dist/assets/");
+  const bundles = jsFiles.map((file) => fs.readFileSync(path.join(assetsDir, file), "utf-8"));
+  for (const { language, title } of titles) {
+    if (!bundles.some((bundle) => bundle.includes(title))) {
+      throw new Error(`[V4 ${language}] Título "${title}" no encontrado en dist/assets/`);
+    }
   }
 }
 

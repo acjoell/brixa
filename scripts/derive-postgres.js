@@ -37,8 +37,15 @@ const groups = {
   },
   react: {
     base: "frontend-react",
-    files: ["src/main.tsx", "src/App.tsx", "src/useAppContent.tsx", "vite.config.ts"],
-    modules: ["react", "react-dom/client", "@vitejs/plugin-react", "vite"],
+    files: [
+      "src/main.tsx",
+      "src/App.tsx",
+      "src/ThemeSelector.tsx",
+      "src/useAppContent.tsx",
+      "vite.config.ts",
+      "_scripts/theme-init.ts",
+    ],
+    modules: ["react", "react-dom/client", "@vitejs/plugin-react", "@tailwindcss/vite", "vite"],
   },
   "database-postgres": {
     files: database,
@@ -322,7 +329,10 @@ function templateGroup(directory, name) {
   const base = frontend ? groups.react : groups.express;
   const dir = (language) =>
     path.join(directory, group.base ? group.base + "-" + language : path.join(name, language));
-  const entries = group.files.map((source) => [source, source.replace(/\.ts(x?)$/, ".js$1")]);
+  const entries = group.files.map((source) => [
+    source,
+    source.replace(/^_scripts\//, "public/").replace(/\.ts(x?)$/, ".js$1"),
+  ]);
   for (const fragment of group.fragments ?? []) {
     entries.push(["_fragments/" + fragment, "_fragments/" + fragment]);
   }
@@ -409,8 +419,14 @@ export async function syncTemplates(
         }
       }
       const expected = fragment ? source : compiled;
-      if ((await exists(target)) && (await fs.readFile(target, "utf8")) === expected) continue;
-      changes.set(target, expected);
+      // Classic browser scripts must be executable before the application module in both variants.
+      const outputs = sourceFile.startsWith("_scripts/")
+        ? [target, path.join(group.sourceDir, targetFile)]
+        : [target];
+      for (const output of outputs) {
+        if ((await exists(output)) && (await fs.readFile(output, "utf8")) === expected) continue;
+        changes.set(output, expected);
+      }
     }
   }
   // Solo contratos de módulos del inventario; Vite gestiona los assets.

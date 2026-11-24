@@ -80,7 +80,8 @@ export const View = <T,>({ value }: Props<T>) => <><Widget value={value!} />{/* 
     await syncFrontend(directory);
     const target = path.join(directory, "frontend-react-js/src/main.jsx");
     const original = await fs.readFile(target, "utf8");
-    const changed = original.replace("<App />", '<App data-test="manual" />');
+    const changed = original.replace("<App", '<App data-test="manual"');
+    expect(changed).not.toBe(original);
     await fs.writeFile(target, changed);
     await expect(syncFrontend(directory)).rejects.toThrow("JavaScript desincronizado");
     expect(await fs.readFile(target, "utf8")).toBe(changed);
@@ -99,7 +100,10 @@ export const View = <T,>({ value }: Props<T>) => <><Widget value={value!} />{/* 
     });
     expect(output).toContain("import './i18n.js'");
     expect(output).not.toContain("@@INSERT:");
-    expect(output).toContain("<App />");
+    expect(output).toContain("projectName={document.title}");
+    expect(output).toContain(
+      "initialThemePreference={document.documentElement.dataset.themePreference}",
+    );
   });
 
   it("detecta cambios TSX, imports inexistentes y errores de lint", async () => {
