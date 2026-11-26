@@ -164,7 +164,7 @@ El aislamiento a nivel de base de datos mediante Row-Level Security (RLS) en Pos
 
 ### Roles, privilegios y separación de credenciales (D-094)
 
-- **Separación estricta de identidades:** se separan la identidad de ejecución de la aplicación (`app_exec`) y la identidad de migraciones y gestión de esquema (`table_owner`).
+- **Separación estricta de identidades:** todos los proyectos PostgreSQL separan la administración, la identidad de ejecución (`app_exec`) y la identidad de migraciones y gestión del esquema (`table_owner`). `POSTGRES_PASSWORD` queda reservada al servicio PostgreSQL y al aprovisionamiento.
 - **Restricciones del rol de ejecución (`app_exec`):** no puede ser superusuario ni poseer el atributo `BYPASSRLS`; no puede ser propietario de tablas protegidas por RLS; no posee privilegios de DDL ni `TRUNCATE` sobre tablas protegidas; y opera con privilegios DML mínimos (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
 - **Credenciales separadas:** el servicio de aplicación Express utiliza `DATABASE_URL` (con rol `app_exec`) y las herramientas de migración Drizzle utilizan `MIGRATION_DATABASE_URL` (con rol `table_owner`).
 - **Aprovisionamiento administrado:** se documenta y proporciona aprovisionamiento claro para proveedores de PostgreSQL administrados (RDS, Cloud SQL, Neon, Supabase, etc.).

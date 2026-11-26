@@ -45,6 +45,7 @@ describe("runPrompts", () => {
       i18n: true,
       auth: false,
       authTransport: undefined,
+      authAppMode: undefined,
       outputDir: "./my-app",
     });
   });
@@ -93,6 +94,7 @@ describe("runPrompts", () => {
       i18n: false,
       auth: false,
       authTransport: undefined,
+      authAppMode: undefined,
       outputDir: "/home/user/projects/api",
     });
   });
@@ -106,6 +108,7 @@ describe("runPrompts", () => {
     inputMock.mockResolvedValue("./my-app");
 
     await expect(runPrompts()).resolves.toMatchObject({ auth: false, authTransport: undefined });
+    expect(selectMock).toHaveBeenCalledTimes(3);
     expect(confirmMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ message: "¿Autenticación (Auth)?" }),
     );
@@ -126,6 +129,7 @@ describe("runPrompts", () => {
       inputMock.mockResolvedValue("./my-app");
 
       await expect(runPrompts()).resolves.toMatchObject({ auth: true, authTransport: mode });
+      expect(selectMock).toHaveBeenCalledTimes(4);
       expect(selectMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           default: "cookie",
@@ -138,21 +142,49 @@ describe("runPrompts", () => {
     },
   );
 
-  it("habilita Auth en fullstack sin preguntar por el transporte", async () => {
+  it("omite la modalidad de aplicación en fullstack sin Auth", async () => {
     selectMock
       .mockResolvedValueOnce("fullstack")
       .mockResolvedValueOnce("ts")
       .mockResolvedValueOnce("postgres");
-    confirmMock
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    confirmMock.mockResolvedValue(false);
     inputMock.mockResolvedValue("./my-app");
 
-    await expect(runPrompts()).resolves.toMatchObject({ auth: true, authTransport: undefined });
+    await expect(runPrompts()).resolves.toMatchObject({ auth: false, authAppMode: undefined });
     expect(selectMock).toHaveBeenCalledTimes(3);
   });
+
+  it.each(["private", "public"] as const)(
+    "permite elegir %s en fullstack con Auth",
+    async (mode) => {
+      selectMock
+        .mockResolvedValueOnce("fullstack")
+        .mockResolvedValueOnce("ts")
+        .mockResolvedValueOnce("postgres")
+        .mockResolvedValueOnce(mode);
+      confirmMock
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      inputMock.mockResolvedValue("./my-app");
+
+      await expect(runPrompts()).resolves.toMatchObject({
+        auth: true,
+        authTransport: undefined,
+        authAppMode: mode,
+      });
+      expect(selectMock).toHaveBeenCalledTimes(4);
+      expect(selectMock).toHaveBeenLastCalledWith({
+        message: "¿Cómo se accederá a la aplicación?",
+        default: "private",
+        choices: [
+          { name: "Aplicación privada", value: "private" },
+          { name: "Landing pública + aplicación protegida", value: "public" },
+        ],
+      });
+    },
+  );
 
   it("cancela la generación desde la selección del transporte", async () => {
     selectMock

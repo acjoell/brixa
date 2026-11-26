@@ -20,6 +20,8 @@ it.each(["cookie", "bearer"])(
   "alta y activación HTTP con %s",
   async (mode) => {
     vi.resetModules();
+    vi.stubEnv("ARGON2_MAX_CONCURRENT", "2");
+    vi.stubEnv("ARGON2_MAX_QUEUE", "8");
     const dir = await mkdtemp(join(tmpdir(), "brixa-http-activation-"));
     const url = "file:" + join(dir, "auth.db");
     const client = createClient({ url });
@@ -32,6 +34,12 @@ it.each(["cookie", "bearer"])(
       AUTH_TRUSTED_PROXIES: "127.0.0.1",
       LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
       LOGIN_IP_REQUEST_LIMIT: "1",
+      AUTH_PASSWORD_MIN_LENGTH: "12",
+      AUTH_PASSWORD_MAX_LENGTH: "50",
+      ACTIVATION_IP_REQUEST_LIMIT: "10",
+      ACTIVATION_ABUSE_WINDOW_MINUTES: "3",
+      ACTIVATION_VALIDATION_IP_REQUEST_LIMIT: "10",
+      ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES: "2",
     };
     let server;
     try {
@@ -64,6 +72,22 @@ it.each(["cookie", "bearer"])(
 
       const { app } = await import("../src/app.js");
       const { initializeAuthHttp } = await import("../src/auth/http-runtime.js");
+      for (const name of [
+        "ACTIVATION_IP_REQUEST_LIMIT",
+        "ACTIVATION_ABUSE_WINDOW_MINUTES",
+        "ACTIVATION_VALIDATION_IP_REQUEST_LIMIT",
+        "ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES",
+      ]) {
+        await expect(
+          initializeAuthHttp(mode, "brixa-example", database, writer, { ...env, [name]: "0" }),
+        ).rejects.toThrow(name);
+      }
+      await expect(
+        initializeAuthHttp(mode, "brixa-example", database, writer, {
+          ...env,
+          AUTH_PASSWORD_MIN_LENGTH: "51",
+        }),
+      ).rejects.toThrow("AUTH_PASSWORD_MIN_LENGTH");
       for (const page of [
         "",
         "http://public.example/complete",
@@ -149,6 +173,47 @@ it.each(["cookie", "bearer"])(
 
       expect(created).toBe(true);
       const token = readLink(activationUrl);
+      const validate = async (value, status) => {
+        const response = await post("/activate/validate", { token: value });
+        expect(response.status).toBe(status);
+        expect(response.headers.get("Cache-Control")).toBe("no-store");
+        expect(response.headers.get("Set-Cookie")).toBeNull();
+        expect(await response.json()).toEqual(
+          status === 200
+            ? { passwordPolicy: { minLength: 12, maxLength: 50, maxBytes: 512 } }
+            : { error: "Bad Request" },
+        );
+      };
+      expect((await post("/activate/validate", { token }, wrongTransport)).status).toBe(403);
+      expect(
+        (await post("/activate/validate", { token }, { "X-Forwarded-Proto": "http" })).status,
+      ).toBe(403);
+      if (mode === "cookie") {
+        expect((await post("/activate/validate", { token }, { Origin: "null" })).status).toBe(403);
+      }
+      const snapshot = async () => ({
+        users: await database.select().from(schema.users),
+        tokens: await database.select().from(schema.activationTokens),
+        sessions: await database.select().from(schema.sessions),
+        audit: await database.select().from(schema.auditLogSystem),
+      });
+      const before = await snapshot();
+      const weak = await post("/activate", { token, password: "🧱".repeat(11) });
+      expect(weak.status).toBe(400);
+      expect(await weak.json()).toEqual({ error: "Bad Request", code: "PASSWORD_POLICY" });
+      const { getArgon2Limiter } = await import("../src/auth/argon2-limiter.js");
+      const gate = Promise.withResolvers();
+      const occupied = Array.from({ length: 10 }, () => getArgon2Limiter()(() => gate.promise));
+      try {
+        await validate(token, 200);
+        await validate(token, 200);
+      } finally {
+        gate.resolve();
+        await Promise.allSettled(occupied);
+      }
+      expect(await snapshot()).toEqual(before);
+      await validate(generateActivationToken(), 400);
+      await validate("bad token", 400);
       const repeat = await post(
         "/register",
         { email: identifier.email.toUpperCase() },
@@ -169,6 +234,7 @@ it.each(["cookie", "bearer"])(
       ).toBe(404);
       const revoked = await post("/activation/revoke", { userId }, proof(adminToken));
       expect(revoked.status).toBe(204);
+      await validate(token, 400);
       const rejects = async (value) => {
         const response = await post("/activate", { token: value, password });
         expect(response.status).toBe(400);
@@ -185,12 +251,24 @@ it.each(["cookie", "bearer"])(
         return readLink(body.activationUrl);
       };
       const expired = await regenerate();
+      await validate(expired, 200);
       await database
         .update(schema.activationTokens)
         .set({ issuedAt: new Date(+now - 2000), expiresAt: new Date(+now - 1000) })
         .where(eq(schema.activationTokens.tokenDigest, activationTokenDigest(expired)));
+      await validate(expired, 400);
       await rejects(expired);
       const usable = await regenerate();
+      await database
+        .update(schema.users)
+        .set({ status: "disabled" })
+        .where(eq(schema.users.id, userId));
+      await validate(usable, 400);
+      await database
+        .update(schema.users)
+        .set({ status: "pending_activation" })
+        .where(eq(schema.users.id, userId));
+      await validate(usable, 200);
 
       await client.execute(
         "CREATE TRIGGER reject_activation BEFORE INSERT ON audit_log_system WHEN NEW.event = 'account_activated' BEGIN SELECT RAISE(ABORT, 'fixture'); END",
@@ -206,11 +284,22 @@ it.each(["cookie", "bearer"])(
       expect(unchanged.passwordHash).toBeNull();
       await client.execute("DROP TRIGGER reject_activation");
 
-      const successful = await post("/activate", { token: usable, password });
+      const [successful, contested] = (
+        await Promise.all([
+          post("/activate", { token: usable, password }),
+          post("/activate", { token: usable, password }),
+        ])
+      ).sort((a, b) => a.status - b.status);
       expect(successful.status).toBe(204);
       expect(await successful.text()).toBe("");
       expect(successful.headers.get("Set-Cookie")).toBeNull();
-      await rejects(usable);
+      expect(contested.status).toBe(400);
+      expect(await contested.json()).toEqual({ error: "Bad Request" });
+      await validate(usable, 400);
+      const validationLimited = await post("/activate/validate", { token: usable });
+      expect(validationLimited.status).toBe(429);
+      expect(Number(validationLimited.headers.get("Retry-After"))).toBeGreaterThan(60);
+      expect(Number(validationLimited.headers.get("Retry-After"))).toBeLessThanOrEqual(120);
       const [activated] = await database
         .select()
         .from(schema.users)
@@ -222,10 +311,11 @@ it.each(["cookie", "bearer"])(
       ).toEqual([]);
 
       // Seven confirmations were accounted for, including the operational failure.
-      for (let i = 0; i < 3; i++) await rejects("invalid");
+      for (let i = 0; i < 2; i++) await rejects("invalid");
       const limited = await post("/activate", { token: usable, password });
       expect(limited.status).toBe(429);
-      expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(120);
+      expect(Number(limited.headers.get("Retry-After"))).toBeLessThanOrEqual(180);
       expect(await createLoginAbuseService(writer, env).ipStatus("127.0.0.1")).toEqual({
         blocked: false,
         retryAfterMs: 0,
@@ -254,6 +344,7 @@ it.each(["cookie", "bearer"])(
       for (const secret of [token, expired, usable, password])
         expect(JSON.stringify(events)).not.toContain(secret);
     } finally {
+      vi.unstubAllEnvs();
       if (server) await new Promise((resolve) => server?.close(() => resolve()));
       client.close();
       await rm(dir, { recursive: true, force: true });

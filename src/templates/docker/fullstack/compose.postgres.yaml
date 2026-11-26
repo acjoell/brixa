@@ -3,7 +3,7 @@ services:
     build: ./backend
     environment:
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?La variable de entorno POSTGRES_PASSWORD es obligatoria y debe ser alfanumerica}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_URL: "${DATABASE_URL:?Se requiere la URL de app_exec}"
       # @@INSERT:api-docs-env@@
       # @@INSERT:auth-env@@
     depends_on:

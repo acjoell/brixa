@@ -112,7 +112,7 @@ export const View = <T,>({ value }: Props<T>) => <><Widget value={value!} />{/* 
     const source = await fs.readFile(sourceFile, "utf8");
     await fs.writeFile(sourceFile, `${source}\nexport const changed: boolean = true;\n`);
     await expect(syncFrontend(directory)).rejects.toThrow("JavaScript desincronizado");
-    await fs.writeFile(sourceFile, source.replace("./App.tsx", "./Missing.tsx"));
+    await fs.writeFile(sourceFile, `${source}\nimport './Missing.tsx'\n`);
     await expect(syncFrontend(directory, true)).rejects.toThrow(
       "Referencia local inexistente: ./Missing.jsx",
     );

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +14,9 @@ import {
   stopProcess,
 } from "./verify-generated.js";
 import { runReportedVerification } from "./verification-report.js";
+import { provisionPostgres } from "./fixtures/postgres.js";
+
+export { provisionPostgres };
 
 export const AUTH_VARIANTS = [
   { modality: "backend", language: "js", database: "postgres", authTransport: "bearer" },
@@ -28,7 +30,7 @@ export async function runStep(
   cmd,
   args,
   cwd,
-  { env, timeoutMs, signal, sensitive = false },
+  { env, timeoutMs, signal, sensitive = false, onFailure },
 ) {
   const result = await executeCommand(cmd, args, cwd, {
     env,
@@ -44,49 +46,21 @@ export async function runStep(
     : (result.spawnError?.code ?? result.signal ?? result.exitCode);
   // Los fallos del driver o de una aserción pueden contener credenciales de la fixture.
   if (!sensitive) console.error(result.stderr.slice(-4000));
+  if (onFailure) {
+    try {
+      await onFailure(result);
+    } catch {
+      console.error(`${label}: no se pudo obtener el diagnóstico del subproceso.`);
+    }
+  }
   throw new Error(`${label}: ${status}`);
 }
 
-async function provisionPostgres(connection, backendDir) {
-  const { containerName, database, user, port } = connection;
-  const ownerPassword = randomBytes(24).toString("hex");
-  const runtimePassword = randomBytes(24).toString("hex");
-  const provision = await readFile(path.join(backendDir, "ops", "provision.sql"), "utf8");
-  const commands = [
-    "SHOW server_version_num;",
-    provision,
-    `ALTER ROLE table_owner PASSWORD '${ownerPassword}';`,
-    `ALTER ROLE app_exec PASSWORD '${runtimePassword}';`,
-  ].join("\n");
-  try {
-    const result = execFileSync(
-      "docker",
-      [
-        "exec",
-        "-i",
-        containerName,
-        "psql",
-        "-XAt",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        user,
-        "-d",
-        database,
-        "-v",
-        "target=" + database,
-      ],
-      { input: commands, encoding: "utf8", timeout: 15_000, stdio: ["pipe", "pipe", "pipe"] },
-    );
-    assert.equal(result.split("\n")[0], "170004");
-  } catch {
-    throw new Error("Falló el aprovisionamiento aislado de PostgreSQL 17.4.");
-  }
-  const location = `@127.0.0.1:${port}/${database}`;
-  return {
-    DATABASE_URL: "postgresql://app_exec:" + runtimePassword + location,
-    MIGRATION_DATABASE_URL: "postgresql://table_owner:" + ownerPassword + location,
-  };
+export async function verifyAuthFrontendTests(frontendDir, signal) {
+  await runStep("Pruebas de frontend Auth", "npm", ["test"], frontendDir, {
+    timeoutMs: 60_000,
+    signal,
+  });
 }
 
 async function checkStartup(variant, backendDir, frontendDir, env) {
@@ -146,7 +120,8 @@ const runtime = await import("./src/db/client." + ext);
 const connection = runtime.pool ?? runtime.client;
 try {
   if (engine === "postgres") {
-    await runtime.checkRuntimeIdentity();
+    const { checkAuthPrivileges } = await import("./src/db/check-auth-privileges." + ext);
+    await checkAuthPrivileges();
     const { withPostgresAdministrator } = await import("./src/db/bootstrap." + ext);
     await checkAuthLifecycle(mode, runtime.db, runtime.db, (operation) =>
       withPostgresAdministrator(operation, {
@@ -197,6 +172,7 @@ export async function verifyVariant(
       }
     }
     if (installOnly) return;
+    if (frontendDir) await verifyAuthFrontendTests(frontendDir, signal);
 
     // Las credenciales y ajustes del anfitrión no pertenecen a la fixture.
     const overrides = Object.fromEntries(

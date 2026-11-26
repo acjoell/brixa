@@ -20,7 +20,7 @@ const messages = {
 export function useAppContent() {
   return {
     LanguageSelector: () => null,
-    t: (key) => messages[key],
+    t: (key, fallback = key) => messages[key] ?? fallback,
     EditInstruction: () => (
       <>
         Edit <code>src/App.jsx</code> and save to test <code>HMR</code>.

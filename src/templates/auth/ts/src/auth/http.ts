@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { BlockList, isIP } from "node:net";
 import express from "express";
-import type { ErrorRequestHandler, Request, Response } from "express";
+import type { ErrorRequestHandler, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { notFoundHandler, parseInput, ValidationError } from "../errors.js";
-import type { createAccountActivationService } from "./activate-account.js";
+import type {
+  createAccountActivationService,
+  createActivationValidationService,
+} from "./activate-account.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import type { createPasswordChangeService } from "./change-password.js";
 import { emailSchema } from "./email.js";
@@ -14,6 +17,7 @@ import type { createLoginAbuseService } from "./login-abuse.js";
 import { ManagedActivationError } from "./managed-activation.js";
 import type { createManagedActivationService } from "./managed-activation.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
+import { parsePasswordPolicy, PasswordPolicyError } from "./password-policy.js";
 import { tokenDigest } from "./sessions.js";
 import type { createSessionService } from "./sessions.js";
 
@@ -24,14 +28,23 @@ type Services = {
   activation: {
     managed: ReturnType<typeof createManagedActivationService>;
     activateAccount: ReturnType<typeof createAccountActivationService>;
+    validateToken: ReturnType<typeof createActivationValidationService>;
     consumeIp: ReturnType<typeof createLoginAbuseService>["consumeActivationIp"];
+    consumeValidationIp: ReturnType<
+      typeof createLoginAbuseService
+    >["consumeActivationValidationIp"];
     cleanupExpired: ReturnType<typeof createLoginAbuseService>["cleanupExpired"];
     link(token: string): string;
   };
 };
 
 export type AuthHttpTransport = {
-  protect?: express.RequestHandler;
+  protect?: (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    invalidCredentials?: 401 | 403,
+  ) => void;
   readToken(req: Request): unknown;
   establishSession(res: Response, token: string): void | Promise<void>;
   clearSession(res: Response): void | Promise<void>;
@@ -40,7 +53,8 @@ export type AuthHttpTransport = {
 const password = z.string().min(1).refine(isPasswordWithinLimits);
 const credentials = z.strictObject({ email: emailSchema, password });
 const registration = z.strictObject({ email: emailSchema });
-const activationConfirmation = z.strictObject({ token: z.string(), password });
+const activationConfirmation = z.strictObject({ token: z.string(), password: z.string() });
+const activationValidation = z.strictObject({ token: z.string() });
 const activationTarget = z.strictObject({ userId: z.uuid() });
 const passwordChange = z.strictObject({ currentPassword: password, newPassword: password });
 
@@ -79,7 +93,9 @@ const handleError: ErrorRequestHandler = (error: unknown, _req, res, next) => {
     next(new Error("AUTH_HTTP_FAILED"));
     return;
   }
-  if (
+  if (error instanceof PasswordPolicyError) {
+    res.status(400).json({ error: "Bad Request", code: "PASSWORD_POLICY" });
+  } else if (
     error === badRequest ||
     error instanceof ValidationError ||
     (error instanceof ManagedActivationError && error.code === "INVALID_INPUT")
@@ -105,6 +121,7 @@ export function createAuthHttpApp(
   services: Services,
   transport: AuthHttpTransport,
   env: Record<string, string | undefined> = process.env,
+  passwordPolicy = parsePasswordPolicy(env),
 ) {
   const app = express();
   app.disable("x-powered-by");
@@ -129,6 +146,39 @@ export function createAuthHttpApp(
     res.set("Cache-Control", "no-store").set("X-Request-Id", randomUUID());
     next();
   });
+
+  const { activation } = services;
+
+  const admitActivation =
+    (consume: Services["activation"]["consumeIp"]): express.RequestHandler =>
+    async (req, res, next) => {
+      const admission = await consume(clientIp(req));
+      if (!admission.accepted) {
+        res
+          .set("Retry-After", String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))))
+          .status(429)
+          .json({ error: "Too Many Requests" });
+        return;
+      }
+      await activation.cleanupExpired();
+      next();
+    };
+
+  app.post(
+    "/activate/validate",
+    (req, res, next) => {
+      // This endpoint does not ask for session credentials.
+      if (transport.protect) transport.protect(req, res, next, 403);
+      else next();
+    },
+    admitActivation(activation.consumeValidationIp),
+    json,
+    async (req, res) => {
+      const { token } = parseInput(activationValidation, req.body);
+      if (!(await activation.validateToken(token))) throw badRequest;
+      res.status(200).json({ passwordPolicy });
+    },
+  );
 
   if (transport.protect) app.use(transport.protect);
 
@@ -176,8 +226,6 @@ export function createAuthHttpApp(
     res.status(204).end();
   });
 
-  const { activation } = services;
-
   app.post("/register", json, async (req, res) => {
     const session = await authenticated(req, res);
     if (!session) return;
@@ -220,27 +268,11 @@ export function createAuthHttpApp(
     res.json({ activationUrl: activation.link(result.token), expiresAt: result.expiresAt });
   });
 
-  app.post(
-    "/activate",
-    async (req, res, next) => {
-      const admission = await activation.consumeIp(clientIp(req));
-      if (!admission.accepted) {
-        res
-          .set("Retry-After", String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))))
-          .status(429)
-          .json({ error: "Too Many Requests" });
-        return;
-      }
-      await activation.cleanupExpired();
-      next();
-    },
-    json,
-    async (req, res) => {
-      const { token, password } = parseInput(activationConfirmation, req.body);
-      if (!(await activation.activateAccount(token, password, requestId(res)))) throw badRequest;
-      res.status(204).end();
-    },
-  );
+  app.post("/activate", admitActivation(activation.consumeIp), json, async (req, res) => {
+    const { token, password } = parseInput(activationConfirmation, req.body);
+    if (!(await activation.activateAccount(token, password, requestId(res)))) throw badRequest;
+    res.status(204).end();
+  });
 
   app.use(notFoundHandler);
   app.use(handleError);

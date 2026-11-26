@@ -19,6 +19,6 @@ export type MessageKey =
 
 export interface AppContent {
   LanguageSelector: () => ReactNode
-  t: (key: MessageKey) => string
+  t: (key: MessageKey | `auth.${string}`, fallback?: string) => string
   EditInstruction: () => ReactNode
 }

@@ -28,6 +28,8 @@ export async function checkAuthLifecycle(mode, database, writer, asAdministrator
     AUTH_TRUSTED_PROXIES: "127.0.0.1",
     LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
     LOGIN_IP_REQUEST_LIMIT: "30",
+    AUTH_PASSWORD_MIN_LENGTH: "12",
+    AUTH_PASSWORD_MAX_LENGTH: "50",
   };
   const adminEmail = "admin@example.test";
   const email = "member@example.test";
@@ -35,6 +37,15 @@ export async function checkAuthLifecycle(mode, database, writer, asAdministrator
   const activated = "activation test credential";
   const changed = "updated test credential";
   const recovered = "recovered test credential";
+  await assert.rejects(
+    asAdministrator((owner) =>
+      bootstrapInitialAdministrator(owner, {
+        email: adminEmail,
+        password: adminEmail.toUpperCase(),
+      }),
+    ),
+    { code: "INVALID_CREDENTIALS" },
+  );
   const { userId: adminId } = await asAdministrator((owner) =>
     bootstrapInitialAdministrator(owner, { email: adminEmail, password: initial }),
   );
@@ -123,6 +134,22 @@ export async function checkAuthLifecycle(mode, database, writer, asAdministrator
       [{ digest }],
     );
 
+    const validation = await post("/activate/validate", { token: activation });
+    assert.equal(validation.status, 200);
+    assert.equal(validation.headers.get("Cache-Control"), "no-store");
+    assert.equal(validation.headers.get("Set-Cookie"), null);
+    assert.deepEqual(await validation.json(), {
+      passwordPolicy: { minLength: 12, maxLength: 50, maxBytes: 512 },
+    });
+    const rejectedActivation = await post("/activate", {
+      token: activation,
+      password: email.toUpperCase(),
+    });
+    assert.equal(rejectedActivation.status, 400);
+    assert.deepEqual(await rejectedActivation.json(), {
+      error: "Bad Request",
+      code: "PASSWORD_POLICY",
+    });
     const confirmation = await post("/activate", { token: activation, password: activated });
     assert.equal(confirmation.status, 204);
     assert.equal(await confirmation.text(), "");
@@ -136,6 +163,20 @@ export async function checkAuthLifecycle(mode, database, writer, asAdministrator
     await session(member, userId);
     const denial = await post("/register", { email: "unexpected@example.test" }, member);
     assert.equal(denial.status, 403);
+    const rejectedChange = await post(
+      "/password",
+      {
+        currentPassword: activated,
+        newPassword: email.toUpperCase(),
+      },
+      member,
+    );
+    assert.equal(rejectedChange.status, 400);
+    assert.deepEqual(await rejectedChange.json(), {
+      error: "Bad Request",
+      code: "PASSWORD_POLICY",
+    });
+    await session(member, userId);
     const change = await post(
       "/password",
       { currentPassword: activated, newPassword: changed },
@@ -154,6 +195,12 @@ export async function checkAuthLifecycle(mode, database, writer, asAdministrator
     const unaffectedMember = await login(email, changed);
 
     const recoveryId = randomUUID();
+    assert.equal(
+      await asAdministrator((owner) =>
+        recoverInitialAdministrator(owner, adminEmail.toUpperCase(), recoveryId),
+      ),
+      false,
+    );
     assert.equal(
       await asAdministrator((owner) => recoverInitialAdministrator(owner, recovered, recoveryId)),
       true,

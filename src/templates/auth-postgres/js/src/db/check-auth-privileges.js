@@ -1,36 +1,9 @@
-import { connectionUrl } from "./connection-url.js";
-import pg from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import * as schema from "./schema.js";
+import { checkRuntimeIdentity, pool } from "./client.js";
 
-const { Pool } = pg;
-
-try {
-  process.loadEnvFile();
-} catch (err) {
-  if (err.code !== "ENOENT") {
-    throw err;
-  }
-}
-
-export const pool = new Pool({
-  connectionString: connectionUrl("DATABASE_URL"),
-});
-
-export const db = drizzle(pool, { schema });
-
-export async function checkRuntimeIdentity() {
+export async function checkAuthPrivileges() {
+  await checkRuntimeIdentity();
   const { rows } = await pool.query(`
-    SELECT current_user = 'app_exec' AND session_user = current_user
-      AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls OR rolreplication)
-      AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member = pg_roles.oid)
-      AND NOT EXISTS (SELECT FROM pg_database WHERE datname = current_database() AND datdba = pg_roles.oid)
-      AND NOT EXISTS (SELECT FROM pg_namespace WHERE nspname IN ('public','drizzle') AND nspowner = pg_roles.oid)
-      AND NOT has_database_privilege(current_database(), 'CREATE,TEMP,CONNECT WITH GRANT OPTION')
-      AND NOT has_schema_privilege('public', 'CREATE,USAGE WITH GRANT OPTION')
-      AND NOT has_schema_privilege('drizzle', 'USAGE,CREATE')
-      AND has_schema_privilege('public', 'USAGE')
-      AND NOT EXISTS (
+    SELECT NOT EXISTS (
         SELECT FROM unnest(ARRAY['public.users','public.sessions','public.activation_tokens','public.audit_log_system','public.login_abuse_counters','public.login_identifier_reservations']) AS t(name)
         WHERE (SELECT relowner FROM pg_class WHERE oid = t.name::regclass) <> 'table_owner'::regrole
       )
@@ -64,7 +37,6 @@ export async function checkRuntimeIdentity() {
       AND NOT has_table_privilege('public.login_identifier_reservations', 'TRUNCATE,TRIGGER,MAINTAIN,DELETE WITH GRANT OPTION')
       AND NOT has_any_column_privilege('public.login_identifier_reservations', 'UPDATE,REFERENCES,SELECT WITH GRANT OPTION,INSERT WITH GRANT OPTION')
       AS allowed
-    FROM pg_roles WHERE rolname = current_user
   `);
   if (rows[0]?.allowed !== true) throw new Error("Identidad PostgreSQL de ejecución insegura.");
 

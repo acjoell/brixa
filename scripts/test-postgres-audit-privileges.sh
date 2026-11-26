@@ -2,7 +2,7 @@
 # Desde la raíz, con las dependencias del backend PostgreSQL ya instaladas.
 set -euo pipefail
 mode=${1:-upgrade}
-case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery|login-abuse|auth-lifecycle) ;; *) exit 2 ;; esac
+case "$mode" in fresh|upgrade|indirect|authority|bootstrap|bootstrap-tty|activation-fresh|activation-upgrade|managed-activation|account-activation|login|logout|change-password|admin-recovery|login-abuse|auth-lifecycle|migration-role) ;; *) exit 2 ;; esac
 script_dir=$(dirname "$(realpath "$0")")
 deps=$(realpath "${BRIXA_BACKEND_NODE_MODULES:?Directorio node_modules del backend generado}")
 test -d "$deps/pg"
@@ -46,10 +46,32 @@ owner_url="postgresql://table_owner:$owner_password@127.0.0.1:$port/app"
 export DATABASE_URL="postgresql://app_exec:$runtime_password@127.0.0.1:$port/app"
 migrate() { MIGRATION_DATABASE_URL="$owner_url" node src/db/migrate.js; }
 test "$(admin -Atc 'SHOW server_version_num')" = 170004
+if [[ "$mode" == migration-role ]]; then
+  expect_migration_rejection() {
+    if migrate >"$work/migration.log" 2>&1; then
+      printf 'Se aceptó un rol de migración incompatible: %s\n' "$1" >&2
+      exit 1
+    fi
+    grep -q 'Identidad PostgreSQL de migración insegura' "$work/migration.log"
+    test "$(admin -Atc "SELECT to_regclass('drizzle.__drizzle_migrations') IS NULL AND to_regclass('public.users') IS NULL")" = t
+  }
+  for attribute in SUPERUSER CREATEROLE CREATEDB REPLICATION BYPASSRLS; do
+    admin -c "ALTER ROLE table_owner $attribute" >/dev/null
+    expect_migration_rejection "$attribute"
+    admin -c "ALTER ROLE table_owner NO$attribute" >/dev/null
+  done
+  admin -c "GRANT pg_read_all_data TO table_owner WITH INHERIT FALSE, SET FALSE" >/dev/null
+  expect_migration_rejection "membresía"
+  admin -c "REVOKE pg_read_all_data FROM table_owner" >/dev/null
+  migrate
+  test "$(admin -Atc "SELECT to_regclass('public.users') IS NOT NULL AND EXISTS (SELECT FROM drizzle.__drizzle_migrations)")" = t
+  echo "PostgreSQL 17.4: validación de atributos y membresías antes de migrar aprobada."
+  exit
+fi
 if [[ "$mode" == auth-lifecycle ]]; then
   migrate
   BRIXA_TEST_OWNER_URL="$owner_url" ENABLE_API_DOCS=true ARGON2_MAX_CONCURRENT=2 ARGON2_MAX_QUEUE=8 node --input-type=module <<'JS'
-import { checkRuntimeIdentity, db, pool } from "./src/db/client.js";
+import { db, pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 import { withPostgresAdministrator } from "./src/db/bootstrap.js";
 import { checkAuthLifecycle } from "./tests/auth-lifecycle-contract.js";
 
@@ -79,7 +101,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { copyFile } from "node:fs/promises";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 import { SystemAuditDenied, withSystemAudit } from "./src/auth/system-audit.js";
 import { setImmediate } from "node:timers/promises";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -348,7 +370,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { activationTokenDigest, generateActivationToken } from "./src/auth/activation-token.js";
-import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 
 const owner = new pg.Pool({ connectionString: process.env.BRIXA_TEST_OWNER_URL });
 try {
@@ -445,7 +467,7 @@ if [ "$mode" = bootstrap ]; then
 import assert from "node:assert/strict";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { checkRuntimeIdentity, pool } from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 import { bootstrapPostgresAdministrator } from "./src/db/bootstrap.js";
 import * as schema from "./src/db/schema.js";
 import { checkBootstrap, checkBootstrapRace } from "./tests/bootstrap-contract.js";
@@ -497,7 +519,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { copyFile } from "node:fs/promises";
 import pg from "pg";
-import { checkRuntimeIdentity, db, pool } from "./src/db/client.js";
+import { db, pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 import { isInitialAdministrator } from "./src/auth/initial-administrator.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -570,7 +592,7 @@ if [ "$mode" = fresh ]; then
   migrate
   migrate
   provision
-  node --input-type=module -e 'import {checkRuntimeIdentity,pool} from "./src/db/client.js"; try { await checkRuntimeIdentity(); } finally { await pool.end(); }'
+  node --input-type=module -e 'import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js"; try { await checkRuntimeIdentity(); } finally { await pool.end(); }'
   echo 'PostgreSQL 17.4: instalación completa desde vacío y repetición comprobadas.'
   exit 0
 fi
@@ -603,7 +625,7 @@ SQL
   check_objects() {
     EXPECT_OBJECT="$1" node --input-type=module <<'JS'
 import assert from "node:assert/strict";
-import {pool,checkRuntimeIdentity} from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 try {
   if (process.env.EXPECT_OBJECT) {
     await assert.rejects(checkRuntimeIdentity(), error => error.message.includes(process.env.EXPECT_OBJECT));
@@ -654,7 +676,7 @@ test "$(baseline)" = "$before"
 test "$(owner -c 'SELECT count(*) FROM drizzle.__drizzle_migrations')" = 9
 node --input-type=module <<'JS'
 import assert from "node:assert/strict";
-import {pool,checkRuntimeIdentity} from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 try {
   await checkRuntimeIdentity();
   assert.equal((await pool.query("SELECT session_user")).rows[0].session_user,"app_exec");
@@ -679,7 +701,7 @@ done
 reject_start() {
   node --input-type=module <<'JS'
 import assert from "node:assert/strict";
-import {pool,checkRuntimeIdentity} from "./src/db/client.js";
+import { pool } from "./src/db/client.js"; import { checkAuthPrivileges as checkRuntimeIdentity } from "./src/db/check-auth-privileges.js";
 try { await assert.rejects(checkRuntimeIdentity(), /insegura/); }
 finally { await pool.end(); }
 JS

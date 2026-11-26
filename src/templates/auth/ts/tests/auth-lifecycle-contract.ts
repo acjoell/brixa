@@ -6,7 +6,12 @@ import type { AddressInfo } from "node:net";
 import { URL, URLSearchParams } from "node:url";
 import type { ActivationDatabase } from "../src/db/activation-write.js";
 import type { db } from "../src/db/client.js";
-import { activationTokens, auditLogSystem, initialAdministrator, sessions } from "../src/db/schema.js";
+import {
+  activationTokens,
+  auditLogSystem,
+  initialAdministrator,
+  sessions,
+} from "../src/db/schema.js";
 import { activationTokenDigest } from "../src/auth/activation-token.js";
 import { tokenDigest } from "../src/auth/sessions.js";
 
@@ -32,6 +37,8 @@ export async function checkAuthLifecycle(
     AUTH_TRUSTED_PROXIES: "127.0.0.1",
     LOGIN_ABUSE_HMAC_KEY: randomBytes(32).toString("hex"),
     LOGIN_IP_REQUEST_LIMIT: "30",
+    AUTH_PASSWORD_MIN_LENGTH: "12",
+    AUTH_PASSWORD_MAX_LENGTH: "50",
   };
   const adminEmail = "admin@example.test";
   const email = "member@example.test";
@@ -39,6 +46,15 @@ export async function checkAuthLifecycle(
   const activated = "activation test credential";
   const changed = "updated test credential";
   const recovered = "recovered test credential";
+  await assert.rejects(
+    asAdministrator((owner) =>
+      bootstrapInitialAdministrator(owner, {
+        email: adminEmail,
+        password: adminEmail.toUpperCase(),
+      }),
+    ),
+    { code: "INVALID_CREDENTIALS" },
+  );
   const { userId: adminId } = await asAdministrator((owner) =>
     bootstrapInitialAdministrator(owner, { email: adminEmail, password: initial }),
   );
@@ -96,10 +112,7 @@ export async function checkAuthLifecycle(
 
     const admin = await login(adminEmail, initial);
     const adminSecond = await login(adminEmail, initial);
-    assert.equal(
-      (await fetch(base + "/auth/session", { headers: admin.header })).status,
-      403,
-    );
+    assert.equal((await fetch(base + "/auth/session", { headers: admin.header })).status, 403);
     const docsEnabled = existsSync("src/docs/openapi.json");
     assert.equal((await get("/docs/swagger-ui-init.js")).status, docsEnabled ? 401 : 404);
     const docs = await get("/docs/swagger-ui-init.js", admin);
@@ -132,17 +145,54 @@ export async function checkAuthLifecycle(
       [{ digest }],
     );
 
+    const validation = await post("/activate/validate", { token: activation });
+    assert.equal(validation.status, 200);
+    assert.equal(validation.headers.get("Cache-Control"), "no-store");
+    assert.equal(validation.headers.get("Set-Cookie"), null);
+    assert.deepEqual(await validation.json(), {
+      passwordPolicy: { minLength: 12, maxLength: 50, maxBytes: 512 },
+    });
+    const rejectedActivation = await post("/activate", {
+      token: activation,
+      password: email.toUpperCase(),
+    });
+    assert.equal(rejectedActivation.status, 400);
+    assert.deepEqual(await rejectedActivation.json(), {
+      error: "Bad Request",
+      code: "PASSWORD_POLICY",
+    });
     const confirmation = await post("/activate", { token: activation, password: activated });
     assert.equal(confirmation.status, 204);
     assert.equal(await confirmation.text(), "");
     assert.equal(confirmation.headers.get("Set-Cookie"), null);
-    assert.equal((await database.select({ digest: sessions.sessionTokenHash }).from(sessions)).length, 2);
+    assert.equal(
+      (await database.select({ digest: sessions.sessionTokenHash }).from(sessions)).length,
+      2,
+    );
     const member = await login(email, activated);
     const otherClient = await login(email, activated);
     await session(member, userId);
     const denial = await post("/register", { email: "unexpected@example.test" }, member);
     assert.equal(denial.status, 403);
-    const change = await post("/password", { currentPassword: activated, newPassword: changed }, member);
+    const rejectedChange = await post(
+      "/password",
+      {
+        currentPassword: activated,
+        newPassword: email.toUpperCase(),
+      },
+      member,
+    );
+    assert.equal(rejectedChange.status, 400);
+    assert.deepEqual(await rejectedChange.json(), {
+      error: "Bad Request",
+      code: "PASSWORD_POLICY",
+    });
+    await session(member, userId);
+    const change = await post(
+      "/password",
+      { currentPassword: activated, newPassword: changed },
+      member,
+    );
     assert.equal(change.status, 204);
     await absentSession(member);
     await absentSession(otherClient);
@@ -156,6 +206,12 @@ export async function checkAuthLifecycle(
     const unaffectedMember = await login(email, changed);
 
     const recoveryId = randomUUID();
+    assert.equal(
+      await asAdministrator((owner) =>
+        recoverInitialAdministrator(owner, adminEmail.toUpperCase(), recoveryId),
+      ),
+      false,
+    );
     assert.equal(
       await asAdministrator((owner) => recoverInitialAdministrator(owner, recovered, recoveryId)),
       true,
@@ -189,8 +245,10 @@ export async function checkAuthLifecycle(
     const audit = await asAdministrator((owner) => owner.select().from(auditLogSystem));
     const checkEvent = (event: string, actorId: string | null, id?: string) =>
       assert.equal(
-        audit.filter((row) =>
-          row.event === event && row.actorId === actorId &&
+        audit.filter(
+          (row) =>
+            row.event === event &&
+            row.actorId === actorId &&
             (id === undefined || row.requestId === id),
         ).length,
         1,
@@ -212,8 +270,18 @@ export async function checkAuthLifecycle(
     assert(!audit.some((row) => row.requestId === saturationId));
     const [{ userId: authority }] = await database.select().from(initialAdministrator);
     assert.equal(authority, adminId);
-    const persistedSessions = await database.select({ digest: sessions.sessionTokenHash }).from(sessions);
-    for (const proof of [admin, adminSecond, member, otherClient, newMember, unaffectedMember, finalAdmin]) {
+    const persistedSessions = await database
+      .select({ digest: sessions.sessionTokenHash })
+      .from(sessions);
+    for (const proof of [
+      admin,
+      adminSecond,
+      member,
+      otherClient,
+      newMember,
+      unaffectedMember,
+      finalAdmin,
+    ]) {
       assert(persistedSessions.some((row) => row.digest === tokenDigest(proof.token)));
       assert(!JSON.stringify(audit).includes(proof.token));
     }
@@ -221,7 +289,7 @@ export async function checkAuthLifecycle(
       assert(!JSON.stringify(audit).includes(secret));
   } finally {
     await new Promise<void>((resolve, reject) =>
-      server.close((error) => error ? reject(error) : resolve()),
+      server.close((error) => (error ? reject(error) : resolve())),
     );
   }
 }

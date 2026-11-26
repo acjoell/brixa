@@ -3,7 +3,10 @@ import { eq } from "drizzle-orm";
 import type { ActivationDatabase } from "../src/db/activation-write.js";
 import { lockActivationUser } from "../src/db/activation-write.js";
 import { auditLogSystem, sessions, users } from "../src/db/schema.js";
-import { createAccountActivationService } from "../src/auth/activate-account.js";
+import {
+  createAccountActivationService,
+  createActivationValidationService,
+} from "../src/auth/activate-account.js";
 import { activationTokenDigest, generateActivationToken } from "../src/auth/activation-token.js";
 import { createManagedActivationService } from "../src/auth/managed-activation.js";
 import { hashPassword, verifyPassword } from "../src/auth/password-crypto.js";
@@ -32,6 +35,7 @@ function activationSetup(fixture: Fixture) {
   const succeeded = (id: string) => audit(id, ["account_activated", "activation_token_consumed"]);
   return {
     activate,
+    validate: (db: ActivationDatabase) => createActivationValidationService(db, clock),
     manage,
     issue,
     account,
@@ -60,18 +64,31 @@ export async function checkAccountActivation(
     enabled: boolean,
   ) => Promise<unknown>,
 ) {
-  const { activate, manage, issue, account, audit, succeeded, setNow } = activationSetup(fixture);
+  const { activate, validate, manage, issue, account, audit, succeeded, setNow } =
+    activationSetup(fixture);
   const consume = activate(runtime);
+  const check = validate(runtime);
   const first = await issue(runtime, "activate-new");
   const initialUser = await account(first.userId);
   const initialToken = await fixture.tokenRows(first.userId);
+  assert.equal(await check(first.token), true);
+  assert.equal(await check(first.token), true);
   assert.equal(initialUser.status, "pending_activation");
   assert.equal(initialUser.passwordHash, null);
   for (const invalid of [undefined, "bad", first.token + "=", generateActivationToken()]) {
+    assert.equal(await check(invalid), false);
     assert.equal(await consume(invalid, primaryPassword, "bad-token"), false);
   }
-  for (const invalid of ["", "a".repeat(129), "\ud800"]) {
-    assert.equal(await consume(first.token, invalid, "bad-password"), false);
+  for (const invalid of [
+    "",
+    "a".repeat(129),
+    "\ud800",
+    "ACTIVATE-NEW@EXAMPLE.TEST",
+    "ACTIVATE-NEW",
+  ]) {
+    await assert.rejects(consume(first.token, invalid, "bad-password"), {
+      message: "PASSWORD_POLICY",
+    });
   }
   assert.deepEqual(await account(first.userId), initialUser);
   assert.deepEqual(await fixture.tokenRows(first.userId), initialToken);
@@ -92,11 +109,14 @@ export async function checkAccountActivation(
     { ...initialToken[0], status: "consumed", closedAt: new Date(fixture.initialTime) },
   ]);
   await succeeded("confirm");
+  assert.equal(await check(first.token), false);
   assert.equal(await consume(first.token, secondaryPassword, "reuse"), false);
   assert.deepEqual(await account(first.userId), activated);
 
   const revoked = await issue(runtime, "activate-revoked");
+  assert.equal(await check(revoked.token), true);
   await manage(runtime).revokeActivationToken(fixture.actor("revoke"), revoked.userId);
+  assert.equal(await check(revoked.token), false);
   assert.equal(await consume(revoked.token, primaryPassword, "revoked"), false);
   await audit("revoked", []);
   await audit("reuse", []);
@@ -112,14 +132,18 @@ export async function checkAccountActivation(
       .update(users)
       .set({ status })
       .where(eq(users.id, pendingWithPassword.userId));
+    assert.equal(await check(pendingWithPassword.token), false);
     assert.equal(await consume(pendingWithPassword.token, primaryPassword, "incompatible"), false);
     assert.deepEqual(await account(pendingWithPassword.userId), { ...existing, status });
   }
   await audit("incompatible", []);
 
   const expired = await issue(runtime, "activate-expired");
+  assert.equal(await check(expired.token), true);
   setNow(expired.expiresAt);
   const expiredBefore = await fixture.tokenRows(expired.userId);
+  assert.equal(await check(expired.token), false);
+  assert.deepEqual(await fixture.tokenRows(expired.userId), expiredBefore);
   await failAudit("activation_token_expired", true);
   await activationFailed(consume(expired.token, primaryPassword, "expiry-audit-failed"));
   assert.deepEqual(await fixture.tokenRows(expired.userId), expiredBefore);

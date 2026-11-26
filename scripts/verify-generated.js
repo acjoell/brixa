@@ -22,10 +22,12 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { provisionPostgres } from "./fixtures/postgres.js";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { verifyI18n } from "./verify-i18n.js";
@@ -87,6 +89,22 @@ function getDefaultTimeout(cmd, args) {
   return 120_000; // 2 minutos por defecto
 }
 
+function verificationEnv(extra = {}) {
+  const reserved = [
+    "DATABASE_URL",
+    "MIGRATION_DATABASE_URL",
+    "POSTGRES_PASSWORD",
+    "PGPASSWORD",
+    "PGPASSFILE",
+    "VERIFY_DATABASE_URL",
+    "VERIFY_MIGRATION_DATABASE_URL",
+  ];
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !reserved.includes(key)),
+  );
+  return { ...inherited, ...extra };
+}
+
 /** Ejecuta un comando sincrónico e imprime la salida heredada con medición de tiempo y timeout. */
 function run(cmd, args, cwd, extraEnv = {}, customTimeoutMs = null) {
   const timeoutMs = customTimeoutMs ?? getDefaultTimeout(cmd, args);
@@ -97,7 +115,7 @@ function run(cmd, args, cwd, extraEnv = {}, customTimeoutMs = null) {
   // Excluir NODE_ENV del entorno heredado para que los builds de Vite usen "production".
   // Vite establece NODE_ENV="development" cuando lanza createServer, y si ese valor
   // se propaga a builds hijos, React se incluye en modo desarrollo (~70 kB extra).
-  const env = { ...process.env, ...extraEnv };
+  const env = verificationEnv(extraEnv);
   delete env.NODE_ENV;
   const isWindows = process.platform === "win32";
   const actualCmd = isWindows && cmd === "npm" ? "npm.cmd" : cmd;
@@ -133,42 +151,46 @@ export function prepareDependencies(projectDir, mode = "all") {
   }
 }
 
-/** Cierra un proceso de forma limpia y fuerza el cierre de todo el árbol en Windows si es necesario. */
-export async function stopProcess(child) {
-  if (!child || child.killed || child.exitCode !== null) return;
+const stoppingProcesses = new WeakMap();
 
-  if (process.platform === "win32") {
-    try {
-      execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-    } catch {
-      // Ignorar si el proceso ya terminó
-    }
-  } else {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // ignore
-    }
-  }
+/** Espera la salida del proceso, incluso si otra llamada ya solicitó detenerlo. */
+export function stopProcess(child) {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  if (stoppingProcesses.has(child)) return stoppingProcesses.get(child);
 
-  await new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve();
+  const stopped = new Promise((resolve, reject) => {
     let timer;
     const onExit = () => {
       clearTimeout(timer);
       resolve();
     };
     child.once("exit", onExit);
+    try {
+      if (process.platform === "win32") {
+        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          timeout: 4000,
+        });
+      } else {
+        child.kill("SIGTERM");
+      }
+    } catch {
+      // El proceso puede haber terminado antes de recibir la señal.
+    }
     timer = setTimeout(() => {
-      child.removeListener("exit", onExit);
       try {
         if (process.platform !== "win32") child.kill("SIGKILL");
       } catch {
-        // ignore
+        // Conserva la espera de salida aunque falle el envío de la señal.
       }
-      resolve();
+      timer = setTimeout(() => {
+        child.removeListener("exit", onExit);
+        reject(new Error("No se confirmó la terminación del proceso."));
+      }, 4000);
     }, 4000);
   });
+  stoppingProcesses.set(child, stopped);
+  return stopped;
 }
 
 /** Obtiene un puerto TCP libre asignado por el sistema operativo. */
@@ -191,10 +213,11 @@ export async function startBackendServer(
   projectDir,
   entryPoint = path.join("dist", "index.js"),
   extraEnv = {},
+  { sanitizeOutput } = {},
 ) {
   const normEntryPoint = path.normalize(entryPoint);
   console.log(`\nIniciando servidor backend (${normEntryPoint})...`);
-  const serverEnv = { ...process.env, PORT: "0", ...extraEnv };
+  const serverEnv = verificationEnv({ PORT: "0", ...extraEnv });
   delete serverEnv.NODE_ENV;
   const child = spawn("node", [normEntryPoint], {
     cwd: projectDir,
@@ -206,8 +229,12 @@ export async function startBackendServer(
   const stderrLines = [];
 
   const port = await new Promise((resolve, reject) => {
+    let stdout = "";
     const timeout = setTimeout(() => {
-      const outTail = stdoutLines.slice(-30).join("\n").trim();
+      const outTail = (sanitizeOutput ? sanitizeOutput(stdout).split("\n") : stdoutLines)
+        .slice(-30)
+        .join("\n")
+        .trim();
       const errTail = stderrLines.slice(-30).join("\n").trim();
       reject(
         new Error(
@@ -216,10 +243,9 @@ export async function startBackendServer(
       );
     }, 10000);
 
-    let stdout = "";
     child.stdout.on("data", (chunk) => {
       const str = chunk.toString();
-      stdoutLines.push(...str.split("\n"));
+      if (!sanitizeOutput) stdoutLines.push(...str.split("\n"));
       stdout += str;
       const match = stdout.match(/http:\/\/localhost:(\d+)/);
       if (match) {
@@ -228,10 +254,18 @@ export async function startBackendServer(
       }
     });
 
-    child.stderr.on("data", (chunk) => {
-      stderrLines.push(...chunk.toString().split("\n"));
-      process.stderr.write(chunk);
-    });
+    if (sanitizeOutput) {
+      createInterface({ input: child.stderr }).on("line", (line) => {
+        const safe = sanitizeOutput(line);
+        stderrLines.push(safe);
+        process.stderr.write(safe + "\n");
+      });
+    } else {
+      child.stderr.on("data", (chunk) => {
+        stderrLines.push(...chunk.toString().split("\n"));
+        process.stderr.write(chunk);
+      });
+    }
 
     child.on("error", (err) => {
       clearTimeout(timeout);
@@ -363,11 +397,11 @@ export async function startViteServer(frontendDir, backendPort, backendLogs = nu
 }
 
 /** Comprueba que el servidor backend arranca y responde 200 en /health antes de cerrarlo. */
-async function checkBackendServer(projectDir, entryPoint = path.join("dist", "index.js")) {
+async function checkBackendServer(projectDir, entryPoint, env) {
   let backend;
   const httpStart = performance.now();
   try {
-    backend = await startBackendServer(projectDir, entryPoint);
+    backend = await startBackendServer(projectDir, entryPoint, env);
     console.log(
       `Servidor backend escuchando en puerto ${backend.port}. Verificando GET /health...`,
     );
@@ -440,7 +474,7 @@ async function verifySwaggerUiAssets(html, docsUrl) {
 }
 
 /** Comprueba que la documentación de API responde 404 por defecto y 200/301 con ENABLE_API_DOCS=true. */
-async function checkBackendDocs(projectDir, entryPoint = path.join("dist", "index.js")) {
+async function checkBackendDocs(projectDir, entryPoint, env) {
   const docsStart = performance.now();
   const envExample = path.join(projectDir, ".env.example");
   const envFile = path.join(projectDir, ".env");
@@ -449,7 +483,7 @@ async function checkBackendDocs(projectDir, entryPoint = path.join("dist", "inde
     // 1. Sin ENABLE_API_DOCS: verificamos que /docs y /docs/ devuelven 404
     let backendWithoutDocs;
     try {
-      backendWithoutDocs = await startBackendServer(projectDir, entryPoint);
+      backendWithoutDocs = await startBackendServer(projectDir, entryPoint, env);
       console.log(
         `Verificando GET http://localhost:${backendWithoutDocs.port}/docs (sin ENABLE_API_DOCS)...`,
       );
@@ -485,7 +519,7 @@ async function checkBackendDocs(projectDir, entryPoint = path.join("dist", "inde
       }
       fs.writeFileSync(envFile, envContent, "utf-8");
 
-      backendWithDocs = await startBackendServer(projectDir, entryPoint);
+      backendWithDocs = await startBackendServer(projectDir, entryPoint, env);
       console.log(`Verificando redirección GET http://localhost:${backendWithDocs.port}/docs...`);
       const resRedirect = await fetch(`http://localhost:${backendWithDocs.port}/docs`, {
         redirect: "manual",
@@ -555,7 +589,7 @@ export async function startPostgresContainer({ auth = false } = {}) {
   const port = await getFreePort();
   const containerName = `brixa-pg-verify-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const user = "brixa_test";
-  const pass = auth ? randomBytes(24).toString("hex") : "brixa_pass";
+  const pass = randomBytes(24).toString("hex");
   const db = "brixa_db";
 
   console.log(`\nIniciando contenedor PostgreSQL desechable en 127.0.0.1:${port}...`);
@@ -564,15 +598,13 @@ export async function startPostgresContainer({ auth = false } = {}) {
     try {
       execFileSync("docker", ["stop", containerName], {
         stdio: "ignore",
-        ...(auth ? { timeout: 15_000 } : {}),
+        timeout: 15_000,
       });
     } catch {
-      if (auth) {
-        execFileSync("docker", ["rm", "-f", "-v", containerName], {
-          stdio: "ignore",
-          timeout: 15_000,
-        });
-      }
+      execFileSync("docker", ["rm", "-f", "-v", containerName], {
+        stdio: "ignore",
+        timeout: 15_000,
+      });
     }
   };
   try {
@@ -587,7 +619,7 @@ export async function startPostgresContainer({ auth = false } = {}) {
         "-e",
         `POSTGRES_USER=${user}`,
         "-e",
-        auth ? "POSTGRES_PASSWORD" : `POSTGRES_PASSWORD=${pass}`,
+        "POSTGRES_PASSWORD",
         "-e",
         `POSTGRES_DB=${db}`,
         "-p",
@@ -601,15 +633,16 @@ export async function startPostgresContainer({ auth = false } = {}) {
               "/var/lib/postgresql/data:rw,size=128m",
             ]
           : []),
-        auth ? "postgres:17.4-alpine" : "postgres:17-alpine",
+        "postgres:17.4-alpine",
       ],
       {
         stdio: "inherit",
-        ...(auth ? { timeout: 30_000, env: { ...process.env, POSTGRES_PASSWORD: pass } } : {}),
+        env: verificationEnv({ POSTGRES_PASSWORD: pass }),
+        timeout: 30_000,
       },
     );
   } catch (error) {
-    if (auth && error.code === "ETIMEDOUT") await stop();
+    if (error.code === "ETIMEDOUT") await stop();
     throw error;
   }
 
@@ -619,10 +652,10 @@ export async function startPostgresContainer({ auth = false } = {}) {
   let ready = false;
   while (Date.now() - startTime < 30000) {
     try {
-      const host = auth ? ["-h", "127.0.0.1"] : [];
+      const host = ["-h", "127.0.0.1"];
       execFileSync("docker", ["exec", containerName, "pg_isready", ...host, "-U", user, "-d", db], {
         stdio: "ignore",
-        ...(auth ? { timeout: 3000 } : {}),
+        timeout: 3000,
       });
       ready = true;
       break;
@@ -642,54 +675,37 @@ export async function startPostgresContainer({ auth = false } = {}) {
 }
 
 export async function setupPostgres() {
-  if (process.env.VERIFY_DATABASE_URL) {
-    console.log("\nUsando VERIFY_DATABASE_URL provista por el entorno.");
+  const {
+    VERIFY_DATABASE_URL: DATABASE_URL,
+    VERIFY_MIGRATION_DATABASE_URL: MIGRATION_DATABASE_URL,
+  } = process.env;
+  const stop = async () => {};
+  if (DATABASE_URL || MIGRATION_DATABASE_URL) {
+    if (!DATABASE_URL || !MIGRATION_DATABASE_URL) {
+      throw new Error(
+        "Configura juntas VERIFY_DATABASE_URL de app_exec y VERIFY_MIGRATION_DATABASE_URL de table_owner.",
+      );
+    }
+    console.log("\nUsando roles preaprovisionados en la base PostgreSQL de verificación.");
     return {
-      databaseUrl: process.env.VERIFY_DATABASE_URL,
-      stop: async () => {},
       available: true,
-      containerName: null,
-      user: null,
-      pass: null,
-      port: null,
+      stop,
+      open: async () => ({ DATABASE_URL, MIGRATION_DATABASE_URL, stop }),
     };
   }
-
-  if (!isDockerAvailable()) {
-    return {
-      databaseUrl: null,
-      stop: async () => {},
-      available: false,
-      containerName: null,
-      user: null,
-      pass: null,
-      port: null,
-    };
-  }
-
-  try {
-    const container = await startPostgresContainer();
-    return {
-      databaseUrl: container.databaseUrl,
-      stop: container.stop,
-      available: true,
-      containerName: container.containerName,
-      user: container.user,
-      pass: container.pass,
-      port: container.port,
-    };
-  } catch (err) {
-    console.warn("\nAdvertencia: no se pudo iniciar PostgreSQL vía Docker:", err.message ?? err);
-    return {
-      databaseUrl: null,
-      stop: async () => {},
-      available: false,
-      containerName: null,
-      user: null,
-      pass: null,
-      port: null,
-    };
-  }
+  return {
+    available: isDockerAvailable(),
+    stop,
+    async open(backendDir) {
+      const container = await startPostgresContainer();
+      try {
+        return { ...(await provisionPostgres(container, backendDir)), stop: container.stop };
+      } catch (error) {
+        await container.stop();
+        throw error;
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +792,106 @@ export async function generateProject(
   }
 }
 
+function addFixtureGrants(backendDir) {
+  const directory = path.join(backendDir, "drizzle");
+  const journalPath = path.join(directory, "meta", "_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+  const migration = journal.entries.at(-1);
+  // The external verification database can be reused for this identical fixture.
+  migration.when = 1;
+  fs.writeFileSync(journalPath, JSON.stringify(journal));
+  fs.appendFileSync(
+    path.join(directory, migration.tag + ".sql"),
+    "\n--> statement-breakpoint\nGRANT SELECT, INSERT ON public.test_items TO app_exec;\n" +
+      "--> statement-breakpoint\nGRANT USAGE ON SEQUENCE public.test_items_id_seq TO app_exec;\n",
+  );
+}
+
+const pendingRuntimeUrl = "DATABASE_URL=postgresql://app_exec:pending@postgres:5432/brixa_db";
+
+async function provisionComposePostgres(projectDir, backendDir) {
+  run("docker", ["compose", "up", "-d", "--wait", "postgres"], projectDir);
+  const containerName = execFileSync("docker", ["compose", "ps", "-q", "postgres"], {
+    cwd: projectDir,
+    env: verificationEnv(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const connection = await provisionPostgres(
+    { containerName, database: "brixa_db", user: "brixa_test", port: 5432 },
+    backendDir,
+    "postgres",
+  );
+  const envPath = path.join(projectDir, ".env");
+  const content = fs.readFileSync(envPath, "utf8");
+  fs.writeFileSync(
+    envPath,
+    content.replace(pendingRuntimeUrl, () => "DATABASE_URL=" + connection.DATABASE_URL),
+  );
+  return connection;
+}
+
+function migrateComposePostgres(projectDir, language, connection) {
+  const entry = language === "ts" ? ["node", "dist/db/migrate.js"] : ["npm", "run", "db:migrate"];
+  run(
+    "docker",
+    [
+      "compose",
+      "run",
+      "--rm",
+      "--no-deps",
+      "-T",
+      "-e",
+      "MIGRATION_DATABASE_URL",
+      "backend",
+      ...entry,
+    ],
+    projectDir,
+    { MIGRATION_DATABASE_URL: connection.MIGRATION_DATABASE_URL },
+  );
+}
+
+const verifyPostgresRuntime = `
+import assert from "node:assert/strict";
+import pg from "pg";
+assert.equal(process.env.POSTGRES_PASSWORD, undefined);
+assert.equal(process.env.MIGRATION_DATABASE_URL, undefined);
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await client.connect();
+  const { rows: [identity] } = await client.query("SELECT current_user AS role, pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'public.test_items'::regclass");
+  assert.deepEqual(identity, { role: "app_exec", owner: "table_owner" });
+  await client.query("BEGIN");
+  try {
+    const { rows } = await client.query("INSERT INTO public.test_items (title) VALUES ('verification') RETURNING id");
+    assert.equal((await client.query("SELECT title FROM public.test_items WHERE id = $1", [rows[0].id])).rows[0].title, "verification");
+  } finally {
+    await client.query("ROLLBACK");
+  }
+  for (const sql of ["CREATE TABLE public.__brixa_forbidden (id int)", "TRUNCATE public.test_items",
+                     "ALTER TABLE public.test_items ADD COLUMN forbidden int", "SELECT * FROM drizzle.__drizzle_migrations"]) {
+    await client.query("BEGIN");
+    try {
+      await assert.rejects(client.query(sql), { code: "42501" });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  }
+} finally {
+  await client.end();
+}
+`;
+
+function checkComposePostgresRuntime(projectDir) {
+  execFileSync("docker", ["compose", "exec", "-T", "backend", "node", "--input-type=module"], {
+    cwd: projectDir,
+    env: verificationEnv(),
+    input: verifyPostgresRuntime,
+    stdio: ["pipe", "inherit", "inherit"],
+    timeout: 30_000,
+  });
+}
+
 /** Verifica variantes con Docker usando docker compose */
 export async function verifyDockerVariant(
   projectDir,
@@ -796,8 +912,9 @@ export async function verifyDockerVariant(
     if (database === "postgres") {
       envLines.push(
         "POSTGRES_USER=brixa_test",
-        "POSTGRES_PASSWORD=brixa_pass_123",
+        "POSTGRES_PASSWORD=" + randomBytes(24).toString("hex"),
         "POSTGRES_DB=brixa_db",
+        pendingRuntimeUrl,
       );
     }
     if (apiDocs) {
@@ -828,6 +945,7 @@ export const testItems = pgTable("test_items", {
 `;
       fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
       run("npm", ["run", "db:generate"], backendDir);
+      addFixtureGrants(backendDir);
     } else if (database === "sqlite") {
       const schemaFile = path.join(
         backendDir,
@@ -848,7 +966,12 @@ export const testItems = sqliteTable("test_items", {
     }
 
     try {
+      const postgres =
+        database === "postgres"
+          ? await provisionComposePostgres(projectDir, backendDir)
+          : undefined;
       run("docker", ["compose", "build"], projectDir);
+      if (postgres) migrateComposePostgres(projectDir, language, postgres);
       run("docker", ["compose", "up", "-d"], projectDir);
 
       console.log("Esperando a que los servicios estén healthy en Docker...");
@@ -973,12 +1096,8 @@ export const testItems = sqliteTable("test_items", {
         );
       }
 
-      if (database === "postgres") {
-        const migrateArgs =
-          language === "ts"
-            ? ["compose", "run", "--rm", "backend", "node", "dist/db/migrate.js"]
-            : ["compose", "run", "--rm", "backend", "npm", "run", "db:migrate"];
-        run("docker", migrateArgs, projectDir);
+      if (postgres) {
+        checkComposePostgresRuntime(projectDir);
 
         const checkSql =
           "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'test_items';";
@@ -1025,7 +1144,11 @@ export const testItems = sqliteTable("test_items", {
     } finally {
       console.log("\nLimpiando recursos Docker (docker compose down -v)...");
       try {
-        execFileSync("docker", ["compose", "down", "-v"], { cwd: projectDir, stdio: "inherit" });
+        execFileSync("docker", ["compose", "down", "-v"], {
+          cwd: projectDir,
+          env: verificationEnv(),
+          stdio: "inherit",
+        });
       } catch {
         // Ignorar
       }
@@ -1037,9 +1160,12 @@ export const testItems = sqliteTable("test_items", {
   if (database === "postgres") {
     const envFile = path.join(projectDir, ".env");
     const envContent =
-      ["POSTGRES_USER=brixa_test", "POSTGRES_PASSWORD=brixa_pass_123", "POSTGRES_DB=brixa_db"].join(
-        "\n",
-      ) + "\n";
+      [
+        "POSTGRES_USER=brixa_test",
+        "POSTGRES_PASSWORD=" + randomBytes(24).toString("hex"),
+        "POSTGRES_DB=brixa_db",
+        pendingRuntimeUrl,
+      ].join("\n") + "\n";
     fs.writeFileSync(envFile, envContent, "utf-8");
   }
 
@@ -1062,6 +1188,7 @@ export const testItems = pgTable("test_items", {
 `;
     fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
     run("npm", ["run", "db:generate"], projectDir);
+    addFixtureGrants(projectDir);
   } else if (database === "sqlite") {
     const schemaFile = path.join(
       projectDir,
@@ -1082,7 +1209,10 @@ export const testItems = sqliteTable("test_items", {
   }
 
   try {
+    const postgres =
+      database === "postgres" ? await provisionComposePostgres(projectDir, projectDir) : undefined;
     run("docker", ["compose", "build"], projectDir);
+    if (postgres) migrateComposePostgres(projectDir, language, postgres);
     run("docker", ["compose", "up", "-d"], projectDir);
 
     console.log("Esperando a que el backend esté healthy en Docker...");
@@ -1119,12 +1249,8 @@ export const testItems = sqliteTable("test_items", {
     }
     console.log("✔ GET /health respondió 200 con status: ok");
 
-    if (database === "postgres") {
-      const migrateArgs =
-        language === "ts"
-          ? ["compose", "run", "--rm", "backend", "node", "dist/db/migrate.js"]
-          : ["compose", "run", "--rm", "backend", "npm", "run", "db:migrate"];
-      run("docker", migrateArgs, projectDir);
+    if (postgres) {
+      checkComposePostgresRuntime(projectDir);
 
       const checkSql =
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'test_items';";
@@ -1169,7 +1295,11 @@ export const testItems = sqliteTable("test_items", {
   } finally {
     console.log("\nLimpiando recursos Docker (docker compose down -v)...");
     try {
-      execFileSync("docker", ["compose", "down", "-v"], { cwd: projectDir, stdio: "inherit" });
+      execFileSync("docker", ["compose", "down", "-v"], {
+        cwd: projectDir,
+        env: verificationEnv(),
+        stdio: "inherit",
+      });
     } catch {
       // Ignorar
     }
@@ -1214,6 +1344,7 @@ async function verifyVariant(variant, step, total, pgContext) {
   const tmpBase = fs.mkdtempSync(path.join(tmpRoot, `brixa-verify-${label.replace(/\+/g, "-")}-`));
   const projectDir = path.join(tmpBase, "test-project");
 
+  let postgres;
   try {
     await generateProject(modality, language, projectDir, database, docker, apiDocs, i18n);
     console.log(`Proyecto generado en: ${projectDir}`);
@@ -1246,6 +1377,9 @@ async function verifyVariant(variant, step, total, pgContext) {
     const hasPostgres = database === "postgres";
     const hasSqlite = database === "sqlite";
     const hasDb = hasPostgres || hasSqlite;
+    const databaseDir = modality === "fullstack" ? path.join(projectDir, "backend") : projectDir;
+    if (hasPostgres && pgContext.available) postgres = await pgContext.open(databaseDir);
+    const runtimeEnv = postgres ? { DATABASE_URL: postgres.DATABASE_URL } : {};
 
     if (modality === "fullstack") {
       const frontendDir = path.join(projectDir, "frontend");
@@ -1270,112 +1404,114 @@ async function verifyVariant(variant, step, total, pgContext) {
       run("npm", ["run", "format:check"], backendDir);
 
       if (hasPostgres) {
-        await verifyDatabaseIntegration(backendDir, language, pgContext, label);
+        await verifyDatabaseIntegration(backendDir, language, pgContext, postgres);
       } else if (hasSqlite) {
         await verifySqliteIntegration(backendDir, language);
       } else {
         run("npm", ["run", "test"], backendDir);
       }
 
-      // Verificación de comunicación frontend-backend vía proxy Vite
-      const entryPoint =
-        language === "ts" ? path.join("dist", "index.js") : path.join("src", "index.js");
-      let backendChild;
-      let viteChild;
+      if (!hasPostgres || postgres) {
+        // Verificación de comunicación frontend-backend vía proxy Vite
+        const entryPoint =
+          language === "ts" ? path.join("dist", "index.js") : path.join("src", "index.js");
+        let backendChild;
+        let viteChild;
 
-      const envExample = path.join(backendDir, ".env.example");
-      const envFile = path.join(backendDir, ".env");
-      let createdEnv = false;
+        const envExample = path.join(backendDir, ".env.example");
+        const envFile = path.join(backendDir, ".env");
+        let createdEnv = false;
 
-      try {
-        if (apiDocs) {
-          let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
-          if (envContent.includes("ENABLE_API_DOCS=")) {
-            envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
-          } else {
-            envContent += "\nENABLE_API_DOCS=true\n";
+        try {
+          if (apiDocs) {
+            let envContent = fs.existsSync(envExample) ? fs.readFileSync(envExample, "utf-8") : "";
+            if (envContent.includes("ENABLE_API_DOCS=")) {
+              envContent = envContent.replace(/ENABLE_API_DOCS=.*/, "ENABLE_API_DOCS=true");
+            } else {
+              envContent += "\nENABLE_API_DOCS=true\n";
+            }
+            fs.writeFileSync(envFile, envContent, "utf-8");
+            createdEnv = true;
           }
-          fs.writeFileSync(envFile, envContent, "utf-8");
-          createdEnv = true;
-        }
 
-        const proxyStart = performance.now();
-        const backend = await startBackendServer(backendDir, entryPoint);
-        backendChild = backend.child;
+          const proxyStart = performance.now();
+          const backend = await startBackendServer(backendDir, entryPoint, runtimeEnv);
+          backendChild = backend.child;
 
-        const vite = await startViteServer(frontendDir, backend.port, backend);
-        viteChild = vite.child;
+          const vite = await startViteServer(frontendDir, backend.port, backend);
+          viteChild = vite.child;
 
-        console.log(`Vite escuchando en puerto ${vite.port}. Verificando GET /api/health...`);
-        const res = await fetch(`http://127.0.0.1:${vite.port}/api/health`, {
-          signal: timeoutSignal(5000),
-        });
-        if (res.status !== 200) {
-          throw new Error(
-            `Esperado status 200 en /api/health vía proxy de Vite, recibido ${res.status}`,
-          );
-        }
-        const body = await res.json();
-        if (body.status !== "ok") {
-          throw new Error(
-            `Esperado body { status: "ok" } en /api/health, recibido ${JSON.stringify(body)}`,
-          );
-        }
-        console.log("✔ GET /api/health vía Vite proxy respondió 200 con status: ok");
-
-        if (apiDocs) {
-          console.log(`Verificando redirección GET http://127.0.0.1:${vite.port}/api/docs...`);
-          const resDocsRedirect = await fetch(`http://127.0.0.1:${vite.port}/api/docs`, {
-            redirect: "manual",
+          console.log(`Vite escuchando en puerto ${vite.port}. Verificando GET /api/health...`);
+          const res = await fetch(`http://127.0.0.1:${vite.port}/api/health`, {
             signal: timeoutSignal(5000),
           });
-          if (resDocsRedirect.status !== 301) {
+          if (res.status !== 200) {
             throw new Error(
-              `Esperado status 301 en /api/docs vía Vite, recibido ${resDocsRedirect.status}`,
+              `Esperado status 200 en /api/health vía proxy de Vite, recibido ${res.status}`,
             );
           }
-          const location = resDocsRedirect.headers.get("location");
-          if (location !== "docs/") {
-            throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
+          const body = await res.json();
+          if (body.status !== "ok") {
+            throw new Error(
+              `Esperado body { status: "ok" } en /api/health, recibido ${JSON.stringify(body)}`,
+            );
           }
-          console.log("✔ GET /api/docs vía Vite respondió 301 con Location: docs/");
+          console.log("✔ GET /api/health vía Vite proxy respondió 200 con status: ok");
 
-          console.log(`Verificando GET http://127.0.0.1:${vite.port}/api/docs/...`);
-          const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`, {
-            redirect: "manual",
-            signal: timeoutSignal(5000),
-          });
-          if (resDocs.status !== 200) {
-            throw new Error(
-              `Esperado status 200 directo en /api/docs/ vía Vite, recibido ${resDocs.status}`,
-            );
-          }
-          if (resDocs.headers.get("location")) {
-            throw new Error(
-              `Inesperada redirección en /api/docs/ vía Vite con Location: '${resDocs.headers.get("location")}'`,
-            );
-          }
-          const docsHtml = await resDocs.text();
-          if (!docsHtml.includes("swagger-ui")) {
-            throw new Error("HTML en /api/docs/ vía Vite no contiene 'swagger-ui'");
-          }
-          console.log("✔ GET /api/docs/ vía Vite respondió 200 directo con Swagger UI");
+          if (apiDocs) {
+            console.log(`Verificando redirección GET http://127.0.0.1:${vite.port}/api/docs...`);
+            const resDocsRedirect = await fetch(`http://127.0.0.1:${vite.port}/api/docs`, {
+              redirect: "manual",
+              signal: timeoutSignal(5000),
+            });
+            if (resDocsRedirect.status !== 301) {
+              throw new Error(
+                `Esperado status 301 en /api/docs vía Vite, recibido ${resDocsRedirect.status}`,
+              );
+            }
+            const location = resDocsRedirect.headers.get("location");
+            if (location !== "docs/") {
+              throw new Error(`Esperada cabecera Location: 'docs/', recibido '${location}'`);
+            }
+            console.log("✔ GET /api/docs vía Vite respondió 301 con Location: docs/");
 
-          await verifySwaggerUiAssets(docsHtml, `http://127.0.0.1:${vite.port}/api/docs/`);
+            console.log(`Verificando GET http://127.0.0.1:${vite.port}/api/docs/...`);
+            const resDocs = await fetch(`http://127.0.0.1:${vite.port}/api/docs/`, {
+              redirect: "manual",
+              signal: timeoutSignal(5000),
+            });
+            if (resDocs.status !== 200) {
+              throw new Error(
+                `Esperado status 200 directo en /api/docs/ vía Vite, recibido ${resDocs.status}`,
+              );
+            }
+            if (resDocs.headers.get("location")) {
+              throw new Error(
+                `Inesperada redirección en /api/docs/ vía Vite con Location: '${resDocs.headers.get("location")}'`,
+              );
+            }
+            const docsHtml = await resDocs.text();
+            if (!docsHtml.includes("swagger-ui")) {
+              throw new Error("HTML en /api/docs/ vía Vite no contiene 'swagger-ui'");
+            }
+            console.log("✔ GET /api/docs/ vía Vite respondió 200 directo con Swagger UI");
+
+            await verifySwaggerUiAssets(docsHtml, `http://127.0.0.1:${vite.port}/api/docs/`);
+            console.log(
+              "✔ Assets CSS y JS de Swagger UI verificados correctamente vía Vite proxy (status 200 y Content-Type)",
+            );
+          }
           console.log(
-            "✔ Assets CSS y JS de Swagger UI verificados correctamente vía Vite proxy (status 200 y Content-Type)",
+            `✔ Verificación proxy Vite completada (${formatDuration(performance.now() - proxyStart)})`,
           );
+        } finally {
+          if (createdEnv) {
+            fs.rmSync(envFile, { force: true });
+          }
+          console.log("Cerrando servidores Vite y backend...");
+          await stopProcess(viteChild);
+          await stopProcess(backendChild);
         }
-        console.log(
-          `✔ Verificación proxy Vite completada (${formatDuration(performance.now() - proxyStart)})`,
-        );
-      } finally {
-        if (createdEnv) {
-          fs.rmSync(envFile, { force: true });
-        }
-        console.log("Cerrando servidores Vite y backend...");
-        await stopProcess(viteChild);
-        await stopProcess(backendChild);
       }
 
       if (i18n) {
@@ -1411,7 +1547,7 @@ async function verifyVariant(variant, step, total, pgContext) {
         }
 
         if (hasPostgres) {
-          await verifyDatabaseIntegration(projectDir, language, pgContext, label);
+          await verifyDatabaseIntegration(projectDir, language, pgContext, postgres);
         } else if (hasSqlite) {
           await verifySqliteIntegration(projectDir, language);
         } else {
@@ -1420,9 +1556,9 @@ async function verifyVariant(variant, step, total, pgContext) {
 
         const entryPoint =
           language === "ts" ? path.join("dist", "index.js") : path.join("src", "index.js");
-        await checkBackendServer(projectDir, entryPoint);
-        if (apiDocs) {
-          await checkBackendDocs(projectDir, entryPoint);
+        if (!hasPostgres || postgres) {
+          await checkBackendServer(projectDir, entryPoint, runtimeEnv);
+          if (apiDocs) await checkBackendDocs(projectDir, entryPoint, runtimeEnv);
         }
       }
     }
@@ -1445,53 +1581,47 @@ async function verifyVariant(variant, step, total, pgContext) {
     );
     throw err;
   } finally {
-    const cleanStart = performance.now();
     try {
-      console.log(`\nLimpiando ${tmpBase} …`);
-      fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-      console.log(`✔ Limpieza completada (${formatDuration(performance.now() - cleanStart)})`);
-    } catch (error) {
-      console.warn(
-        `Aviso: no se pudo limpiar ${tmpBase} tras ${formatDuration(performance.now() - cleanStart)}: ${error.message}`,
-      );
+      await postgres?.stop();
+    } finally {
+      const cleanStart = performance.now();
+      try {
+        console.log(`\nLimpiando ${tmpBase} …`);
+        fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+        console.log(`✔ Limpieza completada (${formatDuration(performance.now() - cleanStart)})`);
+      } catch (error) {
+        console.warn(
+          `Aviso: no se pudo limpiar ${tmpBase} tras ${formatDuration(performance.now() - cleanStart)}: ${error.message}`,
+        );
+      }
     }
   }
 }
 
 /** Verifica integración con PostgreSQL: schema, db:generate, db:migrate, existencia de tabla y tests. */
-export async function verifyDatabaseIntegration(backendDir, language, pgContext, variantLabel) {
+export async function verifyDatabaseIntegration(backendDir, language, pgContext, postgres) {
   // La auditoría se ejecuta en modo integral o audit; el modo functional no la evalúa.
 
-  if (!pgContext.available || !pgContext.databaseUrl) {
+  if (!pgContext.available) {
     console.log("\n========================================================");
-    console.log("NO VERIFICADO: PostgreSQL (Docker no disponible ni VERIFY_DATABASE_URL)");
+    console.log(
+      "NO VERIFICADO: PostgreSQL (Docker no disponible ni URLs de verificación configuradas)",
+    );
     console.log("========================================================");
     run("npm", ["run", "test"], backendDir);
     return;
   }
 
-  // Derivar una base de datos propia para esta variante (aislamiento entre variantes)
-  let databaseUrl = pgContext.databaseUrl;
-  if (pgContext.containerName && pgContext.user && pgContext.pass && pgContext.port) {
-    // Nombre seguro para la base de datos: solo letras, dígitos y guiones bajos
-    const dbName = `brixa_${variantLabel.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
-    console.log(`\nCreando base de datos aislada '${dbName}' para variante ${variantLabel}...`);
-    execFileSync(
-      "docker",
-      ["exec", pgContext.containerName, "createdb", "-U", pgContext.user, dbName],
-      { stdio: "inherit" },
+  const connection = postgres ?? (await pgContext.open(backendDir));
+  try {
+    // 1. Añadir tabla mínima en el schema dentro del directorio temporal (nunca en la plantilla)
+    const schemaFile = path.join(
+      backendDir,
+      "src",
+      "db",
+      language === "ts" ? "schema.ts" : "schema.js",
     );
-    databaseUrl = `postgresql://${pgContext.user}:${pgContext.pass}@127.0.0.1:${pgContext.port}/${dbName}`;
-  }
-
-  // 1. Añadir tabla mínima en el schema dentro del directorio temporal (nunca en la plantilla)
-  const schemaFile = path.join(
-    backendDir,
-    "src",
-    "db",
-    language === "ts" ? "schema.ts" : "schema.js",
-  );
-  const schemaSnippet = `
+    const schemaSnippet = `
 import { pgTable, serial, text } from "drizzle-orm/pg-core";
 
 export const testItems = pgTable("test_items", {
@@ -1499,38 +1629,31 @@ export const testItems = pgTable("test_items", {
   title: text("title").notNull(),
 });
 `;
-  fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
+    fs.writeFileSync(schemaFile, schemaSnippet, "utf-8");
 
-  // 2. Generar migraciones
-  run("npm", ["run", "db:generate"], backendDir);
+    // 2. Generar migraciones
+    run("npm", ["run", "db:generate"], backendDir);
 
-  // 3. Aplicar migraciones con DATABASE_URL
-  run("npm", ["run", "db:migrate"], backendDir, { DATABASE_URL: databaseUrl });
+    addFixtureGrants(backendDir);
+    run("npm", ["run", "db:migrate"], backendDir, {
+      MIGRATION_DATABASE_URL: connection.MIGRATION_DATABASE_URL,
+    });
 
-  // 4. Comprobar que la tabla existe en la base de datos
-  const checkScript = `
-import pg from "pg";
-const { Client } = pg;
-const client = new Client({ connectionString: process.env.DATABASE_URL });
-await client.connect();
-const res = await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'test_items'");
-if (res.rows.length === 0) {
-  throw new Error("La tabla 'test_items' no existe en la base de datos tras ejecutar migraciones.");
-}
-console.log("✔ Tabla 'test_items' encontrada en PostgreSQL.");
-await client.end();
-`;
-  const checkPath = path.join(backendDir, "verify-table.mjs");
-  fs.writeFileSync(checkPath, checkScript, "utf-8");
-  try {
-    run("node", ["verify-table.mjs"], backendDir, { DATABASE_URL: databaseUrl });
+    // 4. Comprobar que la tabla existe en la base de datos
+    const checkPath = path.join(backendDir, "verify-table.mjs");
+    fs.writeFileSync(checkPath, verifyPostgresRuntime, "utf-8");
+    try {
+      run("node", ["verify-table.mjs"], backendDir, { DATABASE_URL: connection.DATABASE_URL });
+    } finally {
+      fs.rmSync(checkPath, { force: true });
+    }
+
+    // 5. Ejecutar tests con DATABASE_URL definida
+    run("npm", ["run", "test:unit"], backendDir);
+    run("npm", ["run", "test:db"], backendDir, { DATABASE_URL: connection.DATABASE_URL });
   } finally {
-    fs.rmSync(checkPath, { force: true });
+    if (!postgres) await connection.stop();
   }
-
-  // 5. Ejecutar tests con DATABASE_URL definida
-  run("npm", ["run", "test:unit"], backendDir);
-  run("npm", ["run", "test:db"], backendDir, { DATABASE_URL: databaseUrl });
 }
 
 /** Verifica integración con SQLite: schema, db:generate, db:migrate (incluso con data/ borrada), existencia de tabla y tests. */

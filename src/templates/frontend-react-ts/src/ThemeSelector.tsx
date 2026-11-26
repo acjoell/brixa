@@ -57,6 +57,7 @@ export function ThemeSelector({
           <input
             type="radio"
             name="brixa-theme"
+            value={theme}
             className="peer sr-only"
             checked={preference === theme}
             onChange={() => selectTheme(theme)}

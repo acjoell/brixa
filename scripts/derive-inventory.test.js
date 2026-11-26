@@ -20,14 +20,15 @@ it("restaura exactamente todos los pares y fragmentos desde sus fuentes y es ide
   const snapshot = new Map();
   for (const [base, count] of [
     ["backend-express-js", 9],
-    ["frontend-react-js", 6],
+    ["frontend-react-js", 7],
     ["database-sqlite/js", 5],
     ["api-docs/js", 7],
-    ["auth/js", 42],
-    ["auth-postgres/js", 13],
+    ["auth/js", 45],
+    ["auth-postgres/js", 9],
     ["auth-sqlite/js", 18],
     ["i18n/js", 3],
-    ["database-postgres/js", 5],
+    ["auth-ui/js", 15],
+    ["database-postgres/js", 6],
   ]) {
     const files = (await fs.readdir(file(base), { recursive: true })).filter(
       (name) =>

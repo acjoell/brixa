@@ -14,6 +14,7 @@ import { sqliteActivationDatabase } from "../src/db/activation-write.js";
 import { withSqliteAdministrator } from "../src/db/local-admin.js";
 import * as schema from "../src/db/schema.js";
 import { checkAuthLifecycle } from "./auth-lifecycle-contract.js";
+import { checkBusinessAuth, checkBusinessTransportBoundaries } from "./require-auth-contract.js";
 
 it("completa el ciclo Auth con cookies y SQLite en archivo", async () => {
   const directory = await mkdtemp(join(tmpdir(), "brixa-auth-lifecycle-"));
@@ -39,6 +40,26 @@ it("completa el ciclo Auth con cookies y SQLite en archivo", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 }, 15_000);
+
+it.each(["cookie", "bearer"])(
+  "protege rutas de negocio SQLite con %s",
+  async (mode) => {
+    const directory = await mkdtemp(join(tmpdir(), "brixa-business-auth-"));
+    const url = "file:" + join(directory, "test.db");
+    const client = createClient({ url });
+    const database = drizzle(client, { schema });
+    try {
+      await migrate(database, { migrationsFolder: "drizzle" });
+      const writer = sqliteActivationDatabase({ url });
+      await checkBusinessAuth(mode, database, writer);
+      if (mode === "cookie") await checkBusinessTransportBoundaries(database, writer);
+    } finally {
+      client.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  15_000,
+);
 
 for (const mode of ["cookie", "bearer"]) {
   it(`monta Auth con ${mode}, validación persistente y documentación condicionada`, async () => {
@@ -115,7 +136,9 @@ for (const mode of ["cookie", "bearer"]) {
       expect((await fetch(base + "/auth/session")).status).toBe(403);
       expect((await get("/auth/session")).status).toBe(401);
       expect((await get("/auth/session", { Authorization: "Bearer x" })).status).toBe(401);
-      expect((await post("/login", { email })).status).toBe(400);
+      const malformedLogin = await post("/login", { email });
+      expect(malformedLogin.status).toBe(400);
+      expect(malformedLogin.headers.has("x-powered-by")).toBe(false);
 
       if (mode === "cookie") {
         for (const rejected of [
@@ -125,7 +148,9 @@ for (const mode of ["cookie", "bearer"]) {
           { ...csrf, "Sec-Fetch-Site": "cross-site" },
           { ...csrf, "X-Requested-With": "wrong" },
         ]) {
-          expect((await post("/login", { email, password }, {}, rejected)).status).toBe(403);
+          const response = await post("/login", { email, password }, {}, rejected);
+          expect(response.status).toBe(403);
+          expect(response.headers.has("x-powered-by")).toBe(false);
         }
       }
 
@@ -158,6 +183,7 @@ for (const mode of ["cookie", "bearer"]) {
             "X-Requested-With": "XMLHttpRequest",
           },
         );
+        expect(response.headers.has("x-powered-by")).toBe(false);
         const cookie = response.headers.get("Set-Cookie");
         let auth;
         if (mode === "cookie") {

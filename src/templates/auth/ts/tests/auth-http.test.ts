@@ -31,7 +31,10 @@ function fixture() {
         regenerateActivationToken: () => Promise.reject(new Error("unexpected regeneration")),
       },
       activateAccount: () => Promise.resolve(false),
+      validateToken: () => Promise.resolve(false),
       consumeIp: () => Promise.resolve({ accepted: false, blocked: true, retryAfterMs: 1000 }),
+      consumeValidationIp: () =>
+        Promise.resolve({ accepted: false, blocked: true, retryAfterMs: 1000 }),
       cleanupExpired: () => Promise.resolve(0),
       link: () => "",
     },
@@ -121,6 +124,24 @@ it("sanea entradas, credenciales rechazadas y errores de ambos límites", async 
       expect(response.headers.get("Retry-After")).toBe(retryAfter);
       expect(await response.json()).toEqual({ error: message });
     }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("sanea un fallo de persistencia durante la validación de activación", async () => {
+  const { transport, services } = fixture();
+  services.activation.consumeValidationIp = () =>
+    Promise.resolve({ accepted: true, blocked: false, retryAfterMs: 0 });
+  services.activation.validateToken = () => Promise.reject(new Error("fixture sensitive data"));
+  const server = createAuthHttpApp(services, transport, {}).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const url = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
+    const response = await fetch(url + "/activate/validate", post({ token: "A".repeat(43) }));
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "Internal Server Error" });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

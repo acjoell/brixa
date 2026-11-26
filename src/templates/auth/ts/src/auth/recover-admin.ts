@@ -6,6 +6,7 @@ import { lockInitialAdministrator } from "../db/session-write.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import { hashPassword } from "./password-crypto.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
+import { acceptsNewPassword, parsePasswordPolicy } from "./password-policy.js";
 import { revokeUserSessions } from "./sessions.js";
 import { recordSystemAudit } from "./system-audit.js";
 
@@ -24,13 +25,14 @@ export async function recoverInitialAdministrator(
   requestId: string,
 ): Promise<boolean> {
   if (password === "" || !isPasswordWithinLimits(password)) return false;
+  const policy = parsePasswordPolicy();
   try {
     const [candidate] = await database
-      .select({ id: users.id })
+      .select({ id: users.id, email: users.canonicalIdentifier })
       .from(initialAdministrator)
       .innerJoin(users, eq(initialAdministrator.userId, users.id))
       .where(eq(users.status, "active"));
-    if (!candidate) return false;
+    if (!candidate || !acceptsNewPassword(password, candidate.email, policy)) return false;
 
     const passwordHash = await hashPassword(password);
     return await database.transaction(async (tx) => {

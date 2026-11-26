@@ -30,6 +30,10 @@ const config = z.object({
   LOGIN_IDENTIFIER_FAILURE_LIMIT: positiveInteger.default(5),
   LOGIN_IP_REQUEST_LIMIT: positiveInteger.default(10),
   LOGIN_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
+  ACTIVATION_IP_REQUEST_LIMIT: positiveInteger.default(10),
+  ACTIVATION_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
+  ACTIVATION_VALIDATION_IP_REQUEST_LIMIT: positiveInteger.default(20),
+  ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
   LOGIN_ABUSE_HMAC_KEY: z
     .string()
     .length(64)
@@ -119,6 +123,7 @@ export function createLoginAbuseService(database, env = process.env) {
     const active = row.expiresAtMs > row.now;
     const hits = active ? row.hits + 1 : 1;
     const expiresAtMs = active ? row.expiresAtMs : row.now + durationMs;
+    if (!Number.isSafeInteger(expiresAtMs)) throw new Error("LOGIN_ABUSE_INVALID_EXPIRY");
     await tx.update(counters).set({ hits, expiresAtMs }).where(eq(counters.keyDigest, keyDigest));
     return { hits, expiresAtMs };
   }
@@ -198,8 +203,19 @@ export function createLoginAbuseService(database, env = process.env) {
 
   return {
     consumeIp: (ip) => consume(digest("ip", canonicalIp(ip)), ipLimit),
-    // Separate key and fixed window. Activation never spends the login budget.
-    consumeActivationIp: (ip) => consume(digest("activation-ip", canonicalIp(ip)), 10, 15 * 60_000),
+    // Preserve the confirmation namespace of deployed projects.
+    consumeActivationIp: (ip) =>
+      consume(
+        digest("activation-ip", canonicalIp(ip)),
+        settings.data.ACTIVATION_IP_REQUEST_LIMIT,
+        settings.data.ACTIVATION_ABUSE_WINDOW_MINUTES * 60_000,
+      ),
+    consumeActivationValidationIp: (ip) =>
+      consume(
+        digest("activation-validation-ip", canonicalIp(ip)),
+        settings.data.ACTIVATION_VALIDATION_IP_REQUEST_LIMIT,
+        settings.data.ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES * 60_000,
+      ),
     // Status is a snapshot. Call consumeIp to decide and account for IP admission.
     ipStatus: (ip) => status(digest("ip", canonicalIp(ip)), ipLimit),
     // Records an observed failure. This does not reserve a slot before verification.

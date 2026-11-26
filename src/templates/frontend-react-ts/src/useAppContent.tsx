@@ -1,6 +1,6 @@
 import type { AppContent, MessageKey } from './appContent.types'
 
-const messages: Record<MessageKey, string> = {
+const messages: Record<MessageKey, string> & Partial<Record<`auth.${string}`, string>> = {
   'nav.label': 'Project resources',
   'nav.docs': 'Docs',
   'home.title': 'Build from a solid foundation.',
@@ -22,7 +22,7 @@ const messages: Record<MessageKey, string> = {
 export function useAppContent(): AppContent {
   return {
     LanguageSelector: () => null,
-    t: (key) => messages[key],
+    t: (key, fallback = key) => messages[key] ?? fallback,
     EditInstruction: () => (
       <>
         Edit <code>src/App.tsx</code> and save to test <code>HMR</code>.

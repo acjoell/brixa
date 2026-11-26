@@ -34,7 +34,7 @@ async function verifyV3StorageAndNavigator(frontendDir) {
   });
 }
 
-function verifyV4DistStrings(frontendDir) {
+function verifyV4DistStrings(frontendDir, language) {
   const assetsDir = path.join(frontendDir, "dist", "assets");
   if (!fs.existsSync(assetsDir)) {
     throw new Error(`Directorio de assets ${assetsDir} no existe tras npm run build`);
@@ -45,22 +45,44 @@ function verifyV4DistStrings(frontendDir) {
     throw new Error("No se encontraron archivos JS en dist/assets/");
   }
 
-  const titles = ["en", "es"].map((language) => {
-    const localeFile = path.join(frontendDir, "src", "locales", `${language}.json`);
-    const title = JSON.parse(fs.readFileSync(localeFile, "utf-8")).home?.title;
-    if (typeof title !== "string" || !title.trim()) {
-      throw new Error(`[V4 ${language}] Falta el título de bienvenida home.title`);
+  const manifest = JSON.parse(fs.readFileSync(path.join(frontendDir, "package.json"), "utf-8"));
+  const hasAuth = manifest.dependencies?.["react-router"] !== undefined;
+  const app = language === "ts" ? "App.tsx" : "App.jsx";
+  const hasWelcome = fs.existsSync(path.join(frontendDir, "src", app));
+  const keys = hasWelcome ? [["home", "title"]] : [];
+  if (hasAuth) {
+    for (const key of [
+      "loginTitle",
+      "appTitle",
+      "activationTitle",
+      "notFoundTitle",
+      "hidePassword",
+      "hideNewPassword",
+      "hideConfirmation",
+    ]) {
+      keys.push(["auth", key]);
     }
-    return { language, title };
-  });
-  if (titles[0].title === titles[1].title) {
-    throw new Error("[V4] Los títulos de bienvenida en inglés y español deben ser distintos");
   }
+  if (keys.length === 0) throw new Error("[V4] No hay vistas que verificar");
 
+  const catalogs = ["en", "es"].map((locale) =>
+    JSON.parse(
+      fs.readFileSync(path.join(frontendDir, "src", "locales", `${locale}.json`), "utf-8"),
+    ),
+  );
   const bundles = jsFiles.map((file) => fs.readFileSync(path.join(assetsDir, file), "utf-8"));
-  for (const { language, title } of titles) {
-    if (!bundles.some((bundle) => bundle.includes(title))) {
-      throw new Error(`[V4 ${language}] Título "${title}" no encontrado en dist/assets/`);
+  for (const [section, key] of keys) {
+    const values = catalogs.map((catalog) => catalog[section]?.[key]);
+    if (
+      values.some((title) => typeof title !== "string" || !title.trim()) ||
+      values[0] === values[1]
+    ) {
+      throw new Error(`[V4] ${section}.${key} debe tener textos distintos en inglés y español`);
+    }
+    for (const value of values) {
+      if (!bundles.some((bundle) => bundle.includes(value))) {
+        throw new Error(`[V4] Texto "${value}" no encontrado en dist/assets/`);
+      }
     }
   }
 }
@@ -102,6 +124,6 @@ export async function verifyI18n(frontendDir, language) {
 
   // V4. Cadenas distintivas de en y es presentes en dist/
   console.log("V4. Verificando cadenas distintivas en dist/...");
-  verifyV4DistStrings(frontendDir);
+  verifyV4DistStrings(frontendDir, language);
   console.log("✔ V4. Cadenas en dist/ completado con éxito.");
 }

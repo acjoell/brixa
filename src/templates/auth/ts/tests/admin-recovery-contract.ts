@@ -78,6 +78,7 @@ export async function checkAdminRecovery(
     "disabled",
   );
   await status("active");
+  assert.equal(await recover(email.toUpperCase(), "policy-rejected"), false);
   assert.deepEqual(await read(), before);
   await failAudit(true);
   try {

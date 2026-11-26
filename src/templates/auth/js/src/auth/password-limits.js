@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
-const maxCodePoints = 128;
-const maxUtf8Bytes = 512;
+export const maxCodePoints = 128;
+export const maxUtf8Bytes = 512;
 
 export function isPasswordWithinLimits(value) {
   // Un punto de código ocupa como máximo dos unidades UTF-16.

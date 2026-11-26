@@ -325,9 +325,9 @@ Tras el tag (D-060), decidir qué versión declara `main` y si se añade una gua
 
 ### P-017 — Pruebas en navegador real
 
-**Estado:** Pendiente.
+**Estado:** Resuelta en D-090.
 
-Incorporar un conjunto mínimo de pruebas E2E (por ejemplo con Playwright, en un único job de Linux) cuando exista autenticación con cookies. Hoy no hay pruebas en navegador real y la plantilla de frontend no incluye pruebas.
+Vitest para pruebas unitarias y de renderizado estático del frontend generado con Auth. Chromium/CDP para verificaciones interactivas internas de Brixa.
 
 ## 3b. Decisiones confirmadas en T-002
 
@@ -640,7 +640,7 @@ Estas versiones aplican al toolchain del propio CLI. Las versiones de las depend
 
 **Estado:** Confirmada.
 
-**Decisión:** Los proyectos generados ejecutan los archivos de test en serie (`fileParallelism: false`, ver hallazgo (c) de D-034) y el test de conexión se omite si falta `DATABASE_URL` (Docker es opcional). `verify:generated` usa `VERIFY_DATABASE_URL` o un contenedor desechable, con una base de datos aislada por variante; si no hay Docker, informa "NO VERIFICADO: PostgreSQL". Con T-012a verifica 12 variantes, incluidas backend y fullstack en ts y js con PostgreSQL.
+**Decisión:** Los proyectos generados ejecutan los archivos de test en serie (`fileParallelism: false`, ver hallazgo (c) de D-034) y el test de conexión se omite si falta `DATABASE_URL`. Con la ampliación de D-094, `verify:generated` usa un contenedor desechable por variante PostgreSQL local o una base de pruebas dedicada y preaprovisionada con `VERIFY_DATABASE_URL` de `app_exec` y `VERIFY_MIGRATION_DATABASE_URL` de `table_owner`. Si no hay Docker ni base externa configurada, informa "NO VERIFICADO: PostgreSQL". Las 12 variantes de T-012a corresponden al alcance histórico.
 
 ---
 
@@ -850,6 +850,15 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 **Consecuencias:** Los usuarios mantienen la libertad de elegir. Al añadir una variante al arnés hay que añadirla a la lista. P-005 se reformula: las combinaciones declaradas como soportadas pasan la verificación y el resto son experimentales.
 
 **Acreditación de Auth v1:** `verify:auth` y los contratos focalizados aportan la evidencia integral especializada. Cada combinación acreditada conserva los controles aplicables de seguridad general y la auditoría de sus instalaciones con el umbral `moderate`. El inventario de Auth identifica el transporte efectivo y las capacidades exactas. Las matrices generales conservan sus listas y las demás combinaciones con Auth siguen experimentales.
+
+**Acreditación de Auth UI (⑧-B4):** El CLI exige evidencia del proyecto fullstack completo con sus capacidades exactas y `authAppMode` efectivo (`private` si se omite, D-113). Las cinco entradas de T-014a conservan la evidencia del servidor y de sus controles focalizados. Las dos entradas fullstack históricas aportan cobertura al servidor y dejan experimental la UI correspondiente. Las listas de `verify:generated` y `verify:security` conservan su alcance.
+
+El responsable confirmó `verify:auth-ui` A y B en Linux con Chromium y TLS activo. Ambas configuraciones son fullstack con Auth por cookies:
+
+- **A:** TypeScript, PostgreSQL, Docker, API Docs, i18n y `private`. Acredita HTTPS local en Nginx con el override distribuido D-114 y los archivos generados intactos.
+- **B:** JavaScript, SQLite y `public`, sin Docker, API Docs ni i18n. Acredita HTTPS local mediante el proxy de la fixture.
+
+Estas ejecuciones cubren únicamente esas dos configuraciones en sus topologías de prueba. El Compose base HTTP, los despliegues públicos y los entornos con remapeo de UID quedan fuera de la evidencia.
 
 ---
 
@@ -1504,7 +1513,10 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Las rutas protegidas en frontend actúan exclusivamente como **mecanismo de experiencia de usuario y navegación defensiva**; la autorización efectiva reside siempre de forma inmutable en el backend Express.
 - Integración compositiva limpia con los overlays de internacionalización (`i18n`), RBAC y futuros módulos sin acoplamiento monolítico.
 - Accesibilidad explícita obligatoria en la navegación: actualización dinámica de `document.title`, gestión de foco del teclado en cambios de ruta y anuncios de navegación para lectores de pantalla.
-- La verificación de esta capacidad exige pruebas reales de navegación, redirecciones, recargas de página y controles de accesibilidad.
+- Fijar `react-router@8.5.3` para el router declarativo y `vitest@5.0.5` para pruebas unitarias y renderizado estático. Ambos se añaden únicamente al frontend de fullstack con Auth. Usar Chromium/CDP en Brixa para verificar navegación, redirecciones, recargas de página y accesibilidad (P-017).
+- Usar `fetch` nativo sobre el mismo origen con cookies y los controles D-089 y D-103. Interpretar HTTP 401 según la operación: credenciales inválidas al iniciar sesión, sesión ausente o perdida al consultar la sesión o al acceder a un recurso que la requiere.
+- El proveedor global verifica bajo demanda al entrar en la raíz privada, el login o un grupo protegido. Las redirecciones dentro de ese grupo comparten la comprobación. La landing pública, activación y 404 no la inician. Al volver desde una vista pública, se verifica con el servidor antes de mostrar contenido protegido. La landing usa la última sesión conocida en memoria para elegir su CTA.
+- `ProtectedRoute` protege rutas hijas declarativas mediante `Outlet`. El frontend cancela lecturas obsoletas al salir del grupo, permite que una mutación activa termine y consulta al servidor antes de habilitar otra mutación si el resultado fue ambiguo. Un rechazo de login cuyo contrato garantiza que la sesión quedó intacta conserva el formulario.
 
 **Motivo:** Garantiza una arquitectura limpia y accesible sin sobrecargar variantes sencillas que no requieran enrutamiento, manteniendo al mismo tiempo la estricta barrera de seguridad en el servidor.
 
@@ -1562,7 +1574,11 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - **Mitigación de enumeración por temporización (hash ficticio / dummy):** cuando una cuenta solicitada en el login no exista, el backend debe ejecutar una verificación ficticia con un hash Argon2id dummy previamente preparado en memoria, haciendo que el tiempo de respuesta sea indistinguible respecto a una cuenta existente.
 - **Limitador de concurrencia:** restringir las operaciones Argon2id concurrentes en el proceso Node.js mediante una cola acotada con manejo seguro de saturación (rechazo controlado cuando la cola esté llena), protegiendo al contenedor frente a OOM kills bajo ráfagas de peticiones.
 - **Independencia de rate limiting:** el limitador de concurrencia protege la memoria local del proceso y no sustituye al rate limiting de autenticación, que debe operar de forma independiente en capas previas.
-- **Política inicial de entrada:** contraseñas entrantes limitadas a un máximo de **128 caracteres** y **512 bytes UTF-8**, rechazando excesos con error de validación sin truncamiento silencioso.
+- **Límites defensivos de entrada:** máximo de **128 puntos de código Unicode** y **512 bytes UTF-8**. Se rechazan los sustitutos UTF-16 aislados y los excesos sin truncar el valor.
+- **Política de establecimiento (I-05):** bootstrap, recuperación administrativa, cambio autenticado y activación aplican `AUTH_PASSWORD_MIN_LENGTH` (10) y `AUTH_PASSWORD_MAX_LENGTH` (64), enteros de 8 a 128, con mínimo menor o igual al máximo. La comparación con el correo, su parte local y el nombre generado del proyecto es completa e insensible a mayúsculas. El secreto se entrega intacto a Argon2id. Login, verificación de la contraseña actual y rehash admiten las credenciales existentes dentro de los límites defensivos.
+- **Referencia de longitud:** [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b/authenticators/) exige un mínimo de 15 para factor único y recomienda admitir un máximo de al menos 64. El valor predeterminado de 10 queda por debajo del requisito. Un máximo inferior a 64 se aparta de la recomendación. Estos ajustes solo cubren los criterios de longitud.
+- **Alcance aprobado de I-05:** Auth v1 prescinde de una lista de bloqueo. La evaluación de XATO, NCSC, Django y Openwall no confirmó derechos de redistribución compatibles con Brixa y sus proyectos generados. Las contraseñas comunes que satisfagan las demás reglas pueden ser aceptadas. Auth v1 no satisface el requisito de lista de bloqueo de [NIST SP 800-63B-4, §3.1.1.2](https://pages.nist.gov/800-63-4/sp800-63b/authenticators/#passwordver).
+- **Mejora futura no bloqueante:** validar las contraseñas nuevas contra contraseñas comunes y comprometidas. La fuente y el mecanismo quedan abiertos.
 - **Pendientes técnicos por concretar en diseño e implementación (T-014-0 / T-014a):**
   - Límites defensivos exactos para parámetros PHC y su compatibilidad con la política de rehash.
   - Capacidad de la cola y política de saturación del limitador de concurrencia.
@@ -1600,7 +1616,9 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 **Motivo:** Las políticas RLS de PostgreSQL solo se evalúan obligatoriamente si el usuario conectado no es superusuario ni propietario de la tabla. Separar `table_owner` de `app_exec` garantiza que la aplicación esté técnica y formalmente forzada a someterse a las políticas RLS, limitando drásticamente el impacto de posibles errores en la capa de aplicación.
 
-**Consecuencias:** Todo despliegue de un proyecto multitenant exige la configuración previa de dos roles y dos credenciales de base de datos.
+**Ampliación aprobada (I-06.1b, S18):** La separación de administración, migración y ejecución se aplica a todo proyecto nuevo con PostgreSQL, con o sin Auth o Docker. El aprovisionamiento común prepara una base dedicada y conserva la marca de roles existentes compatibles. `POSTGRES_PASSWORD` se reserva a PostgreSQL y al aprovisionamiento. Express recibe `DATABASE_URL` de `app_exec` y comprueba identidad y privilegios efectivos al arrancar, incluidas membresías y concesiones de `PUBLIC`. `MIGRATION_DATABASE_URL` de `table_owner` se entrega solo a las órdenes puntuales que la requieren. Las migraciones conceden únicamente los permisos sobre objetos que la aplicación necesita. Auth conserva sus controles específicos de tablas, auditoría y autoridad administrativa. RLS sigue condicionado a multitenancy.
+
+**Consecuencias:** Los proyectos PostgreSQL nuevos requieren dos credenciales operativas distintas y aprovisionamiento previo. La transición de proyectos antiguos con una sola credencial es responsabilidad del operador. La evidencia de las acreditaciones previas se conserva como histórica.
 
 ---
 
@@ -1822,6 +1840,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - **Exclusión de tráfico de mantenimiento:** Las consultas automáticas de mantenimiento (tales como sondeos de salud `/health`, polling periódico de interfaz o telemetría) **no prolongan la sesión**. Solo solicitudes que correspondan a interacción intencional o mutaciones de negocio actualizan la marca de actividad.
 - **Sin rotación periódica de tokens en v1:** Se ratifica D-088. No se realiza rotación automática periódica de tokens de sesión durante peticiones ordinarias para evitar condiciones de carrera en navegadores. La rotación del identificador de sesión se reserva para eventos de seguridad sensibles como la elevación de privilegios. Para el cambio de contraseña y la recuperación privilegiada se aplican la revocación total de sesiones y las reglas de D-108 y D-109.
 - **Revocación inmediata:** La invalidación de una sesión (vía borrado o marca `revoked_at` en BD) surte efecto instantáneo e ineludible en la petición inmediatamente posterior.
+- **Rutas de negocio:** El middleware público `requireAuth()` valida en cada petición y expone únicamente `req.auth.userId`. Solo la opción de servidor `requireAuth({ intentionalActivity: true })` habilita la renovación con el servicio existente. El middleware usa el mismo transporte de Auth para TLS, IP de proxy confiable y CSRF, con independencia del `trust proxy` del router anfitrión. Devuelve respuestas no cacheables y deja la autorización de recursos al controlador.
 
 **Motivo:** Equilibrio riguroso entre seguridad estricta (revocación inmediata, caducidad absoluta improrrogable) y eficiencia operativa en PostgreSQL, evitando problemas de contención de filas detectados en pruebas de carga concurrentes.
 
@@ -1894,6 +1913,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - **Separación estricta de credenciales en migraciones (D-094):**
   - Las migraciones (`npm run db:migrate`) se ejecutan exclusivamente utilizando `MIGRATION_DATABASE_URL` conectada con el rol propietario del esquema (`table_owner`).
   - La aplicación en ejecución opera estrictamente con `DATABASE_URL` conectada con el rol de privilegios mínimos `app_exec`.
+  - I-06.1b aplica este contrato a PostgreSQL base. Las migraciones Auth siguen suministrando sus ACL específicas. En PostgreSQL base, las migraciones de la aplicación deben incluir solamente las concesiones explícitas requeridas por sus tablas y secuencias.
 - **Aprovisionamiento previo de roles separado de las migraciones:** La creación de los roles de base de datos (`app_exec`, `table_owner`) y la asignación inicial de contraseñas constituyen tareas de aprovisionamiento de infraestructura externa (documentadas con scripts SQL de aprovisionamiento para el operador), independientes de las migraciones de esquema de la aplicación. Las migraciones asumen la existencia previa de estos roles.
 - **Verificación en PostgreSQL real:** La compatibilidad de las políticas RLS y de las migraciones SQL personalizadas debe verificarse empíricamente contra instancias reales de PostgreSQL 17 utilizando la versión exacta fijada de Drizzle Kit en el proyecto.
 - **Prohibición absoluta:** Bajo ninguna circunstancia se desactivará RLS ni se otorgarán privilegios de superusuario a `app_exec` para eludir fallos de configuración de migraciones.
@@ -1990,10 +2010,12 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
   9. **Protección de confidencialidad:** Prohibición absoluta de registrar el token de activación en claro en logs, registros de auditoría o respuestas de error de la API.
   10. **Defensa contra abuso y enumeración:** El endpoint de activación aplica rate limiting riguroso contra ataques de fuerza bruta y devuelve respuestas uniformes ante tokens inválidos o expirados para mitigar la enumeración de estados de cuentas.
   11. **Auditoría:** Todos los eventos del ciclo de vida de la cuenta (creación de identidad, generación de token de activación, consumo exitoso, revocación y expiración) se registran de forma obligatoria en la auditoría global de sistema (D-105). Las denegaciones de autoridad de alta, revocación y regeneración siguen el contrato de denegación independiente de D-105.
+  12. **Comprobación previa (I-04 e I-05):** La vista retira el fragmento y envía `{token}` en JSON a `POST /auth/activate/validate` (con prefijo `/api` en fullstack). El endpoint público aplica el transporte y CSRF según la modalidad. Desde I-05 devuelve 200 con `{passwordPolicy:{minLength,maxLength,maxBytes}}` para un enlace elegible. Se conservan el 400 uniforme para un enlace inválido, 403 por transporte, 429 con `Retry-After` al agotar el presupuesto y 500 genérico ante fallo interno. La comprobación contabiliza la solicitud y lee el candidato. Solo la confirmación aplica la política de D-093, calcula Argon2id y consume el token atómicamente. Un rechazo de política devuelve 400 con `code: PASSWORD_POLICY` y permite corregir la contraseña. La vista conserva el token en memoria vinculado a su entrada de historial y ofrece reintento explícito tras fallos temporales.
 - **Comportamiento con usuarios existentes y multitenancy:**
   - Si una identidad global ya completó su activación previamente, el administrador puede concederle acceso a nuevas organizaciones directamente sin generar nuevos enlaces de activación.
   - En proyectos multitenant, las concesiones organizacionales pueden preconfigurarse para una cuenta, pero permanecen inutilizables hasta que la cuenta complete satisfactoriamente su activación inicial.
 - **Parámetros configurables en implementación:** `ACTIVATION_TOKEN_EXPIRY_HOURS` se valida con Zod como entero de 1 a 168 inclusive, con 24 horas por defecto.
+- **Presupuestos persistentes por IP:** `ACTIVATION_IP_REQUEST_LIMIT` (10) y `ACTIVATION_ABUSE_WINDOW_MINUTES` (15) configuran la confirmación. `ACTIVATION_VALIDATION_IP_REQUEST_LIMIT` (20) y `ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES` (15) configuran la comprobación previa. Se validan con Zod al arrancar como enteros positivos hasta 2147483647. Los dos presupuestos y el de login usan claves HMAC en espacios independientes, con el mismo contador persistente y limpieza acotada de D-110.
 
 **Motivo:** Resuelve de forma segura, elegante y autocontenida el aprovisionamiento de identidades sin credenciales predeterminadas ni falsas dependencias de infraestructura SMTP, cerrando el modelo de autenticación y autorización de Brixa.
 
@@ -2043,7 +2065,7 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ### D-112 — Stack y diseño del frontend React generado
 
-**Estado:** Confirmada por el responsable e implementada en T-029. Cierre de T-029 pendiente del CI multiplataforma del nuevo SHA.
+**Estado:** Confirmada por el responsable e implementada en T-029, completada tras la confirmación del CI multiplataforma.
 
 **Contexto:** La bienvenida y las interfaces iniciales necesitan una base visual común para todas las variantes que generan frontend React.
 
@@ -2061,16 +2083,49 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 
 ### D-113 — Modalidad de entrada para fullstack con Auth
 
-**Estado:** Confirmada por el responsable. Implementación pendiente en T-014a-ui.
+**Estado:** Confirmada por el responsable e implementada en T-014a-ui. Los flujos Auth de las dos modalidades pasaron los recorridos exactos de ⑧-B4 descritos en D-053.
 
 **Contexto:** Los proyectos fullstack con Auth pueden comenzar en una aplicación privada o presentar una landing pública antes del área protegida.
 
 **Decisión:**
 - Preguntar por la modalidad exclusivamente cuando se genere fullstack con Auth. Ofrecer **Aplicación privada** (predeterminada), con login, activación y área protegida, sin landing pública, y **Landing pública + aplicación protegida**, que añade una landing pública al mismo flujo.
+- En modalidad privada, `/` redirige a `/app`. En modalidad pública, `/` muestra la bienvenida de T-029 con acceso a `/login`. Ambas comparten `/login`, `/app`, `/activate` y una vista 404 para rutas desconocidas. Sin `returnTo` dinámico.
 - Compartir el núcleo Auth en ambas modalidades. La elección solo compone la interfaz, mantiene los contratos D-089, D-090, D-103 y D-107 y es independiente del registro público contemplado en D-086.
 - Los proyectos React sin Auth generan una bienvenida funcional, sin infraestructura Auth. El backend independiente conserva su alcance de API.
 
 **Motivo:** Adaptar el acceso inicial al tipo de aplicación con una sola implementación de autenticación.
+
+---
+
+### D-114 — HTTPS local optativo para fullstack con Auth y Docker
+
+**Estado:** Confirmada por el responsable en T-014a-ui ⑧-B3.2. Implementada y validada en HTTPS local por el responsable con la variante A de ⑧-B4, sin reescribir los archivos distribuidos. Véase D-053 para el alcance exacto.
+
+**Contexto:** El Nginx base sirve HTTP. El transporte por cookies de Auth detrás de un proxy exige HTTPS y una IP de proxy explícita conforme a D-089, D-099 y D-103.
+
+**Decisión:**
+- **TLS-01.** Usar una subred Compose configurable y una IP estática solo para Nginx, fuera del rango dinámico. Configurar `AUTH_TRUSTED_PROXIES` con esa misma IP. Express y PostgreSQL conservan sus conexiones internas.
+- **TLS-02.** Publicar HTTPS en loopback por defecto, en sustitución del puerto HTTP base. El healthcheck HTTP de Nginx permanece dentro del contenedor.
+- **TLS-03.** El desarrollador aporta y gestiona el certificado y la clave fuera del repositorio y de los contextos de build. Ambos se montan en solo lectura. I-06 puede ofrecer emisión local con una herramienta ya instalada y autorización expresa, utilizar certificados existentes o dejar el paso pendiente. La instalación de confianza de la CA y los cambios privilegiados de permisos siguen siendo manuales (D-115, S23).
+- **TLS-04.** Conservar Nginx no root y restringir la lectura de la clave privada a su identidad efectiva.
+- **TLS-05.** Activar el modo explícitamente mediante `docker compose -f compose.yaml -f compose.tls.yaml`. `!override` requiere Compose 2.24.4 o posterior solo para este modo. Para el aislamiento loopback se documenta Docker Engine 28.0.0 o posterior.
+- **TLS-06.** Documentar las responsabilidades del despliegue público. La configuración entregada cubre HTTPS local.
+- **TLS-07.** Generar el override solo para fullstack con Auth y Docker, en ambas modalidades de entrada y con SQLite o PostgreSQL.
+
+**Motivo:** Permitir probar el transporte real de Auth detrás de Nginx con una configuración explícita y mantener las garantías de cookies, CSRF, CSP y separación de roles.
+
+---
+
+### D-115 — Inicialización asistida opcional de proyectos generados
+
+**Estado:** Diseño aprobado por el responsable tras I-06.1. I-06.1b implementa exclusivamente S18. Los mecanismos concretos de las demás decisiones quedan para sus incrementos.
+
+- **S18.** Separar administración, migración (`table_owner`, `MIGRATION_DATABASE_URL`) y ejecución (`app_exec`, `DATABASE_URL`) en todos los proyectos PostgreSQL generados. Sustituye la propuesta de mantener manual la preparación de PostgreSQL sin Auth. Ver D-094 y D-104.
+- **S19.** Permitir proporcionar la credencial de migración al ejecutar una operación puntual o reutilizar una fuente local protegida, separada del entorno de ejecución y preferentemente externa al repositorio. Sin archivo adicional obligatorio ni gestor propio. La persistencia concreta y su portabilidad quedan pendientes.
+- **S20.** Evaluar el aprovisionamiento integrado de instancias PostgreSQL nuevas, locales, dedicadas y creadas con Docker, incluida la asignación segura de secretos. Reutilizar instalaciones compatibles y detenerse ante roles incompatibles. PostgreSQL externo o administrado sigue a cargo del operador. La asignación automática requiere validación y aprobación. Las contraseñas existentes se conservan.
+- **S21.** Consultar si ya existe un administrador inicial antes del prompt, reutilizando los adaptadores y la consulta existentes. Conservar el bootstrap transaccional. Sin endpoints, tablas o servicios adicionales.
+- **S22.** Sin Docker, preparar y mostrar comandos de arranque independientes, sin supervisar procesos ni añadir `concurrently`. En Docker se puede ofrecer arranque con Compose.
+- **S23.** Asistencia HTTPS optativa según TLS-03 de D-114. La confianza de la CA y los permisos privilegiados son manuales. Se conservan HTTPS, cookies Secure, CSRF y validación de proxies.
 
 ---
 
@@ -2087,12 +2142,11 @@ Nota sobre cifras: 34 era el recuento de pasos del arnés (variantes + 2 pasos a
 - Cifras: el número de variantes verificadas es 32 (inspección 2026-11-07). Cualquier documento que diga 34 está desactualizado.
 - Dependabot / Renovate: evaluar conveniencia y configuración para automatizar alertas sin introducir ruido excesivo (pendiente de decisión, D-066).
 - Alineación de `@types/node`, `eslint` y `typescript-eslint` entre frontend, backend y CLI (actualmente `eslint` 10.14.0 en frontend vs 10.13.0 en backend; `typescript-eslint` 8.72.1 vs 8.72.0; `@types/node` 24 en frontend vs 26 en backend y CLI).
-- Etiqueta de PostgreSQL: alinear la imagen usada por las plantillas (`postgres:17.4-alpine`) frente a la usada por el arnés de verificación (`postgres:17-alpine`, D-047, D-049).
 - Variante nueva para cubrir los 3 pares faltantes de cobertura pairwise: candidata `fullstack+js+postgres+docker+apiDocs+i18n`, que elevaría las variantes verificadas de 32 a 33 cubriendo los 76 pares válidos al 100%.
 - Revisión periódica de imágenes Docker base (`node:24.22.1-slim`, `nginxinc/nginx-unprivileged:1.30.6-alpine-slim`, `postgres:17.4-alpine`) con herramientas como Docker Scout o Trivy (no ejecutado actualmente).
 - Versiones transitivas sin fijar en proyectos generados (las plantillas no contienen lockfile, D-049, D-066).
 - Node 26: no probado en la ejecución local P1 (probado localmente en P1 solo con Node v24.22.1; la CI sí lo cubre en la matriz de `.github/workflows/ci.yml`).
-- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090 y D-101; P-011, resuelta en D-080 a D-086 y D-106; RLS/multitenancy/auditorías resueltas en D-094 a D-097, D-104 y D-105; estrategia JS/TS P-013 resuelta en D-098 tras INV-08 con implementación pendiente en T-023; y cuestiones A-1, A-2 y B-1 a B-8 de T-014-0 resueltas formalmente en D-099 a D-107). Permanecen abiertas como validaciones de implementación: la comprobación de soporte de sintaxis de políticas RLS en Drizzle Kit 0.31.x sobre PostgreSQL real (T-014c) y la verificación del flujo de activación según D-107 (T-014a).
+- Cuestiones técnicas abiertas posteriores a 0.1.0: P-008 a P-017 (salvo P-009, resuelta en D-091 a D-093; P-010, resuelta en D-087 a D-090 y D-101; P-011, resuelta en D-080 a D-086 y D-106; RLS/multitenancy/auditorías resueltas en D-094 a D-097, D-104 y D-105; estrategia JS/TS P-013 resuelta en D-098 tras INV-08 con implementación pendiente en T-023; pruebas en navegador real P-017 resueltas en D-090; y cuestiones A-1, A-2 y B-1 a B-8 de T-014-0 resueltas formalmente en D-099 a D-107). Permanecen abiertas como validaciones de implementación: la comprobación de soporte de sintaxis de políticas RLS en Drizzle Kit 0.31.x sobre PostgreSQL real (T-014c) y la verificación del flujo de activación según D-107 (T-014a).
 - Propuesta de backlog en evaluación (sin implementación aprobada): generación de aplicaciones móviles reutilizando React y Vite mediante Capacitor y evaluación de Progressive Web Apps (PWA), con soporte inicial propuesto para Android y posterior evaluación de iOS; requiere análisis futuro de autenticación móvil, almacenamiento seguro en dispositivo, comunicación con backend y modo offline (Brixa no soporta actualmente aplicaciones móviles).
 - `tsconfig.json` de `api-docs`: resuelto por D-077 (eliminada la duplicación añadiendo `resolveJsonModule: true` a la plantilla base).
 - Composición de archivos compartidos: resuelta en backend y frontend por D-077, D-078 y D-079 (`.env.example`, Compose, `main`, `App`, `vite.config`). Queda pendiente únicamente la combinación de rutas OpenAPI cuando una segunda capacidad aporte especificaciones (T-014a/b).

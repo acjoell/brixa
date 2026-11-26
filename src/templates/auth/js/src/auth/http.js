@@ -13,12 +13,14 @@ import { LoginRateLimitedError } from "./login.js";
 import { ManagedActivationError } from "./managed-activation.js";
 
 import { isPasswordWithinLimits } from "./password-limits.js";
+import { parsePasswordPolicy, PasswordPolicyError } from "./password-policy.js";
 import { tokenDigest } from "./sessions.js";
 
 const password = z.string().min(1).refine(isPasswordWithinLimits);
 const credentials = z.strictObject({ email: emailSchema, password });
 const registration = z.strictObject({ email: emailSchema });
-const activationConfirmation = z.strictObject({ token: z.string(), password });
+const activationConfirmation = z.strictObject({ token: z.string(), password: z.string() });
+const activationValidation = z.strictObject({ token: z.string() });
 const activationTarget = z.strictObject({ userId: z.uuid() });
 const passwordChange = z.strictObject({ currentPassword: password, newPassword: password });
 
@@ -57,7 +59,9 @@ const handleError = (error, _req, res, next) => {
     next(new Error("AUTH_HTTP_FAILED"));
     return;
   }
-  if (
+  if (error instanceof PasswordPolicyError) {
+    res.status(400).json({ error: "Bad Request", code: "PASSWORD_POLICY" });
+  } else if (
     error === badRequest ||
     error instanceof ValidationError ||
     (error instanceof ManagedActivationError && error.code === "INVALID_INPUT")
@@ -79,7 +83,12 @@ const handleError = (error, _req, res, next) => {
   }
 };
 
-export function createAuthHttpApp(services, transport, env = process.env) {
+export function createAuthHttpApp(
+  services,
+  transport,
+  env = process.env,
+  passwordPolicy = parsePasswordPolicy(env),
+) {
   const app = express();
   app.disable("x-powered-by");
   // Explicit policy on the sub-app, independent of the parent app's trust setting.
@@ -103,6 +112,37 @@ export function createAuthHttpApp(services, transport, env = process.env) {
     res.set("Cache-Control", "no-store").set("X-Request-Id", randomUUID());
     next();
   });
+
+  const { activation } = services;
+
+  const admitActivation = (consume) => async (req, res, next) => {
+    const admission = await consume(clientIp(req));
+    if (!admission.accepted) {
+      res
+        .set("Retry-After", String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))))
+        .status(429)
+        .json({ error: "Too Many Requests" });
+      return;
+    }
+    await activation.cleanupExpired();
+    next();
+  };
+
+  app.post(
+    "/activate/validate",
+    (req, res, next) => {
+      // This endpoint does not ask for session credentials.
+      if (transport.protect) transport.protect(req, res, next, 403);
+      else next();
+    },
+    admitActivation(activation.consumeValidationIp),
+    json,
+    async (req, res) => {
+      const { token } = parseInput(activationValidation, req.body);
+      if (!(await activation.validateToken(token))) throw badRequest;
+      res.status(200).json({ passwordPolicy });
+    },
+  );
 
   if (transport.protect) app.use(transport.protect);
 
@@ -150,8 +190,6 @@ export function createAuthHttpApp(services, transport, env = process.env) {
     res.status(204).end();
   });
 
-  const { activation } = services;
-
   app.post("/register", json, async (req, res) => {
     const session = await authenticated(req, res);
     if (!session) return;
@@ -194,27 +232,11 @@ export function createAuthHttpApp(services, transport, env = process.env) {
     res.json({ activationUrl: activation.link(result.token), expiresAt: result.expiresAt });
   });
 
-  app.post(
-    "/activate",
-    async (req, res, next) => {
-      const admission = await activation.consumeIp(clientIp(req));
-      if (!admission.accepted) {
-        res
-          .set("Retry-After", String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))))
-          .status(429)
-          .json({ error: "Too Many Requests" });
-        return;
-      }
-      await activation.cleanupExpired();
-      next();
-    },
-    json,
-    async (req, res) => {
-      const { token, password } = parseInput(activationConfirmation, req.body);
-      if (!(await activation.activateAccount(token, password, requestId(res)))) throw badRequest;
-      res.status(204).end();
-    },
-  );
+  app.post("/activate", admitActivation(activation.consumeIp), json, async (req, res) => {
+    const { token, password } = parseInput(activationConfirmation, req.body);
+    if (!(await activation.activateAccount(token, password, requestId(res)))) throw badRequest;
+    res.status(204).end();
+  });
 
   app.use(notFoundHandler);
   app.use(handleError);

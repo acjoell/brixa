@@ -1,6 +1,10 @@
 import { select, input, confirm } from "@inquirer/prompts";
 import type { RawOptions, Database } from "../types.js";
-import { canEnableAuth, DEFAULT_AUTH_TRANSPORT } from "../validation/options.js";
+import {
+  canEnableAuth,
+  DEFAULT_AUTH_APP_MODE,
+  DEFAULT_AUTH_TRANSPORT,
+} from "../validation/options.js";
 
 /** Directorio de destino por defecto si el usuario no introduce ninguno. */
 const DEFAULT_OUTPUT_DIR = "./my-project";
@@ -82,12 +86,35 @@ export async function runPrompts(): Promise<RawOptions | null> {
           })
         : undefined;
 
+    const authAppMode =
+      auth && modality === "fullstack"
+        ? await select({
+            message: "¿Cómo se accederá a la aplicación?",
+            choices: [
+              { name: "Aplicación privada", value: "private" as const },
+              { name: "Landing pública + aplicación protegida", value: "public" as const },
+            ],
+            default: DEFAULT_AUTH_APP_MODE,
+          })
+        : undefined;
+
     const outputDir = await input({
       message: "¿En qué directorio quieres generar el proyecto?",
       default: DEFAULT_OUTPUT_DIR,
     });
 
-    return { modality, language, database, docker, apiDocs, i18n, auth, authTransport, outputDir };
+    return {
+      modality,
+      language,
+      database,
+      docker,
+      apiDocs,
+      i18n,
+      auth,
+      authTransport,
+      authAppMode,
+      outputDir,
+    };
   } catch (error: unknown) {
     // ExitPromptError se lanza cuando el usuario cancela con Ctrl+C.
     if (isExitPromptError(error)) {

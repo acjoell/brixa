@@ -1,4 +1,5 @@
 import { checkAuditTransactions } from "./system-audit-contract.js";
+import { checkBusinessAuth } from "./require-auth-contract.js";
 import { recordSystemAudit } from "../src/auth/system-audit.js";
 import { URL } from "node:url";
 import { Buffer } from "node:buffer";
@@ -236,6 +237,21 @@ describe.runIf(enabled)("sesiones PostgreSQL aisladas", () => {
       expect(upgraded[0]).toEqual(authMigration[0]);
       await migrate(database, { migrationsFolder });
       expect(await history()).toEqual(upgraded);
+      // El contrato de auditoría actual escribe una denegación administrativa.
+      // Esta fixture histórica usa el rol de prueba, sin las ACL del proyecto real.
+      const platformAudit = journal.entries.find(
+        (entry) => entry.tag === "0005_platform_admin_audit",
+      );
+      expect(platformAudit).toBeDefined();
+      await copyFile(
+        "drizzle/0005_platform_admin_audit.sql",
+        join(migrationsFolder, "0005_platform_admin_audit.sql"),
+      );
+      await writeFile(
+        join(migrationsFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: [...journal.entries.slice(0, 2), platformAudit] }),
+      );
+      await migrate(database, { migrationsFolder });
     } finally {
       await rm(migrationsFolder, { recursive: true, force: true });
     }
@@ -264,6 +280,13 @@ describe.runIf(enabled)("sesiones PostgreSQL aisladas", () => {
     });
     token = (await service.createSession(id))!;
   });
+
+  it.each(["cookie", "bearer"] as const)(
+    "protege rutas de negocio PostgreSQL con %s",
+    async (mode) => {
+      await checkBusinessAuth(mode, database, database);
+    },
+  );
 
   it("atomicidad de auditoría ante escrituras concurrentes", async () => {
     const observing = drizzle(observer, { schema });

@@ -2,26 +2,26 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { EventEmitter, once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import { networkInterfaces, tmpdir } from "node:os";
 import path from "node:path";
-import { URL, URLSearchParams } from "node:url";
+import { URL, URLSearchParams, fileURLToPath } from "node:url";
 import { generate } from "../src/generator/generate.ts";
 import { startBackendServer, stopProcess } from "./verify-generated.js";
 
-const address = "127.0.0.1";
-const proxyAddress = "127.0.0.2";
-const hostname = "brixa.test";
+export const address = "127.0.0.1";
+export const proxyAddress = "127.0.0.2";
+export const hostname = "brixa.test";
 const otherHost = "other.test";
 const fixture = path.join(import.meta.dirname, "fixtures", "auth-https");
 const timeout = () => globalThis.AbortSignal.timeout(5000);
-const secret = () => randomBytes(32).toString("hex");
+export const secret = () => randomBytes(32).toString("hex");
 
-function command(label, executable, args, options = {}) {
+export function command(label, executable, args, options = {}) {
   try {
-    execFileSync(executable, args, { timeout: 120_000, stdio: "pipe", ...options });
+    return execFileSync(executable, args, { timeout: 120_000, stdio: "pipe", ...options });
   } catch (error) {
     const { code, status, signal } = error;
     const cause = { code, status, signal };
@@ -30,7 +30,7 @@ function command(label, executable, args, options = {}) {
   }
 }
 
-async function certificates(workspace) {
+export async function certificates(workspace) {
   const openssl = (...args) =>
     command("Certificado TLS de prueba", "openssl", args, { cwd: workspace });
   openssl(
@@ -86,6 +86,9 @@ async function certificates(workspace) {
   );
   openssl("x509", "-in", "ca.pem", "-outform", "DER", "-out", "ca.der");
 
+  await chmod(path.join(workspace, "ca.key"), 0o600);
+  await chmod(path.join(workspace, "tls.key"), 0o600);
+
   const home = path.join(workspace, "browser-home");
   const data = path.join(home, ".local", "share");
   const nssdb = path.join(data, "pki", "nssdb");
@@ -107,7 +110,14 @@ async function certificates(workspace) {
   };
 }
 
-async function browser(child) {
+export async function navigatePage(send, url, step) {
+  const { errorText } = await send("Page.navigate", { url });
+  if (!errorText) return;
+  const code = /^net::ERR_[A-Z0-9_]+$/.exec(errorText)?.[0];
+  throw new Error(`Chromium no pudo navegar en ${step}${code ? ` (${code})` : ""}.`);
+}
+
+export async function browser(child) {
   const pending = new Map();
   let nextId = 0;
   let sessionId;
@@ -159,8 +169,7 @@ async function browser(child) {
       return result.result.value;
     },
     async open(url, selector) {
-      const { errorText } = await send("Page.navigate", { url });
-      assert(!errorText, `Chromium rechazó la navegación HTTPS (${errorText}).`);
+      await navigatePage(send, url, "apertura de página de prueba");
       for (let attempt = 0; attempt < 50; attempt++) {
         const result = await send("Runtime.evaluate", {
           expression: `location.origin + '|' + Boolean(document.querySelector(${JSON.stringify(selector)}))`,
@@ -172,6 +181,84 @@ async function browser(child) {
       throw new Error("No cargó la página de prueba HTTPS.");
     },
   };
+}
+
+export function bootstrapSource(directory, postgres = false) {
+  const administrator = postgres ? "withPostgresAdministrator" : "withSqliteAdministrator";
+  const module = postgres ? "bootstrap" : "local-admin";
+  return `
+import { ${administrator} } from "./${directory}/db/${module}.js";
+import { bootstrapInitialAdministrator } from "./${directory}/auth/bootstrap.js";
+await ${administrator}((database) => bootstrapInitialAdministrator(database, {
+  email: process.env.BRIXA_FIXTURE_EMAIL, password: process.env.BRIXA_FIXTURE_PASSWORD,
+}));
+delete process.env.BRIXA_FIXTURE_PASSWORD;
+`;
+}
+
+export function spawnTlsBrowser({ home, data }) {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) =>
+        !/^(AUTH_|DATABASE_|MIGRATION_|CORS_|LOGIN_|ARGON2_|SESSION_|ACTIVATION_|POSTGRES_|BRIXA_FIXTURE_)/i.test(
+          name,
+        ),
+    ),
+  );
+  return spawn(
+    process.env.BRIXA_CHROMIUM || "chromium",
+    [
+      "--headless",
+      "--no-first-run",
+      "--disable-background-networking",
+      "--no-proxy-server",
+      "--remote-debugging-pipe",
+      "--disable-dev-shm-usage",
+      `--user-data-dir=${path.join(home, "profile")}`,
+      `--host-resolver-rules=MAP ${hostname} ${address}, MAP ${otherHost} ${address}`,
+      "about:blank",
+    ],
+    {
+      env: { ...env, HOME: home, XDG_DATA_HOME: data },
+      stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
+    },
+  );
+}
+
+export function trustedForwardingHeaders(req) {
+  const headers = Object.fromEntries(
+    Object.entries(req.headers).filter(
+      ([name]) => name !== "forwarded" && name !== "x-real-ip" && !name.startsWith("x-forwarded-"),
+    ),
+  );
+  headers["x-forwarded-for"] = req.socket.remoteAddress;
+  headers["x-forwarded-proto"] = "https";
+  return headers;
+}
+
+export function forwardAuthApi(req, res, port, headers, onResponse) {
+  const upstream = http.request(
+    {
+      hostname: address,
+      port,
+      localAddress: proxyAddress,
+      method: req.method,
+      path: req.url.slice(4),
+      headers,
+      signal: timeout(),
+    },
+    (response) => {
+      onResponse?.(response);
+      res.writeHead(response.statusCode, response.headers);
+      response.pipe(res);
+    },
+  );
+  res.once("close", () => upstream.destroy());
+  upstream.on("error", () => {
+    if (res.headersSent) res.destroy();
+    else res.writeHead(502).end();
+  });
+  req.pipe(upstream);
 }
 
 async function run() {
@@ -235,14 +322,7 @@ async function run() {
           .writeHead(200, { "Content-Type": "text/html" })
           .end('<!doctype html><main id="fixture">Brixa HTTPS</main>');
       if (!req.url?.startsWith("/api/") || !backend) return res.writeHead(404).end();
-      const headers = Object.fromEntries(
-        Object.entries(req.headers).filter(
-          ([name]) =>
-            name !== "forwarded" && name !== "x-real-ip" && !name.startsWith("x-forwarded-"),
-        ),
-      );
-      headers["x-forwarded-for"] = req.socket.remoteAddress;
-      headers["x-forwarded-proto"] = "https";
+      const headers = trustedForwardingHeaders(req);
       if (req.url === "/api/auth/login" && !loginForwarding) {
         const isForwardingHeader = ([name]) =>
           name.startsWith("x-forwarded-") || name === "forwarded" || name === "x-real-ip";
@@ -251,29 +331,11 @@ async function run() {
           outgoing: Object.fromEntries(Object.entries(headers).filter(isForwardingHeader)),
         };
       }
-      const upstream = http.request(
-        {
-          hostname: address,
-          port: backend.port,
-          localAddress: proxyAddress,
-          method: req.method,
-          path: req.url.slice(4),
-          headers,
-          signal: timeout(),
-        },
-        (response) => {
-          if (req.url === "/api/auth/login" && !loginSetCookie)
-            loginSetCookie = response.headers["set-cookie"];
-          forwarded.emit(req.url, response.statusCode, req.headers.origin);
-          res.writeHead(response.statusCode, response.headers);
-          response.pipe(res);
-        },
-      );
-      upstream.on("error", () => {
-        if (res.headersSent) res.destroy();
-        else res.writeHead(502).end();
+      forwardAuthApi(req, res, backend.port, headers, (response) => {
+        if (req.url === "/api/auth/login" && !loginSetCookie)
+          loginSetCookie = response.headers["set-cookie"];
+        forwarded.emit(req.url, response.statusCode, req.headers.origin);
       });
-      req.pipe(upstream);
     });
     proxy.listen(0, address);
     await once(proxy, "listening");
@@ -298,13 +360,7 @@ import { app } from "./dist/app.js";
 import { initializeAuthHttp } from "./dist/auth/http-runtime.js";
 import { db } from "./dist/db/client.js";
 import { sqliteActivationDatabase } from "./dist/db/activation-write.js";
-import { withSqliteAdministrator } from "./dist/db/local-admin.js";
-import { bootstrapInitialAdministrator } from "./dist/auth/bootstrap.js";
-await withSqliteAdministrator((database) => bootstrapInitialAdministrator(database, {
-  email: process.env.BRIXA_FIXTURE_EMAIL, password: process.env.BRIXA_FIXTURE_PASSWORD,
-}));
-delete process.env.BRIXA_FIXTURE_PASSWORD;
-await initializeAuthHttp("cookie", "brixa-session-fixture", db, sqliteActivationDatabase({ url: process.env.DATABASE_URL }));
+${bootstrapSource("dist")}await initializeAuthHttp("cookie", "brixa-session-fixture", db, sqliteActivationDatabase({ url: process.env.DATABASE_URL }));
 const server = app.listen(0, "${address}", () => console.log("http://localhost:" + server.address().port));
 `,
     );
@@ -348,24 +404,7 @@ const server = app.listen(0, "${address}", () => console.log("http://localhost:"
       "OK backend inaccesible en IPv4 no loopback; X-Forwarded-Proto directo rechazado (403)",
     );
 
-    chrome = spawn(
-      process.env.BRIXA_CHROMIUM || "chromium",
-      [
-        "--headless",
-        "--no-first-run",
-        "--disable-background-networking",
-        "--no-proxy-server",
-        "--remote-debugging-pipe",
-        "--disable-dev-shm-usage",
-        `--user-data-dir=${path.join(home, "profile")}`,
-        `--host-resolver-rules=MAP ${hostname} ${address}, MAP ${otherHost} ${address}`,
-        "about:blank",
-      ],
-      {
-        env: { ...env, BRIXA_FIXTURE_PASSWORD: undefined, HOME: home, XDG_DATA_HOME: data },
-        stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
-      },
-    );
+    chrome = spawnTlsBrowser({ home, data });
     const page = await browser(chrome);
     await page.open(origin + "/", "#fixture");
     assert.equal(await page.evaluate("isSecureContext"), true);
@@ -518,7 +557,9 @@ const server = app.listen(0, "${address}", () => console.log("http://localhost:"
   }
 }
 
-run().catch((error) => {
-  console.error(`Validación HTTPS fallida: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  run().catch((error) => {
+    console.error(`Validación HTTPS fallida: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -61,6 +61,10 @@ function checkCsrf(req, origins) {
   );
 }
 
+export function isMutableMethod(method) {
+  return !["GET", "HEAD", "OPTIONS"].includes(method);
+}
+
 export function createAuthHttpTransport(mode, cookieName, env) {
   const result = configSchema.safeParse(env);
   if (!result.success) {
@@ -93,7 +97,7 @@ export function createAuthHttpTransport(mode, cookieName, env) {
 
   return {
     publicOrigin: origin,
-    protect(req, res, next) {
+    protect(req, res, next, invalidCredentials = 401) {
       const socket = req.socket;
       const forwardedProto =
         socket.remoteAddress && trusted(socket.remoteAddress)
@@ -110,10 +114,9 @@ export function createAuthHttpTransport(mode, cookieName, env) {
         localPeers.check(socket.remoteAddress, socket.remoteFamily === "IPv6" ? "ipv6" : "ipv4") &&
         typeof host === "string" &&
         /^(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(host);
-      const mutable = !["GET", "HEAD", "OPTIONS"].includes(req.method);
       if (
         !(localHttp ? development : https) ||
-        (mode === "cookie" && mutable && !checkCsrf(req, origins))
+        (mode === "cookie" && isMutableMethod(req.method) && !checkCsrf(req, origins))
       ) {
         res.status(403).json({ error: "Forbidden" });
         return;
@@ -131,7 +134,9 @@ export function createAuthHttpTransport(mode, cookieName, env) {
                 authorization.slice(0, 7).toLowerCase() !== "bearer " ||
                 /[^0-9a-f]/.test(authorization.slice(7))))))
       ) {
-        res.status(401).json({ error: "Unauthorized" });
+        res
+          .status(invalidCredentials)
+          .json({ error: invalidCredentials === 403 ? "Forbidden" : "Unauthorized" });
         return;
       }
       next();

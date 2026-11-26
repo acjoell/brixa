@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { initialAdministrator, users } from "../db/schema.js";
 import { emailSchema } from "./email.js";
 import { hashPassword } from "./password-crypto.js";
-import { isPasswordWithinLimits } from "./password-limits.js";
+import { acceptsNewPassword, parsePasswordPolicy } from "./password-policy.js";
 import { withSystemAudit } from "./system-audit.js";
 
 export class BootstrapError extends Error {
@@ -17,7 +17,10 @@ export class BootstrapError extends Error {
 // En PostgreSQL el llamador operativo usa el adaptador reservado a table_owner.
 export async function bootstrapInitialAdministrator(database, { email, password }) {
   const identifier = emailSchema.safeParse(email);
-  if (!identifier.success || password === "" || !isPasswordWithinLimits(password)) {
+  if (
+    !identifier.success ||
+    !acceptsNewPassword(password, identifier.data, parsePasswordPolicy())
+  ) {
     throw new BootstrapError("INVALID_CREDENTIALS");
   }
 

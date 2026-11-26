@@ -5,7 +5,7 @@
  * Las combinaciones Auth disponen de evidencia especializada (D-053).
  */
 
-import { DEFAULT_AUTH_TRANSPORT } from "./validation/options.js";
+import { DEFAULT_AUTH_APP_MODE, DEFAULT_AUTH_TRANSPORT } from "./validation/options.js";
 import type { UserOptions } from "./types.js";
 
 /** Representa los flags opcionales de una variante verificada. */
@@ -21,7 +21,10 @@ export function variantLabel(opts: VerifiedVariant): string {
   if (opts.docker) parts.push("docker");
   if (opts.apiDocs) parts.push("docs");
   if (opts.i18n) parts.push("i18n");
-  if (opts.auth) parts.push("auth", opts.authTransport ?? DEFAULT_AUTH_TRANSPORT);
+  if (opts.auth) {
+    parts.push("auth", opts.authTransport ?? DEFAULT_AUTH_TRANSPORT);
+    if (opts.authAppMode) parts.push(opts.authAppMode);
+  }
   return parts.join("+");
 }
 
@@ -66,7 +69,7 @@ export const VERIFIED_VARIANTS: readonly VerifiedVariant[] = [
 
 const _verifiedSet = new Set(VERIFIED_VARIANTS.map(variantLabel));
 
-/** Ciclo Auth y controles generales focalizados acreditados (T-014a). */
+/** Contratos del servidor Auth y controles generales focalizados acreditados (T-014a). */
 export const VERIFIED_AUTH_VARIANTS: readonly VerifiedVariant[] = (
   [
     { modality: "backend", language: "js", database: "postgres", authTransport: "bearer" },
@@ -79,10 +82,38 @@ export const VERIFIED_AUTH_VARIANTS: readonly VerifiedVariant[] = (
 
 const verifiedAuthSet = new Set(VERIFIED_AUTH_VARIANTS.map(variantLabel));
 
+/** Recorridos Auth UI acreditados (T-014a-ui), con las topologías descritas en D-053. */
+export const VERIFIED_AUTH_UI_VARIANTS: readonly VerifiedVariant[] = [
+  {
+    modality: "fullstack",
+    language: "ts",
+    database: "postgres",
+    docker: true,
+    apiDocs: true,
+    i18n: true,
+    auth: true,
+    authAppMode: "private",
+  },
+  {
+    modality: "fullstack",
+    language: "js",
+    database: "sqlite",
+    auth: true,
+    authAppMode: "public",
+  },
+];
+
+const verifiedAuthUiSet = new Set(VERIFIED_AUTH_UI_VARIANTS.map(variantLabel));
+
 /**
  * Devuelve true para una combinación exacta con evidencia de generación y funcionamiento.
  */
 export function isVerified(opts: VerifiedVariant): boolean {
+  if (opts.auth && opts.modality === "fullstack") {
+    return verifiedAuthUiSet.has(
+      variantLabel({ ...opts, authAppMode: opts.authAppMode ?? DEFAULT_AUTH_APP_MODE }),
+    );
+  }
   const label = variantLabel(opts);
   return opts.auth ? verifiedAuthSet.has(label) : _verifiedSet.has(label);
 }
@@ -100,7 +131,8 @@ export const VERIFIED_SECURITY_VARIANTS: readonly VerifiedVariant[] = [
 const _verifiedSecuritySet = new Set(VERIFIED_SECURITY_VARIANTS.map(variantLabel));
 
 /**
- * Devuelve true si la combinación dada está entre las verificadas por el arnés de seguridad.
+ * Consulta el arnés de seguridad y los controles del servidor Auth. En Auth, la
+ * evidencia histórica se consulta sin authAppMode y se limita al servidor.
  */
 export function isSecurityVerified(opts: VerifiedVariant): boolean {
   const label = variantLabel(opts);

@@ -29,6 +29,10 @@ export async function checkLoginAbuse(
       "LOGIN_IP_REQUEST_LIMIT",
       "LOGIN_IDENTIFIER_FAILURE_LIMIT",
       "LOGIN_ABUSE_WINDOW_MINUTES",
+      "ACTIVATION_IP_REQUEST_LIMIT",
+      "ACTIVATION_ABUSE_WINDOW_MINUTES",
+      "ACTIVATION_VALIDATION_IP_REQUEST_LIMIT",
+      "ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES",
     ])
       assert.throws(() => createLoginAbuseService(first, { ...env, [option]: value }), {
         message: "LOGIN_ABUSE_INVALID_CONFIG: " + option,
@@ -127,6 +131,19 @@ export async function checkLoginAbuse(
   assert.equal(await reopened.cleanupExpired(), 2);
   assert.equal(await service.cleanupExpired(), 0);
   assert.equal((await read(ipDigest)).hits, 10);
+  for (const [limit, consume] of [
+    [10, service.consumeActivationIp],
+    [20, service.consumeActivationValidationIp],
+  ] as const) {
+    for (let i = 1; i <= limit; i++) {
+      const result = await consume(i % 2 ? ip : "::ffff:c000:201");
+      assert.equal(result.accepted, true);
+      assert.equal(result.blocked, i === limit);
+    }
+    const rejected = await consume(ip);
+    assert.equal(rejected.accepted, false);
+    assert(rejected.retryAfterMs > 0 && rejected.retryAfterMs <= 900_000);
+  }
 
   await rejectUpdates(true);
   try {

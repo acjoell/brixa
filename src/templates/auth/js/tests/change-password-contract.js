@@ -110,6 +110,11 @@ export async function checkPasswordChange(
     [first, old, "\ud800"],
   ])
     assert.equal(await change(token, current, replacement, "rejected"), false);
+  for (const replacement of ["too short", "CHANGE@EXAMPLE.TEST"]) {
+    await assert.rejects(change(first, old, replacement, "rejected"), {
+      message: "PASSWORD_POLICY",
+    });
+  }
   await setStatus("disabled");
   assert.equal(await change(first, old, next, "disabled"), false);
   await setStatus("active");
@@ -202,7 +207,10 @@ export async function checkPasswordChange(
                 from: () => ({
                   where: async (condition) => {
                     const row = await target
-                      .select({ passwordHash: users.passwordHash })
+                      .select({
+                        passwordHash: users.passwordHash,
+                        email: users.canonicalIdentifier,
+                      })
                       .from(users)
                       .where(condition);
                     // El servicio recibe la fila y encola Argon2id antes del siguiente turno.

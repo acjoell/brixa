@@ -3,7 +3,7 @@ import type { db } from "../db/client.js";
 import { initialAdministrator, users } from "../db/schema.js";
 import { emailSchema } from "./email.js";
 import { hashPassword } from "./password-crypto.js";
-import { isPasswordWithinLimits } from "./password-limits.js";
+import { acceptsNewPassword, parsePasswordPolicy } from "./password-policy.js";
 import { withSystemAudit } from "./system-audit.js";
 
 type BootstrapCode =
@@ -22,7 +22,10 @@ export async function bootstrapInitialAdministrator(
   { email, password }: { email: unknown; password: unknown },
 ): Promise<{ userId: string }> {
   const identifier = emailSchema.safeParse(email);
-  if (!identifier.success || password === "" || !isPasswordWithinLimits(password)) {
+  if (
+    !identifier.success ||
+    !acceptsNewPassword(password, identifier.data, parsePasswordPolicy())
+  ) {
     throw new BootstrapError("INVALID_CREDENTIALS");
   }
 

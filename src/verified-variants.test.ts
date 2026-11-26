@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   VERIFIED_VARIANTS,
   VERIFIED_AUTH_VARIANTS,
+  VERIFIED_AUTH_UI_VARIANTS,
   VERIFIED_SECURITY_VARIANTS,
   isVerified,
   isSecurityVerified,
@@ -10,7 +11,7 @@ import {
 import { nextStepsMessage } from "./generator/generate.js";
 
 describe("acreditación exacta de Auth", () => {
-  it("mantiene las cinco combinaciones integrales separadas de los inventarios generales", () => {
+  it("conserva las cinco acreditaciones del servidor sin extenderlas a Auth UI", () => {
     expect(VERIFIED_AUTH_VARIANTS.map(variantLabel)).toEqual([
       "backend+js+postgres+docs+auth+bearer",
       "backend+ts+sqlite+docs+auth+bearer",
@@ -19,8 +20,15 @@ describe("acreditación exacta de Auth", () => {
       "backend+js+sqlite+docs+auth+cookie",
     ]);
     for (const variant of VERIFIED_AUTH_VARIANTS) {
-      expect(isVerified(variant)).toBe(true);
+      const hasAuthUi = variant.modality === "fullstack";
+      expect(isVerified(variant)).toBe(!hasAuthUi);
       expect(isSecurityVerified(variant)).toBe(true);
+      if (hasAuthUi) {
+        for (const authAppMode of ["private", "public"] as const) {
+          expect(isVerified({ ...variant, authAppMode })).toBe(false);
+          expect(isSecurityVerified({ ...variant, authAppMode })).toBe(false);
+        }
+      }
       const { modality, language, database, authTransport } = variant;
       expect(
         nextStepsMessage(
@@ -33,8 +41,8 @@ describe("acreditación exacta de Auth", () => {
           false,
           true,
           authTransport,
-        ),
-      ).not.toContain("experimental");
+        ).includes("experimental"),
+      ).toBe(hasAuthUi);
     }
   });
 
@@ -55,6 +63,38 @@ describe("acreditación exacta de Auth", () => {
     ] as const) {
       expect(isVerified(changed)).toBe(false);
       expect(isSecurityVerified(changed)).toBe(false);
+    }
+  });
+});
+
+describe("acreditación exacta de Auth UI", () => {
+  it("identifica únicamente los recorridos A privado y B público", () => {
+    expect(VERIFIED_AUTH_UI_VARIANTS.map(variantLabel)).toEqual([
+      "fullstack+ts+postgres+docker+docs+i18n+auth+cookie+private",
+      "fullstack+js+sqlite+auth+cookie+public",
+    ]);
+    for (const variant of VERIFIED_AUTH_UI_VARIANTS) {
+      expect(isVerified(variant)).toBe(true);
+      expect(isSecurityVerified(variant)).toBe(false);
+      expect(isVerified({ ...variant, authAppMode: undefined })).toBe(
+        variant.authAppMode === "private",
+      );
+      expect(
+        isVerified({
+          ...variant,
+          authAppMode: variant.authAppMode === "private" ? "public" : "private",
+        }),
+      ).toBe(false);
+      for (const changed of [
+        { ...variant, docker: !variant.docker },
+        { ...variant, apiDocs: !variant.apiDocs },
+        { ...variant, i18n: !variant.i18n },
+        { ...variant, language: variant.language === "ts" ? "js" : "ts" },
+        { ...variant, database: variant.database === "postgres" ? "sqlite" : "postgres" },
+        { ...variant, authTransport: "bearer" },
+      ] as const) {
+        expect(isVerified(changed)).toBe(false);
+      }
     }
   });
 });

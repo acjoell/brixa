@@ -16,12 +16,12 @@ BEGIN
     RAISE EXCEPTION 'Se requiere una base dedicada confirmada con target';
   END IF;
   SELECT oid INTO STRICT db_oid FROM pg_database WHERE datname = current_database();
+  -- Conservar la marca histórica para reconocer roles Auth ya aprovisionados.
   marker := 'Brixa Auth PostgreSQL / database oid ' || db_oid;
   FOR previous IN
     SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner) AS owner_name
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE (n.nspname = 'public' AND c.relname IN ('users','sessions','audit_log_system','initial_administrator','login_abuse_counters','login_identifier_reservations')
-           OR n.nspname = 'drizzle') AND pg_get_userbyid(c.relowner) <> 'table_owner'
+    WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','i','I','S','v','m','f','c') AND pg_get_userbyid(c.relowner) <> 'table_owner'
   LOOP
     RAISE EXCEPTION 'Revisar propietario anterior de %.%: %', previous.nspname, previous.relname, previous.owner_name;
   END LOOP;

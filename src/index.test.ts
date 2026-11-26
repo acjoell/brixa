@@ -22,17 +22,18 @@ describe("main", () => {
   });
 
   it.each([
-    ["backend", "js", "postgres", true, "bearer"],
-    ["backend", "ts", "sqlite", true, "cookie"],
-    ["fullstack", "ts", "sqlite", true, undefined],
-    ["backend", "ts", "sqlite", false, undefined],
+    ["backend", "js", "postgres", true, "bearer", undefined],
+    ["backend", "ts", "sqlite", true, "cookie", undefined],
+    ["fullstack", "ts", "sqlite", true, undefined, undefined],
+    ["fullstack", "ts", "sqlite", true, undefined, "public"],
+    ["backend", "ts", "sqlite", false, undefined, undefined],
   ] as const)(
-    "genera %s %s con %s, Auth=%s y transporte %s",
-    async (modality, language, database, auth, authTransport) => {
+    "genera %s %s con %s, Auth=%s, transporte %s y entrada %s",
+    async (modality, language, database, auth, authTransport, authAppMode) => {
       const directory = await mkdtemp(path.join(tmpdir(), "brixa-cli-auth-"));
       try {
         const outputDir = path.join(directory, "project");
-        const raw = { modality, language, database, auth, authTransport, outputDir };
+        const raw = { modality, language, database, auth, authTransport, authAppMode, outputDir };
         runPromptsMock.mockResolvedValue(raw);
         await expect(main()).resolves.toBe(0);
         expect(generateMock).toHaveBeenCalledExactlyOnceWith({
@@ -40,6 +41,7 @@ describe("main", () => {
           docker: false,
           apiDocs: false,
           i18n: false,
+          authAppMode: modality === "fullstack" ? (authAppMode ?? "private") : undefined,
         });
 
         const backend = modality === "fullstack" ? path.join(outputDir, "backend") : outputDir;
@@ -56,6 +58,37 @@ describe("main", () => {
           expect(startup).not.toContain("initializeAuthHttp");
         }
       } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["public", "private"] as const)(
+    "aplica la acreditación de Auth UI %s a ambos avisos",
+    async (authAppMode) => {
+      const directory = await mkdtemp(path.join(tmpdir(), "brixa-cli-auth-ui-"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        runPromptsMock.mockResolvedValue({
+          modality: "fullstack",
+          language: "js",
+          database: "sqlite",
+          auth: true,
+          authAppMode,
+          outputDir: path.join(directory, "project"),
+        });
+        await expect(main()).resolves.toBe(0);
+        const label = `fullstack+js+sqlite+auth+cookie+${authAppMode}`;
+        const finalMessage = vi.mocked(nextStepsMessage).mock.results[0]?.value;
+        if (authAppMode === "public") {
+          expect(warn).not.toHaveBeenCalled();
+          expect(finalMessage).not.toContain("experimental");
+        } else {
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining(`experimental (${label})`));
+          expect(finalMessage).toContain(`experimental (${label})`);
+        }
+      } finally {
+        warn.mockRestore();
         await rm(directory, { recursive: true, force: true });
       }
     },

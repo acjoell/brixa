@@ -13,7 +13,7 @@ export type Language = "js" | "ts";
 export type Database = "none" | "postgres" | "sqlite";
 
 /** Opciones crudas devueltas por el flujo de prompts. */
-export interface RawOptions extends Pick<UserOptions, "auth" | "authTransport"> {
+export interface RawOptions extends Pick<UserOptions, "auth" | "authTransport" | "authAppMode"> {
   modality: Modality;
   language: Language;
   database?: Database | undefined;
@@ -29,6 +29,8 @@ export interface UserOptions {
   /** Activa el overlay de Auth al componer el backend. */
   auth?: boolean | undefined;
   authTransport?: "cookie" | "bearer" | undefined;
+  /** Modalidad de entrada aplicable solo a fullstack con Auth. */
+  authAppMode?: "private" | "public" | undefined;
   modality: Modality;
   language: Language;
   database?: Database | undefined;

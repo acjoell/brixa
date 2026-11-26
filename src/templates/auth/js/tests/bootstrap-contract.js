@@ -6,7 +6,7 @@ import { bootstrapInitialAdministrator } from "../src/auth/bootstrap.js";
 import { isInitialAdministrator } from "../src/auth/initial-administrator.js";
 import { verifyPassword } from "../src/auth/password-crypto.js";
 
-const credentials = { email: " initial@EXAMPLE.test ", password: "initial test passphrase" };
+const credentials = { email: " initial@EXAMPLE.test ", password: "  cafe\u0301 🧱 fixture  " };
 const other = { email: "other@example.test", password: "different test passphrase" };
 
 function snapshot(database) {
@@ -36,6 +36,7 @@ export async function checkBootstrap(
     { ...credentials, email: "invalid" },
     { ...credentials, password: "" },
     { ...credentials, password: "x".repeat(129) },
+    { ...credentials, password: credentials.email.trim().toUpperCase() },
   ]) {
     await rejectsWith(bootstrap(input), "INVALID_CREDENTIALS");
   }
@@ -65,6 +66,7 @@ export async function checkBootstrap(
   assert.equal(account?.canonicalIdentifier, "initial@example.test");
   assert.equal(account.status, "active");
   assert(await verifyPassword(credentials.password, account.passwordHash));
+  assert(!(await verifyPassword(credentials.password.trim().normalize(), account.passwordHash)));
   assert.deepEqual(result, { userId: account.id });
   assert.deepEqual(assignments, [{ singleton: "initial", userId: account.id }]);
   assert(await isInitialAdministrator(database, account.id));

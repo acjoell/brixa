@@ -6,6 +6,7 @@ import { lockSession } from "../db/session-write.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import { hashPassword, verifyPassword } from "./password-crypto.js";
 import { isPasswordWithinLimits } from "./password-limits.js";
+import { acceptsNewPassword, parsePasswordPolicy, PasswordPolicyError } from "./password-policy.js";
 import { parseSessionConfig } from "./session-config.js";
 import { isSessionValid, readSession, revokeUserSessions, tokenDigest } from "./sessions.js";
 import { recordSystemAudit } from "./system-audit.js";
@@ -21,6 +22,7 @@ export class PasswordChangeError extends Error {
 
 export function createPasswordChangeService(database, env = process.env, clock = Date.now) {
   const config = parseSessionConfig(env);
+  const policy = parsePasswordPolicy(env);
 
   return async function changePassword(token, currentPassword, newPassword, requestId) {
     const digest = tokenDigest(token);
@@ -38,12 +40,16 @@ export function createPasswordChangeService(database, env = process.env, clock =
         const [session] = await readSession(connection, digest);
         if (!isSessionValid(config, session, clock())) return null;
         const [account] = await connection
-          .select({ passwordHash: users.passwordHash })
+          .select({ passwordHash: users.passwordHash, email: users.canonicalIdentifier })
           .from(users)
           .where(and(eq(users.id, session.userId), eq(users.status, "active")));
-        return account?.passwordHash ? { userId: session.userId, phc: account.passwordHash } : null;
+        return account?.passwordHash
+          ? { userId: session.userId, phc: account.passwordHash, email: account.email }
+          : null;
       });
       if (!candidate || !(await verifyPassword(currentPassword, candidate.phc))) return false;
+      if (!acceptsNewPassword(newPassword, candidate.email, policy))
+        throw new PasswordPolicyError();
       const replacement = await hashPassword(newPassword);
 
       const { userId } = candidate;
@@ -66,7 +72,8 @@ export function createPasswordChangeService(database, env = process.env, clock =
         return true;
       });
     } catch (error) {
-      if (error instanceof Argon2SaturatedError) throw error;
+      if (error instanceof Argon2SaturatedError || error instanceof PasswordPolicyError)
+        throw error;
       throw new PasswordChangeError();
     }
   };

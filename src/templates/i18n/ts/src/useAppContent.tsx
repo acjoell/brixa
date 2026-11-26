@@ -6,7 +6,7 @@ export function useAppContent(): AppContent {
   const { t } = useTranslation()
   return {
     LanguageSelector,
-    t: (key) => t(key),
+    t: (key, fallback = key) => t(key, { defaultValue: fallback }),
     EditInstruction: () => (
       <Trans
         i18nKey="launchpad.edit"

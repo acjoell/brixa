@@ -29,7 +29,7 @@ import {
 import { redact as redactTs } from "../templates/backend-express-ts/src/redact.js";
 // @ts-expect-error La plantilla JavaScript no incluye archivo de declaraciones .d.ts
 import { redact as redactJs } from "../templates/backend-express-js/src/redact.js";
-import { connectionUrl } from "../templates/auth-postgres/ts/src/db/connection-url.js";
+import { connectionUrl } from "../templates/database-postgres/ts/src/db/connection-url.js";
 import type { Modality } from "../types.js";
 
 const KEY_FILES = [
@@ -85,14 +85,18 @@ describe("persistencia de Auth", () => {
           await expect(fs.access(path.join(backend, recoverySource))).resolves.toBeUndefined();
           await expect(fs.access(path.join(backend, source))).resolves.toBeUndefined();
           const env = database === "postgres" ? "-e MIGRATION_DATABASE_URL " : "";
+          const composeCommand =
+            modality === "fullstack"
+              ? "docker compose -f compose.yaml -f compose.tls.yaml"
+              : "docker compose";
           const command =
             language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
-          expect(readme).toContain("docker compose run --rm " + env + "backend " + command);
+          expect(readme).toContain(`${composeCommand} run --rm ${env}backend ${command}`);
           const recovery =
             language === "ts"
               ? "node dist/auth/recover-admin-cli.js"
               : "npm run auth:recover-admin";
-          expect(readme).toContain("docker compose run --rm " + env + "backend " + recovery);
+          expect(readme).toContain(`${composeCommand} run --rm ${env}backend ${recovery}`);
           const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
           expect(compose).not.toContain("MIGRATION_DATABASE_URL");
         } else {
@@ -142,7 +146,7 @@ describe("persistencia de Auth", () => {
               () => true,
               () => false,
             ),
-          ).toBe(auth && database === "postgres");
+          ).toBe(database === "postgres");
           expect(schema.includes("export const initialAdministrator")).toBe(auth);
           expect(schema.includes("export const loginAbuseCounters")).toBe(auth);
           if (auth) {
@@ -310,6 +314,8 @@ it("separa identidades PostgreSQL y rechaza credenciales incompletas o privilegi
     { DATABASE_URL: runtime + "?user=postgres" },
     { DATABASE_URL: runtime, MIGRATION_DATABASE_URL: migration },
     { DATABASE_URL: runtime, POSTGRES_PASSWORD: "fixture" },
+    { DATABASE_URL: runtime, PGPASSWORD: "fixture" },
+    { DATABASE_URL: runtime, PGPASSFILE: "fixture" },
     { DATABASE_URL: "postgresql://app_exec@postgres/app" },
   ]) {
     expect(() => connectionUrl("DATABASE_URL", env)).toThrow();
@@ -327,6 +333,9 @@ describe("overlay criptográfico de Auth", () => {
     ["fullstack", "js", "postgres", true, false],
     ["backend", "ts", "sqlite", false, false],
     ["fullstack", "js", "postgres", false, true],
+    ["backend", "js", "postgres", false, false],
+    ["backend", "ts", "postgres", false, false],
+    ["fullstack", "ts", "postgres", false, false],
   ] as const)(
     "compone entorno Docker en %s %s %s con auth=%s y docs=%s",
     async (modality, language, database, auth, apiDocs) => {
@@ -335,16 +344,34 @@ describe("overlay criptográfico de Auth", () => {
         await generate({ outputDir, modality, language, database, auth, apiDocs, docker: true }),
       ).toEqual({ ok: true });
       const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
+      const tlsPath = path.join(outputDir, "compose.tls.yaml");
+      const nginxTlsPath = path.join(outputDir, "frontend", "nginx.tls.conf");
+      if (modality === "fullstack" && auth) {
+        const tls = await fs.readFile(tlsPath, "utf8");
+        const nginx = await fs.readFile(nginxTlsPath, "utf8");
+        const baseNginx = await fs.readFile(path.join(outputDir, "frontend", "nginx.conf"), "utf8");
+        expect(compose).toContain('"8080:8080"');
+        expect(tls).toContain('ports: !override\n      - "127.0.0.1:${TLS_PORT:-8443}:8443"');
+        expect(tls).toContain('AUTH_TRUSTED_PROXIES: "${TLS_NGINX_IP:?Configura TLS_NGINX_IP}"');
+        expect(tls).toContain('ipv4_address: "${TLS_NGINX_IP:?Configura TLS_NGINX_IP}"');
+        expect(nginx).toContain("listen 127.0.0.1:8080;");
+        expect(nginx).toContain("proxy_set_header X-Forwarded-For $remote_addr;");
+        expect(nginx).toContain("try_files $uri $uri/ /index.html;");
+        expect(nginx.match(/add_header .+/g)).toEqual(baseNginx.match(/add_header .+/g));
+      } else {
+        await expect(fs.access(tlsPath)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(fs.access(nginxTlsPath)).rejects.toMatchObject({ code: "ENOENT" });
+      }
       const environment =
         /\n {2}backend:\n(?: {4}[^\n]+\n)*? {4}environment:\n((?: {6}[^\n]+\n)+)/.exec(
           compose,
         )?.[1];
-      const separate = auth && database === "postgres";
+      const separate = database === "postgres";
       const backend = modality === "fullstack" ? path.join(outputDir, "backend") : outputDir;
       const read = (name: string) => fs.readFile(path.join(backend, name), "utf8");
-      expect((await read("src/index." + language)).includes("await checkRuntimeIdentity()")).toBe(
-        separate,
-      );
+      const startup = await read("src/index." + language);
+      expect(startup.includes("await checkRuntimeIdentity()")).toBe(separate && !auth);
+      expect(startup.includes("await checkAuthPrivileges()")).toBe(separate && auth);
       expect((await read("src/db/migrate." + language)).includes("MIGRATION_DATABASE_URL")).toBe(
         separate,
       );
@@ -384,6 +411,17 @@ describe("overlay criptográfico de Auth", () => {
       ).toBe(auth);
       expect(example.includes("ACTIVATION_TOKEN_EXPIRY_HOURS=24\n")).toBe(auth);
       expect(example.includes("ACTIVATION_PAGE_URL=\n")).toBe(auth);
+      for (const [key, value] of [
+        ["ACTIVATION_IP_REQUEST_LIMIT", 10],
+        ["ACTIVATION_ABUSE_WINDOW_MINUTES", 15],
+        ["ACTIVATION_VALIDATION_IP_REQUEST_LIMIT", 20],
+        ["ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES", 15],
+        ["AUTH_PASSWORD_MIN_LENGTH", 10],
+        ["AUTH_PASSWORD_MAX_LENGTH", 64],
+      ] as const) {
+        expect(environment?.includes(key + ': "${' + key + "-" + value + '}"')).toBe(auth);
+        expect(example.includes(key + "=" + value + "\n")).toBe(auth);
+      }
       expect(environment?.includes('ACTIVATION_PAGE_URL: "${ACTIVATION_PAGE_URL-}"')).toBe(auth);
       const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
       expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
@@ -404,6 +442,9 @@ describe("overlay criptográfico de Auth", () => {
       expect(example.includes("LOGIN_IP_REQUEST_LIMIT=10\n")).toBe(auth);
       expect(readme.includes("LOGIN_ABUSE_WINDOW_MINUTES")).toBe(auth);
       if (auth) {
+        expect(await read("src/auth/password-policy." + language)).toContain(
+          JSON.stringify(path.basename(outputDir)),
+        );
         expect(environment).toContain('ARGON2_MAX_CONCURRENT: "${ARGON2_MAX_CONCURRENT-2}"');
         expect(environment).toContain('ARGON2_MAX_QUEUE: "${ARGON2_MAX_QUEUE-8}"');
         expect(example).toContain("ARGON2_MAX_CONCURRENT=2\nARGON2_MAX_QUEUE=8\n");
@@ -411,6 +452,51 @@ describe("overlay criptográfico de Auth", () => {
         expect(compose).not.toContain("ARGON2_");
         expect(example).not.toContain("ARGON2_");
       }
+    },
+  );
+
+  it("conserva el backend al elegir cualquiera de las modalidades de entrada", async () => {
+    const root = await mkTmp("auth-app-mode");
+    const generated = [];
+    for (const authAppMode of [undefined, "private", "public"] as const) {
+      const outputDir = path.join(root, authAppMode ?? "default", "app");
+      expect(
+        await generate({
+          outputDir,
+          modality: "fullstack",
+          language: "ts",
+          database: "sqlite",
+          auth: true,
+          authAppMode,
+        }),
+      ).toEqual({ ok: true });
+      await expect(fs.access(path.join(outputDir, "compose.tls.yaml"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      generated.push(await fs.readFile(path.join(outputDir, "backend/src/app.ts"), "utf8"));
+    }
+    expect(generated[1]).toEqual(generated[0]);
+    expect(generated[2]).toEqual(generated[0]);
+  });
+
+  it.each([
+    { modality: "frontend", authAppMode: "private" },
+    { modality: "backend", database: "sqlite", auth: true, authAppMode: "public" },
+    { modality: "fullstack", database: "sqlite", auth: false, authAppMode: "public" },
+    { modality: "fullstack", database: "sqlite", auth: true, authAppMode: "unknown" },
+  ] as const)(
+    "rechaza la modalidad de aplicación incompatible %j antes de escribir",
+    async (options) => {
+      const outputDir = path.join(await mkTmp("invalid-auth-app-mode"), "app");
+      expect(
+        await generate({
+          ...options,
+          language: "ts",
+          outputDir,
+          authAppMode: options.authAppMode as "private" | "public",
+        }),
+      ).toEqual({ ok: false, error: { kind: "invalid_auth_app_mode" } });
+      await expect(fs.access(outputDir)).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
 
@@ -456,8 +542,16 @@ describe("overlay criptográfico de Auth", () => {
         "/auth/activation/revoke",
         "/auth/activation/regenerate",
         "/auth/activate",
+        "/auth/activate/validate",
       ]);
       expect(spec.servers).toEqual(modality === "fullstack" ? [{ url: "/api" }] : undefined);
+      const validate = spec.paths["/auth/activate/validate"].post;
+      expect(Object.keys(validate.responses).map(Number)).toEqual([200, 400, 403, 429, 500]);
+      expect(validate.responses[200].content["application/json"].schema.required).toEqual([
+        "passwordPolicy",
+      ]);
+      expect(validate.requestBody.content["application/json"].schema.required).toEqual(["token"]);
+      expect(Boolean(validate.parameters)).toBe(authTransport === "cookie");
       expect(spec.paths["/auth/session"].get.security).toEqual(
         authTransport === "bearer" ? [{ session: [] }] : undefined,
       );
@@ -927,7 +1021,7 @@ describe("generate — persistencia PostgreSQL (T-012)", () => {
 
     const envContent = await fs.readFile(path.join(dest, ".env.example"), "utf-8");
     expect(envContent).toContain("DATABASE_URL=");
-    expect(envContent).toContain("postgresql://USUARIO:CLAVE@localhost:5432/NOMBRE_BD");
+    expect(envContent).toContain("postgresql://app_exec:CLAVE@localhost:5432/NOMBRE_BD");
     expect(envContent).not.toMatch(/postgres:\/\/.*:.*@.*:.*\/.+/);
   });
 
@@ -1667,6 +1761,28 @@ describe("generate — i18n opcional (T-013c)", () => {
     expect(msg).not.toContain("experimental");
   });
 
+  it("nextStepsMessage conserva la acreditación exacta de Auth UI en PostgreSQL", () => {
+    const message = (mode: "private" | "public") =>
+      nextStepsMessage(
+        "/tmp/my-app",
+        "fullstack",
+        "postgres",
+        true,
+        "ts",
+        true,
+        true,
+        true,
+        "cookie",
+        mode,
+      );
+
+    expect(message("private")).not.toMatch(/experimental|regresión integral/);
+    expect(message("public")).toContain(
+      "Combinación experimental (fullstack+ts+postgres+docker+docs+i18n+auth+cookie+public)",
+    );
+    expect(message("public")).not.toContain("regresión integral");
+  });
+
   it("generate falla con copy_error si un archivo contiene un marcador con typo no reconocido", async () => {
     // Si la plantilla backend contuviera un marcador con typo (simulamos modificando un archivo generado antes de cleanup o mediante mock)
     // Para probar directamente el camino de fallo en generate(), usamos spy en fs.readFile para inyectar un typo en app.ts
@@ -2271,6 +2387,112 @@ describe("composición limpia de frontend (main, App, vite.config)", () => {
     const mainContent = await fs.readFile(path.join(dest, "frontend", "src", "main.tsx"), "utf-8");
     expect(mainContent).not.toContain("@@INSERT:");
   });
+});
+
+describe("overlay frontend Auth", () => {
+  it.each([
+    { language: "ts", i18n: true, authAppMode: undefined },
+    { language: "ts", i18n: false, authAppMode: "public" },
+    { language: "js", i18n: true, authAppMode: "public" },
+    { language: "js", i18n: false, authAppMode: "private" },
+  ] as const)("compone $language $authAppMode con i18n=$i18n", async (options) => {
+    const outputDir = await mkTmp("auth-ui");
+    expect(
+      await generate({
+        ...options,
+        outputDir,
+        modality: "fullstack",
+        database: "sqlite",
+        auth: true,
+      }),
+    ).toEqual({ ok: true });
+    const frontend = path.join(outputDir, "frontend");
+    const read = (file: string) => fs.readFile(path.join(frontend, file), "utf8");
+    const ext = options.language === "ts" ? "tsx" : "jsx";
+    const publicMode = options.authAppMode === "public";
+
+    expect(JSON.parse(await read("package.json"))).toMatchObject({
+      dependencies: { "react-router": "8.5.3" },
+      devDependencies: { vitest: "5.0.5" },
+      scripts: { test: "vitest run" },
+    });
+    const main = await read(`src/main.${ext}`);
+    expect(main).toContain(`import App from './features/auth/AuthApp.${ext}'`);
+    expect(main.includes(`import './i18n.${options.language}'`)).toBe(options.i18n);
+    expect(main).toContain("projectName={document.title}");
+    expect(main).toContain(
+      "initialThemePreference={document.documentElement.dataset.themePreference}",
+    );
+    const routes = await read(`src/features/auth/AuthApp.${ext}`);
+    expect(routes).toContain("<BrowserRouter");
+    expect(routes).toContain("<SessionProvider required={requiresSession(pathname)}>");
+    expect(routes).toContain("<Route element={<ProtectedRoute />}>");
+    await expect(read(`src/features/auth/session.${options.language}`)).resolves.toContain(
+      "createSessionActions",
+    );
+    expect(routes).toContain('<Navigate to="/app" replace');
+    expect(routes.includes(`import { Welcome } from '../../App.${ext}'`)).toBe(publicMode);
+    for (const route of ["/", "/login", "/app", "/activate", "*"]) {
+      expect(routes).toContain(`path="${route}"`);
+    }
+    const tests = await read(`src/features/auth/AuthApp.test.${ext}`);
+    await expect(read(`src/features/auth/authClient.${options.language}`)).resolves.toContain(
+      "/api/auth/",
+    );
+    await expect(read(`src/features/auth/authClient.test.${options.language}`)).resolves.toContain(
+      "getSession",
+    );
+    expect(tests).toContain("renderToStaticMarkup");
+    expect(tests.includes(`import '../../i18n.${options.language}'`)).toBe(options.i18n);
+    expect(main + routes + tests).not.toContain("@@INSERT:");
+
+    if (publicMode) {
+      expect(await read(`src/App.${ext}`)).toContain("welcome-title");
+    } else {
+      await expect(read(`src/App.${ext}`)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    if (options.i18n) {
+      expect(JSON.parse(await read("src/locales/es.json"))).toMatchObject({
+        auth: { loginTitle: "Iniciar sesión" },
+      });
+    } else {
+      await expect(read("src/locales/en.json")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+
+    expect(await read("index.html")).toContain(
+      '<script src="%BASE_URL%theme-init.js" blocking="render"></script>',
+    );
+    await expect(read("public/theme-init.js")).resolves.toContain("themePreference");
+  });
+
+  it.each(["frontend", "fullstack", "backend"] as const)(
+    "omite Router y el overlay en %s sin interfaz Auth",
+    async (modality) => {
+      const outputDir = await mkTmp("no-auth-ui");
+      const database = modality === "backend" ? "sqlite" : "none";
+      expect(
+        await generate({
+          outputDir,
+          modality,
+          database,
+          language: "js",
+          auth: modality === "backend",
+        }),
+      ).toEqual({ ok: true });
+      const target = modality === "fullstack" ? path.join(outputDir, "frontend") : outputDir;
+      const manifest = JSON.parse(await fs.readFile(path.join(target, "package.json"), "utf8"));
+      expect(manifest.dependencies).not.toHaveProperty("react-router");
+      await expect(fs.access(path.join(target, "src/features/auth"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      if (modality !== "backend") {
+        expect(manifest.devDependencies).not.toHaveProperty("vitest");
+        expect(await fs.readFile(path.join(target, "src/main.jsx"), "utf8")).toContain(
+          "import App from './App.jsx'",
+        );
+      }
+    },
+  );
 });
 
 describe("appContent.types.ts — archivo de tipos compartido (TS)", () => {

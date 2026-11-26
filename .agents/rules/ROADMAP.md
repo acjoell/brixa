@@ -146,7 +146,7 @@ Estas capacidades no deben tratarse como simples fragmentos de código. Cada una
 
 **Auth backend y generador.** T-014a está completada y registra las combinaciones acreditadas mediante verificación especializada.
 
-**Modernización del frontend base.** T-029 incorporó Tailwind CSS v4, renovó la bienvenida de los proyectos React generados e incluyó los temas Sistema, Claro y Oscuro (D-112). El cierre queda pendiente del CI multiplataforma del nuevo SHA. T-014a-ui sigue como siguiente tarea.
+**Modernización del frontend base.** T-029 incorporó Tailwind CSS v4, renovó la bienvenida de los proyectos React generados e incluyó los temas Sistema, Claro y Oscuro (D-112). T-029 está completada tras la confirmación del CI multiplataforma por parte del responsable. T-014a-ui continúa en progreso.
 
 **Vistas Auth.** T-014a-ui reutiliza la base modernizada y añade al CLI de fullstack con Auth la elección entre aplicación privada (predeterminada) y landing pública con aplicación protegida (D-113). Cada despliegue público valida su topología TLS y su URL de activación.
 

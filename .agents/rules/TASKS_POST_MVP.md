@@ -65,8 +65,8 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-013e | PENDIENTE | D-052 y cobertura existente de T-013d |
 | T-018 | COMPLETADA | Implementación e integración completadas; CI normal aprobado y CI Full con SV-5, Docker y PostgreSQL aprobado según confirmación del desarrollador |
 | T-014a | COMPLETADA (backend y generador; ①–⑤, CLI público y verificación final acreditados) | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
-| T-029 | EN PROGRESO (CI multiplataforma del nuevo SHA pendiente) | T-017a-ui y T-023 (completadas); D-112 |
-| T-014a-ui | PENDIENTE (tras T-029) | T-014a, T-017a-ui y T-029 |
+| T-029 | COMPLETADA | T-017a-ui y T-023 (completadas); D-112 |
+| T-014a-ui | EN PROGRESO (I-06.1b y correcciones de auditoría validadas) | T-014a, T-017a-ui y T-029 |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
 | T-014c | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018; decisiones de arquitectura RLS consolidadas en D-094 a D-097 y D-104 (comprobación de sintaxis Drizzle Kit pendiente en implementación) |
@@ -74,7 +74,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 
 **Orden de ejecución propuesto (actualizado):**
 
-T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b ✔ → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a ✔ → T-029 → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
+T-019 ✔ → T-020 y T-021 (en paralelo, sin tocar código) → decisiones P-008, P-012 y P-013 (aprobada en D-098 tras INV-08) → T-017a ✔ → T-017a-ui ✔ → T-017b ✔ → T-018 y T-023 (derivador JS/TS y verify:sync en verde antes de implementar plantillas de Auth/RBAC) → T-014-0 (diseño de identidad, organización y modelo de amenazas sin código) → T-014a ✔ → T-029 ✔ → T-014a-ui → T-014b1 → T-014b2 → T-014c → T-014d.
 
 - T-014c y T-014b1 no dependen entre sí. El orden lineal es de conveniencia, no una restricción técnica.
 - T-017a y T-017a-ui ya están completadas; la incorporación de T-023 no altera ni reabre la composición de overlays existente, sino que se integra con el mecanismo existente.
@@ -638,7 +638,7 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 
 ### T-029 — Modernización del frontend base
 
-**Estado:** EN PROGRESO. Implementación y validación local aprobadas. Cierre pendiente del CI multiplataforma del nuevo SHA.
+**Estado:** COMPLETADA. El responsable confirmó que el CI multiplataforma terminó satisfactoriamente.
 **Aprobación:** Aprobada en D-112.
 **Dependencias:** T-017a-ui y T-023 (completadas). Precede a T-014a-ui porque la base visual se genera también en proyectos sin Auth.
 
@@ -660,14 +660,14 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 - **Regresión i18n V2.** El renderizado con `react-dom/server` falló porque `App` leía `document.title` durante el renderizado, y el selector de tema también accedía al DOM al inicializar su estado. El punto de entrada del navegador ahora pasa el nombre generado y la preferencia inicial como props. V2 verifica el renderizado sin DOM con el contenido actual, y V4 comprueba ambos títulos localizados en el build. Después de la corrección, el agente verificó V1–V4 en `frontend+ts+i18n` y `fullstack+js+sqlite+i18n`.
 - **Matriz integral.** El responsable confirmó que la ejecución final de `npm run verify:generated` pasó después de corregir V2.
 
-**Pendiente de cierre:** verificar el CI multiplataforma del nuevo SHA. T-014a-ui sigue como siguiente tarea.
+**CI multiplataforma.** El responsable confirmó el resultado satisfactorio. T-014a-ui continúa en progreso.
 
 ---
 
 ### T-014a-ui — Vistas de autenticación (aplicación completa)
 
-**Estado:** PENDIENTE (T-014a y T-017a-ui completas; se implementa tras T-029).
-**Aprobación:** Arquitectura, diseño y modalidades aprobados en D-090, D-112 y D-113. Herramientas de pruebas pendientes.
+**Estado:** EN PROGRESO. Implementación validada hasta I-06.1b y correcciones de auditoría. I-06.2 a I-06.5, I-07 e I-08 siguen pendientes.
+**Aprobación:** Arquitectura, diseño, modalidades, rutas y herramientas de pruebas aprobados en D-090, D-112 y D-113.
 **Dependencias:** T-014a, T-017a-ui y T-029.
 
 **Objetivo:** vistas funcionales, accesibles y fáciles de modificar. Solo en aplicación completa; en backend solo se generan los endpoints.
@@ -683,7 +683,7 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 - Accesibilidad explícita obligatoria (CODE_STANDARDS §12): actualización dinámica de `document.title`, gestión de foco del teclado en navegación y anuncios de cambio de ruta para lectores de pantalla.
 - Pruebas reales de navegación, redirecciones, recargas de página y accesibilidad.
 
-**Áreas afectadas:** CLI, composición del generador, plantillas frontend y overlay i18n. Rutas nuevas por determinar.
+**Áreas afectadas:** CLI, composición del generador, plantillas frontend y overlay i18n.
 
 **Criterios de aceptación:**
 - La pregunta aparece exclusivamente en fullstack con Auth, selecciona por defecto la aplicación privada y solo la segunda opción genera la landing pública. Ambas generan login, activación y área protegida con el mismo núcleo Auth.
@@ -696,6 +696,88 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 **Pruebas positivas:** inicio de sesión correcto; estado de autenticación tras recargar; navegación entre rutas públicas y protegidas.
 **Pruebas negativas:** credenciales inválidas con mensaje uniforme; acceso a una vista protegida sin sesión redirige; respuesta 401 del backend limpia el estado; en modalidad cookie no se guarda ninguna credencial en el almacenamiento accesible a JavaScript; sin `dangerouslySetInnerHTML`.
 **Verificaciones:** compilación, lint, pruebas de componentes y pruebas reales de navegación y accesibilidad.
+
+**Incremento ②-A — Contrato de modalidad.** El CLI pregunta solo en fullstack con Auth. La validación y el generador admiten `authAppMode` con valores `private` (predeterminado) y `public` (landing pública y aplicación protegida). La opción es independiente del registro público.
+
+**Incrementos ②-B y ③ — Composición y rutas.** El overlay genera una entrada privada o la bienvenida pública y comparte las vistas de soporte de `/login`, `/app`, `/activate` y 404. Conserva temas, marca, i18n y derivación TS/JS. Las vistas de soporte quedan pendientes de conexión con los flujos Auth.
+
+**Evidencia ②-B y ③:** compilación, lint y renderizado estático en cuatro frontends Auth TS/JS con y sin i18n. V1–V4 pasaron en modalidad privada TS, pública JS y en un frontend TS sin Auth. Chromium/CDP comprobó navegación, foco, título y tema bajo la CSP existente en las dos modalidades con i18n.
+
+**Incremento ④-A — Cliente HTTP.** El overlay incluye un cliente independiente de React para `GET /api/auth/session` (200 con `userId`) y los POST de login, logout y activación (204). Usa cookies del mismo origen, aplica la cabecera CSRF y devuelve resultados tipados con 401 contextual, `Retry-After` y cancelación nativa. Build, lint y 27 pruebas pasaron en cada frontend generado temporal (TS privado con i18n y JS público). También pasó `check:i18n` en TS. La conexión con las vistas sigue pendiente.
+
+**Incremento ④-B — Estado centralizado de sesión.** `SessionProvider` expone `useSession` con los cuatro estados de D-090 y acciones de verificación, login y logout. Login 204 exige una consulta de sesión satisfactoria. Logout 204 o 401 de sesión ausente confirma la ausencia. Si falla sin confirmarla, se muestra estado de error y queda disponible la verificación explícita. Se excluyen mutaciones concurrentes y se ignoran respuestas canceladas u obsoletas.
+
+**Evidencia ④-B.** Build, lint y 38 pruebas pasaron en cada frontend temporal (TS privado con i18n y JS público). También pasó `check:i18n` en TS. Once pruebas Node ejercitan las transiciones y Chromium/CDP comprobó por separado el proveedor React en Strict Mode con transporte controlado, incluidas respuestas fuera de orden y desmontaje. Quedan pendientes los formularios, los guards, la activación y los flujos de navegador contra el backend.
+
+**Incremento ⑤ — Vistas Auth.** Inicio de sesión y activación comparten el layout, los campos de contraseña y la presentación de mensajes. Reutilizan la marca, los tres temas y la composición EN/ES de T-029. El área de trabajo presenta los cuatro estados de sesión y muestra la bienvenida autenticada solo tras una verificación satisfactoria. Los envíos y el cierre de sesión permanecen deshabilitados. Los guards definitivos y el procesamiento del token quedan pendientes.
+
+**Incremento ⑤-B — Refinamiento de login y activación.** Ambas vistas usan un marco compacto con los selectores existentes, el logotipo junto al título y formularios sin tarjeta exterior. Los controles de contraseña se integran en los campos y anuncian su acción en EN/ES. El responsable aprobó el diseño para continuar con el incremento ⑥.
+
+**Incremento ⑥ — Login, logout y navegación protegida.** El formulario usa el proveedor de sesión y espera la confirmación del backend antes de abrir el área de trabajo. Los guards de `/login` y `/app` reemplazan la entrada del historial al redirigir. Un fallo de comunicación al cerrar sesión permite verificar de nuevo el estado. La activación sigue accesible y pendiente del incremento ⑦.
+
+**Evidencia ⑥.** Ocho verificaciones ordinarias y 313 pruebas del generador aprobadas. Build, lint y 51 pruebas en cada frontend temporal (TS privado con i18n y JS público), con V1–V4 en TS. Chromium/CDP validó en ambos los flujos con backends SQLite generados, bootstrap de administrador, HTTPS con CA temporal y cookie segura. Se comprobó el rechazo de credenciales, el login seguido de verificación de sesión, las redirecciones, la recarga, el logout y una cookie revocada con respuesta 401 del backend. El arnés temporal controló por separado las esperas, la prevención de envíos duplicados, un fallo de comunicación durante logout y las respuestas 429 y 503.
+
+**Incremento ⑦ — Activación de cuentas según D-107.** La vista lee y retira el fragmento con reemplazo del historial, conserva el token en memoria y solo lo envía al confirmar el formulario. Aplica los límites del backend, verifica la coincidencia y descarta las contraseñas de los campos al enviar. Un 204 descarta el token y conduce al login sin iniciar sesión. La recarga pide reabrir el enlace original. Un 400 muestra una respuesta uniforme y un fallo de comunicación deja el resultado sin confirmar.
+
+**Evidencia ⑦.** Ocho verificaciones ordinarias y 313 pruebas del generador aprobadas. Build, lint y 54 pruebas por frontend temporal (TS privado con i18n y JS público), con V1–V4 en TS. Chromium/CDP con backends SQLite generados y HTTPS local comprobó alta administrativa, enlace, recarga, confirmación, respuesta 204 sin sesión, rechazo uniforme de enlaces desconocidos, caducados y consumidos, y login con la contraseña establecida. TS también comprobó Strict Mode en desarrollo, idioma, tema y teclado. El arnés controló la espera para comprobar duplicados y simuló la pérdida de un 204 real en el límite de fetch. La validación de cada topología HTTPS pública queda fuera de esta evidencia local.
+
+**Incremento ⑧-B1 — Ciclo de vida del token en el historial.** Chromium reprodujo que Atrás hacia otra entrada de `/activate` conservaba el formulario anterior. El token queda asociado en memoria a la entrada resultante del reemplazo del fragmento. Cambiar de entrada descarta el flujo, cancela la solicitud y evita que una respuesta tardía altere el nuevo flujo.
+
+**Evidencia ⑧-B1.** La regresión versionada se ejecuta desde Brixa con `node --import tsx scripts/check-activation-history.js <frontend generado>` y permite indicar Chromium con `BRIXA_CHROMIUM`. Con transporte controlado comprobó Atrás y Adelante, cambio de enlace, cancelación, respuesta tardía, confirmación explícita, apertura directa, recarga y ausencia de persistencia en TS privado con i18n y JS público, ambos en Strict Mode. En ambos pasaron build, lint y 54 pruebas. V1–V4 pasó en TS y pasaron las ocho verificaciones ordinarias, con 313 pruebas del generador.
+
+**Incremento ⑧-B2 — Verificación permanente de Auth UI.** `verify:auth` ejecuta Vitest en los frontends fullstack que ya genera. `npm run verify:auth-ui` añade dos recorridos Chromium/CDP sobre el frontend generado y sus backends reales. A usa TS privado, PostgreSQL, Compose, Nginx con TLS temporal, i18n V1–V4 y API Docs. B usa JS público, SQLite y el proxy HTTPS local del arnés. Ambos cubren guards, login, recarga, logout y revocación, alta administrativa, activación de uso único, CSP, foco, títulos y ausencia de credenciales persistidas. La regresión de historial reutiliza el comando de ⑧-B1 con transporte controlado en Strict Mode.
+
+**Evidencia ⑧-B2.** Las ocho comprobaciones ordinarias pasaron, con 315 pruebas del repositorio. Las dos nuevas pruebas focalizadas cubren la adaptación TLS de la fixture y las cabeceras del proxy. La sintaxis Compose se comprobó sin arrancar contenedores. **NO EJECUTADO:** el recorrido integral, las suites especiales y el CI nuevo. A y B quedan pendientes de aceptación. El ajuste TLS de A vive solo en el proyecto temporal, termina TLS en Nginx y usa una red Docker aislada. En ambos casos el arnés elimina los recursos temporales al terminar.
+
+**Corrección de red de ⑧-B2.** El primer recorrido A del responsable falló al iniciar Compose. Docker rechazaba la IP fija de Nginx en una red con subred automática. La fixture reserva ahora un /28 privado explícito, reintenta de forma acotada ante solapamientos y usa la misma IP fija, fuera del rango dinámico, para Nginx y `AUTH_TRUSTED_PROXIES`. Pasó la regresión focalizada. Compose efectivo, dos reservas concurrentes y la creación aislada en Docker con la IP fija se comprobaron sin arrancar los servicios. El recorrido integral corregido sigue sin ejecutarse y A permanece sin acreditar.
+
+**Aceptación manual de las topologías de prueba de ⑧-B2.** El responsable ejecutó `npm run verify:auth-ui -- A` y `npm run verify:auth-ui -- B` con `BRIXA_CHROMIUM` apuntando al binario directo de Chromium. Ambas devolvieron `PASS Auth UI` con la validación TLS activa. Acredita las topologías temporales descritas arriba. El responsable confirmó un nuevo PASS de ambas variantes tras los ajustes de permisos, diagnóstico y limpieza, con validación TLS activa. La configuración TLS distribuida y los despliegues públicos quedan fuera de esta evidencia. T-014a-ui continúa abierta.
+
+**Incremento ⑧-B3.2 — DX y HTTPS local optativo (D-114).** Los proyectos fullstack con Auth y Docker generan `compose.tls.yaml` y `frontend/nginx.tls.conf`. El README explica certificados externos, permisos de la clave, arranque, migraciones incluidas, bootstrap, alta administrativa y activación. También distingue el recorrido local sin Docker y las responsabilidades del despliegue público. El PASS de A y B anterior corresponde a las topologías del arnés. T-014a-ui continúa abierta.
+
+**Validación del override distribuido D-114.** A usa los archivos generados `compose.yaml`, `compose.tls.yaml` y `frontend/nginx.tls.conf` con su contenido intacto. Compose gestiona y limpia la red del proyecto, con reintentos acotados ante solapamientos. La fixture conserva la CA, el relay TCP y el puerto efímero, el bootstrap, el diagnóstico y los controles existentes. Prepara la clave `0400` para el UID 101 con un proceso efímero no privilegiado de la imagen generada. Los mínimos de Docker Engine 28.0.0 y Compose 2.24.4 solo se comprueban en A. La regresión preserva los archivos y comprueba el reintento. Un sondeo aislado confirmó la configuración efectiva de Compose, la clave del UID 101, HTTPS con validación activa y el healthcheck interno. El recorrido integral posterior a D-114 se confirmó en ⑧-B4.
+
+**Incremento ⑧-B4 — Acreditación exacta de Auth UI.** El responsable confirmó los PASS de `npm run verify:auth-ui -- A` y `npm run verify:auth-ui -- B` ejecutados con el binario directo de Chromium mediante `BRIXA_CHROMIUM` y validación TLS activa. A usó TypeScript, PostgreSQL, Docker, API Docs, i18n, Auth por cookies y modo privado, con HTTPS local de Nginx a través de los archivos distribuidos de D-114 intactos. B usó JavaScript, SQLite, Auth por cookies y modo público, sin Docker, API Docs ni i18n, con HTTPS local a través del proxy de la fixture. El CLI aplica el modo efectivo en ambos avisos y conserva experimental cualquier otra combinación Auth UI. Las cinco entradas de T-014a conservan su acreditación de servidor. Compose base HTTP, despliegues públicos y remapeo de UID quedan fuera de la evidencia.
+
+**Diferencia de pruebas del ajuste D-114 (320 → 319).** En `scripts/verify-auth-ui.test.js`, «adapta solo la fixture de Nginx y conserva CSP, SPA y upstream» y «reserva una subred explícita, reintenta solapamientos y separa la IP de Nginx» dieron paso a una regresión que ejecuta la orquestación de A con Docker simulado. Esta verifica la integridad de los archivos, el reintento, la IP fuera del rango dinámico, la preparación de la clave y la limpieza. Se retiraron las aserciones sobre la reescritura de archivos y la red externa. Las comprobaciones del generador sobre el override y los flujos reales HTTPS, CSP, SPA y proxy de A conservan la cobertura relevante. T-014a-ui continúa abierta.
+
+**Incremento I-01 — Compatibilidad HTTP en la aceptación manual.** El responsable verificó la variante A privada (fullstack TypeScript, PostgreSQL, Docker con TLS de D-114, Auth por cookies, i18n y API Docs). En Firefox 157, la combinación de `mode: 'same-origin'` y la política global `no-referrer` hizo que el POST de login enviara `Origin: null` y recibiera 403. Al indicar `referrerPolicy: 'same-origin'` en Fetch, el cuerpo vacío recibió 400 y el login válido devolvió 204 con sesión disponible al recargar. Chromium funcionó tras importar manualmente la CA local de mkcert.
+
+El cliente Auth aplica esa política únicamente a sus peticiones del mismo origen. D-075, D-089 y D-103 conservan sus requisitos, incluido el rechazo de `Origin: null`. La subaplicación Express intermedia `authRoutes` desactiva `X-Powered-By`. Las pruebas focalizadas del backend generado TS y JS comprueban su ausencia en respuestas de éxito y rechazo. Las pruebas del cliente comprueban las opciones de Fetch. Un sondeo de Firefox 157 en loopback confirmó el origen emitido por el cliente corregido y por Fetch con el modo predeterminado. Este sondeo no acredita el recorrido distribuido posterior al cambio. El ejemplo de alta y Swagger mantienen el modo predeterminado de Fetch. La tarea y las acreditaciones mantienen su estado.
+
+**Incremento I-02 — Sesión bajo demanda y navegación.** D-090 conserva un proveedor y cuatro estados públicos. La raíz privada, el login y las rutas hijas de `ProtectedRoute` comparten la validación al enlazar sus redirecciones. La landing pública usa la sesión conocida para el CTA. Ni la landing ni activación ni 404 inician lecturas. La reentrada exige validación del servidor antes de mostrar contenido protegido. El login conserva el formulario ante rechazos conocidos, distingue errores EN/ES, asocia sus validaciones a los campos y presenta `Retry-After` cuando se puede interpretar. Los resultados ambiguos de login y logout se reconcilian con el servidor antes de habilitar otra mutación.
+
+Las pruebas unitarias y estáticas pasaron en frontends temporales TS privado con i18n y JS público. El sondeo Chromium/CDP con transporte controlado verificó la demanda, redirecciones, reentrada, CTA, foco, errores de login e historial de activación en Strict Mode.
+
+**Incremento I-03 — Autenticación de rutas de negocio.** El backend exporta `requireAuth()` y `requireAuth({ intentionalActivity: true })` desde `auth/http-runtime`. Las rutas y routers lo registran explícitamente. Reutiliza el transporte y el servicio de sesiones inicializados por Auth, aplica `Cache-Control: no-store` y expone solo `req.auth.userId` al continuar. D-101 conserva la validación por petición, la renovación explícita y sus límites. D-103 se aplica a las mutaciones con cookies también fuera de `/auth`. El README del backend incluye un ejemplo y explica que la autorización del recurso corresponde a la ruta.
+
+Se ejecutó el contrato HTTP en proyectos TS y JS con SQLite en archivo y PostgreSQL 17.4 temporal, para cookies y Bearer. La prueba de fallo de persistencia inyecta una excepción dirigida. SQLite también verificó las regresiones Auth y Swagger UI, los límites de la excepción local y TLS directo con un certificado temporal validado por el cliente.
+
+**Incremento I-04 — Comprobación previa y presupuestos de activación.** D-107 y OpenAPI recogen `POST /auth/activate/validate`, con el prefijo `/api` en fullstack. La vista comprueba el candidato después de retirar el fragmento y antes de mostrar el formulario. El reintento es explícito y respeta `Retry-After` en la comprobación previa. La confirmación vuelve a validar y consume atómicamente. Los presupuestos de confirmación, comprobación y login usan el contador HMAC existente con espacios independientes. Los cuatro parámetros de activación se validan al arrancar y se propagan al entorno generado y Compose.
+
+Las pruebas HTTP focalizadas usaron SQLite en archivo y PostgreSQL 17.4 con `app_exec` y migraciones como `table_owner`, en TS y JS con cookies y Bearer. El fallo interno se simuló de forma dirigida. Chromium/CDP con transporte controlado verificó los cambios de entrada, cancelación, StrictMode, reintento y espera, además de la regresión de confirmación e historial. Se comprobó la propagación en la configuración efectiva de Compose para ambos motores, con y sin el override TLS aplicable.
+
+**Incremento I-05 — Política de establecimiento. Cerrado con alcance reducido.** D-093 recoge la configuración, los cuatro puntos de aplicación y la compatibilidad de credenciales anteriores. D-107 expone los límites efectivos en el 200 de comprobación previa. La vista valida puntos de código, bytes y confirmación, y permite corregir un rechazo de política sin salir del flujo. El alcance aprobado prescinde de la lista de bloqueo. Auth v1 puede aceptar contraseñas comunes que satisfagan las demás reglas y no satisface el requisito de lista de bloqueo de NIST SP 800-63B-4.
+
+Se comprobaron las rutas HTTP con SQLite en archivo y PostgreSQL 17.4 temporal, en TS y JS con cookies y Bearer. Chromium verificó la corrección de un rechazo de política, la navegación y el historial con transporte controlado, además de los requisitos EN/ES en la variante con i18n. La configuración efectiva de Compose propagó los valores predeterminados y personalizados. La validación contra contraseñas comunes y comprometidas queda como mejora futura no bloqueante, con fuente y mecanismo por decidir.
+
+**I-06 — Inicialización asistida.** I-06.1, inspección técnica, aceptada. D-115 registra S18–S23. I-06.1b aplica S18 con el alcance ampliado: el generador PostgreSQL común incorpora aprovisionamiento, credenciales separadas y controles de identidad y permisos. Auth conserva sus migraciones y verificaciones de seguridad particulares. El contrato anterior de una credencial no aplica a las plantillas nuevas. S19–S23 quedan aprobadas como diseño para incrementos posteriores, sin implementar aún el asistente. SQLite y los archivos del override TLS se conservan.
+
+La prueba focalizada con PostgreSQL 17.4 usó backend TS y fullstack JS sin Auth, y backend JS y fullstack TS con Auth. Verificó migraciones como `table_owner`, arranque con `app_exec`, rechazo de credenciales privilegiadas y de concesiones inseguras, y regresiones Auth con cookies y Bearer. Se inspeccionó la configuración efectiva de Compose para fullstack con y sin Auth, incluido el override TLS de Auth. Las pruebas de Auth aplicaron en la fixture la migración de auditoría ya publicada que permite el evento de denegación administrativa.
+
+**Validación integral antes de las correcciones de auditoría.** Tras I-06.1b y las correcciones de los verificadores de renderizado i18n y activación, el responsable confirmó PASS para `npm run verify:auth`, `npm run verify:auth-ui` en A y B y `VERIFY_SCOPE=full npm run verify:all`. La evidencia conserva la matriz de acreditación vigente.
+
+**Correcciones de auditoría y validación focalizada.**
+- **A-01.** GET, HEAD y OPTIONS validan la sesión sin renovarla. POST con actividad intencional conserva su umbral y límite absoluto. PASS en SQLite y PostgreSQL 17.4 con cookies y Bearer.
+- **B-01.** El migrador valida los atributos y la ausencia de membresías de `table_owner` antes de invocar Drizzle. PASS en PostgreSQL 17.4, en JS con Auth y TS sin Auth. Los roles rechazados no aplicaron migraciones ni crearon su historial.
+- **C-01.** La confirmación de activación respeta `Retry-After` tras un 429 y libera la espera al cambiar de enlace. PASS en Chromium con transporte controlado para bloqueo, reenvío y cambio de enlace.
+- **D-01.** El CLI retira el aviso obsoleto de regresión PostgreSQL. PASS en la prueba de salida para la variante A exacta y la variante pública experimental.
+
+Las ocho comprobaciones ordinarias posteriores a las correcciones pasaron, con 326/326 pruebas. Las suites especiales posteriores a las correcciones no se ejecutaron.
+
+**Seguimiento de auditoría.** B-02 es un riesgo condicionado y no bloqueante al adoptar esquemas PostgreSQL existentes. El DBA debe revisar rutinas `SECURITY DEFINER` y triggers con privilegios del propietario, como indica la guía de aprovisionamiento. E-01 queda aplazada como mejora opcional de las aserciones i18n por vista.
+
+**Ejecución manual y CI propuesto.** Con Node 24, dependencias Brixa instaladas, Chromium con sandbox operativo, OpenSSL, Python 3, `libnss3`, npm accesible y Docker Compose v2 para A, ejecutar `npm run verify:auth-ui` en Linux. Los filtros `npm run verify:auth-ui -- A` y `npm run verify:auth-ui -- B` aíslan cada recorrido. `BRIXA_CHROMIUM` indica un binario alternativo. Propuesta pendiente de medir: un job Linux bajo demanda con caché npm y tope inicial de 30 minutos, sin añadir el recorrido a las matrices existentes.
 
 **Riesgos:** introducir un router en fullstack con Auth agrega una dependencia nueva; debe mantenerse estrictamente desacoplada y accesible (gestión de `document.title`, foco al navegar y anuncios de cambio de ruta, D-090).
 
@@ -889,7 +971,7 @@ Para decisión del responsable (con valor por defecto cuando se propone uno):
 1. **Identidad externa en T-014c.** Resuelta por D-100: Auth v1 opera únicamente con identidad interna propia de Brixa; proveedores externos (OAuth, OIDC, SSO) quedan fuera de alcance en v1 manteniendo desacoplamiento arquitectónico para extensiones futuras.
 2. **Administrador de plataforma entre organizaciones.** Resuelta por D-084 y D-085: administración de plataforma estrictamente separada de la organizacional, sin acceso global automático a datos de organizaciones ni bypass genérico de RLS; aprovisionamiento local seguro sin panel global en v1.
 3. **Propiedades desconocidas en validación** (descartar o rechazar). Tras INV-02.
-4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; diseño y stack base confirmados en D-112, modalidades de entrada confirmadas en D-113. Quedan por concretar las herramientas de pruebas de componentes y navegador (P-017), las rutas UI y las versiones exactas de las nuevas dependencias.
+4. **Router, estilos y pruebas del frontend.** Resuelta en arquitectura de Router por D-090 (P-010): React Router declarativo condicionado a fullstack con Auth, 4 estados explícitos de sesión, rutas protegidas solo para navegación/UX y accesibilidad obligatoria; diseño y stack base confirmados en D-112, modalidades de entrada confirmadas en D-113. Las herramientas de pruebas (P-017), los pines y las rutas UI están confirmados en D-090 y D-113.
 5. **Versión de `package.json` en `main`** tras el tag (P-016). Por defecto: versión de preparación.
 6. **T-013e.** Asignación resuelta en D-052. La implementación de N1–N7 queda pendiente en T-013e.
 7. **Relación con la decisión de validar `DATABASE_URL` sin que el servidor lo importe.** Tras INV-02.

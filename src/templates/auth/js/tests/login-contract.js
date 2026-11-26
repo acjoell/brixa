@@ -98,6 +98,22 @@ export async function checkLogin(owner, runtime, activation, other, pauseRead, f
   assert.equal(await login(adminEmail, password, "corrupt"), null);
   assert.equal((await audit("corrupt"))[0].event, "login_failed");
 
+  const legacyShortPassword = "old-pass";
+  await setCredential(
+    await hash(legacyShortPassword, {
+      algorithm: Algorithm.Argon2id,
+      version: Version.V0x13,
+      memoryCost: 19456,
+      timeCost: 3,
+      parallelism: 1,
+      outputLen: 32,
+      salt: randomBytes(16),
+    }),
+  );
+  assert(await login(adminEmail, legacyShortPassword, "login-legacy-short"));
+  assert.equal(needsPasswordRehash((await account()).passwordHash, true), false);
+  assert(await login(adminEmail, legacyShortPassword, "login-rehashed-short"));
+
   // Si la ruta de cuenta inexistente omite Argon2, devolvería null pese a la saturación.
   const gate = Promise.withResolvers();
   const limiter = getArgon2Limiter();

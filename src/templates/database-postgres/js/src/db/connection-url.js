@@ -4,7 +4,10 @@ export function connectionUrl(variable, env = process.env) {
   const runtime = variable === "DATABASE_URL";
   if (
     runtime &&
-    (env.MIGRATION_DATABASE_URL !== undefined || env.POSTGRES_PASSWORD !== undefined)
+    (env.MIGRATION_DATABASE_URL !== undefined ||
+      env.POSTGRES_PASSWORD !== undefined ||
+      env.PGPASSWORD !== undefined ||
+      env.PGPASSFILE !== undefined)
   ) {
     throw new Error("El backend recibió credenciales reservadas a administración o migraciones.");
   }

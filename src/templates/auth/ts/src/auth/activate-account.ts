@@ -10,7 +10,7 @@ import { activationTokens, users } from "../db/schema.js";
 import { activationTokenDigest } from "./activation-token.js";
 import { Argon2SaturatedError } from "./argon2-limiter.js";
 import { hashPassword } from "./password-crypto.js";
-import { isPasswordWithinLimits } from "./password-limits.js";
+import { acceptsNewPassword, parsePasswordPolicy, PasswordPolicyError } from "./password-policy.js";
 import { recordSystemAudit, withSystemAudit } from "./system-audit.js";
 
 export class AccountActivationError extends Error {
@@ -22,7 +22,48 @@ export class AccountActivationError extends Error {
   }
 }
 
-export function createAccountActivationService(database: ActivationDatabase, clock = Date.now) {
+async function readCandidate(database: ActivationDatabase, digest: string) {
+  const [candidate] = await readActivation(database, (connection) =>
+    connection
+      .select({
+        userId: activationTokens.userId,
+        status: activationTokens.status,
+        expiresAt: activationTokens.expiresAt,
+        email: users.canonicalIdentifier,
+        eligible:
+          sql`${users.status} = 'pending_activation' AND ${users.passwordHash} IS NULL`.mapWith(
+            Boolean,
+          ),
+      })
+      .from(activationTokens)
+      .innerJoin(users, eq(users.id, activationTokens.userId))
+      .where(eq(activationTokens.tokenDigest, digest)),
+  );
+  return candidate;
+}
+
+export function createActivationValidationService(database: ActivationDatabase, clock = Date.now) {
+  return async function validateActivation(token: unknown): Promise<boolean> {
+    const digest = activationTokenDigest(token);
+    if (digest === null) return false;
+    try {
+      const candidate = await readCandidate(database, digest);
+      return (
+        candidate?.status === "open" &&
+        candidate.eligible &&
+        clock() < candidate.expiresAt.getTime()
+      );
+    } catch {
+      throw new AccountActivationError();
+    }
+  };
+}
+
+export function createAccountActivationService(
+  database: ActivationDatabase,
+  clock = Date.now,
+  policy = parsePasswordPolicy(),
+) {
   // requestId es correlación de confianza del llamador. Aún no existe sesión.
   return async function activateAccount(
     token: unknown,
@@ -33,27 +74,13 @@ export function createAccountActivationService(database: ActivationDatabase, clo
     if (digest === null) return false;
 
     try {
-      const [candidate] = await readActivation(database, (connection) =>
-        connection
-          .select({
-            userId: activationTokens.userId,
-            status: activationTokens.status,
-            expiresAt: activationTokens.expiresAt,
-            eligible:
-              sql`${users.status} = 'pending_activation' AND ${users.passwordHash} IS NULL`.mapWith(
-                Boolean,
-              ),
-          })
-          .from(activationTokens)
-          .innerJoin(users, eq(users.id, activationTokens.userId))
-          .where(eq(activationTokens.tokenDigest, digest)),
-      );
+      const candidate = await readCandidate(database, digest);
       if (candidate?.status !== "open") return false;
 
       let passwordHash: string | null = null;
       if (clock() < candidate.expiresAt.getTime()) {
-        if (!candidate.eligible || password === "" || !isPasswordWithinLimits(password))
-          return false;
+        if (!candidate.eligible) return false;
+        if (!acceptsNewPassword(password, candidate.email, policy)) throw new PasswordPolicyError();
         passwordHash = await hashPassword(password);
       }
 
@@ -114,7 +141,8 @@ export function createAccountActivationService(database: ActivationDatabase, clo
         },
       );
     } catch (error) {
-      if (error instanceof Argon2SaturatedError) throw error;
+      if (error instanceof Argon2SaturatedError || error instanceof PasswordPolicyError)
+        throw error;
       // Los errores del driver pueden contener parámetros de SQL, incluido el PHC.
       throw new AccountActivationError();
     }

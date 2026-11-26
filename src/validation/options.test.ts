@@ -56,6 +56,7 @@ describe("validateOptions", () => {
     if (result.ok) {
       expect(result.value.modality).toBe("frontend");
       expect(result.value.language).toBe("ts");
+      expect(result.value.authAppMode).toBeUndefined();
     }
   });
 
@@ -130,6 +131,23 @@ describe("validateOptions", () => {
         authTransport: "jwt",
       }),
     ).toMatchObject({ ok: false, error: { kind: "invalid_auth_transport" } });
+  });
+
+  it.each([
+    [undefined, "private"],
+    ["private", "private"],
+    ["public", "public"],
+  ] as const)("normaliza la modalidad Auth %s como %s", (authAppMode, expected) => {
+    expect(
+      validateOptions({
+        modality: "fullstack",
+        database: "sqlite",
+        language: "ts",
+        outputDir: "./app",
+        auth: true,
+        authAppMode,
+      }),
+    ).toMatchObject({ ok: true, value: { authAppMode: expected } });
   });
 });
 

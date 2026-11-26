@@ -13,7 +13,9 @@ import {
 
 /** Razones de validación fallida. */
 export type AuthOptionsError =
-  { kind: "auth_requires_backend_database" } | { kind: "invalid_auth_transport" };
+  | { kind: "auth_requires_backend_database" }
+  | { kind: "invalid_auth_transport" }
+  | { kind: "invalid_auth_app_mode" };
 
 export type ValidationError =
   | AuthOptionsError
@@ -28,17 +30,19 @@ const VALID_DATABASES = new Set(["none", "postgres", "sqlite"]);
 
 export const DEFAULT_AUTH_TRANSPORT = "cookie";
 const VALID_AUTH_TRANSPORTS = new Set([DEFAULT_AUTH_TRANSPORT, "bearer"]);
+export const DEFAULT_AUTH_APP_MODE = "private";
+const VALID_AUTH_APP_MODES = new Set([DEFAULT_AUTH_APP_MODE, "public"]);
 
 export function canEnableAuth(modality: Modality, database: Database = "none"): boolean {
   return modality !== "frontend" && database !== "none";
 }
 
 export function validateAuthOptions(
-  options: Pick<UserOptions, "modality" | "database" | "auth" | "authTransport">,
-): AuthOptionsError | undefined {
-  const { modality, database, auth, authTransport } = options;
+  options: Pick<UserOptions, "modality" | "database" | "auth" | "authTransport" | "authAppMode">,
+): Result<UserOptions["authAppMode"], AuthOptionsError> {
+  const { modality, database, auth, authTransport, authAppMode } = options;
   if (auth && !canEnableAuth(modality, database)) {
-    return { kind: "auth_requires_backend_database" };
+    return { ok: false, error: { kind: "auth_requires_backend_database" } };
   }
   if (
     authTransport !== undefined &&
@@ -46,14 +50,24 @@ export function validateAuthOptions(
       !VALID_AUTH_TRANSPORTS.has(authTransport) ||
       (modality === "fullstack" && authTransport !== DEFAULT_AUTH_TRANSPORT))
   ) {
-    return { kind: "invalid_auth_transport" };
+    return { ok: false, error: { kind: "invalid_auth_transport" } };
   }
+  const fullstackAuth = modality === "fullstack" && auth;
+  if (authAppMode !== undefined && (!fullstackAuth || !VALID_AUTH_APP_MODES.has(authAppMode))) {
+    return { ok: false, error: { kind: "invalid_auth_app_mode" } };
+  }
+  return { ok: true, value: fullstackAuth ? (authAppMode ?? DEFAULT_AUTH_APP_MODE) : undefined };
 }
 
 export function formatAuthOptionsError(error: AuthOptionsError): string {
-  return error.kind === "auth_requires_backend_database"
-    ? "Auth requiere un backend con base de datos."
-    : "Usa cookies o Bearer con Auth en un backend independiente. Fullstack solo admite cookies.";
+  switch (error.kind) {
+    case "auth_requires_backend_database":
+      return "Auth requiere un backend con base de datos.";
+    case "invalid_auth_transport":
+      return "Usa cookies o Bearer con Auth en un backend independiente. Fullstack solo admite cookies.";
+    case "invalid_auth_app_mode":
+      return "La modalidad de aplicación debe ser privada o pública y solo se admite en fullstack con Auth.";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +99,8 @@ export function validateOptions(
     return { ok: false, error: { kind: "invalid_database", received: raw.database } };
   }
 
-  const authError = validateAuthOptions(raw);
-  if (authError) return { ok: false, error: authError };
+  const authOptions = validateAuthOptions(raw);
+  if (!authOptions.ok) return authOptions;
 
   const docker =
     raw.modality === "backend" || raw.modality === "fullstack" ? (raw.docker ?? false) : false;
@@ -108,6 +122,7 @@ export function validateOptions(
       i18n,
       auth: raw.auth,
       authTransport: raw.authTransport,
+      authAppMode: authOptions.value,
     },
   };
 }
@@ -167,6 +182,7 @@ export function formatValidationError(error: ValidationError): string {
   switch (error.kind) {
     case "auth_requires_backend_database":
     case "invalid_auth_transport":
+    case "invalid_auth_app_mode":
       return formatAuthOptionsError(error);
     case "invalid_modality":
       return `Modalidad no válida: "${String(error.received)}". Las opciones son: frontend, backend, fullstack.`;

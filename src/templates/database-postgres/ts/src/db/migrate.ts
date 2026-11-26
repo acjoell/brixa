@@ -1,40 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { URL } from "node:url";
+import { connectionUrl } from "./connection-url.js";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { redact } from "../redact.js";
 
-const { Pool } = pg;
-
-try {
-  process.loadEnvFile();
-} catch (err: unknown) {
-  if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-    throw err;
-  }
-}
-
-function getDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error("Variable de entorno DATABASE_URL no configurada.");
-  }
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
-      throw new Error();
-    }
-  } catch {
-    throw new Error(
-      "Variable de entorno DATABASE_URL inválida. Debe ser una URL de conexión válida para PostgreSQL.",
-    );
-  }
-  return url;
-}
+const { Client } = pg;
 
 async function runMigrations(): Promise<void> {
+  const url = connectionUrl("MIGRATION_DATABASE_URL");
   const migrationsFolder = path.resolve(process.cwd(), "drizzle");
   if (!fs.existsSync(migrationsFolder)) {
     throw new Error(
@@ -49,13 +24,21 @@ async function runMigrations(): Promise<void> {
     return;
   }
 
-  const url = getDatabaseUrl();
-  const pool = new Pool({ connectionString: url });
-  const db = drizzle(pool);
+  const client = new Client({ connectionString: url });
+  await client.connect();
 
   try {
     console.log("Aplicando migraciones en la base de datos...");
-    await migrate(db, { migrationsFolder });
+    const { rows } = await client.query<{ allowed: boolean }>(`
+      SELECT current_user = 'table_owner' AND session_user = current_user
+        AND rolcanlogin
+        AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_auth_members WHERE member = pg_roles.oid)
+        AS allowed
+      FROM pg_catalog.pg_roles WHERE rolname = current_user
+    `);
+    if (rows[0]?.allowed !== true) throw new Error("Identidad PostgreSQL de migración insegura.");
+    await migrate(drizzle(client), { migrationsFolder });
     console.log("Migraciones aplicadas con éxito.");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -64,7 +47,7 @@ async function runMigrations(): Promise<void> {
     const detail = cause ? `\n  Causa: ${cause}` : "";
     throw new Error(`Error al aplicar migraciones: ${msg}${detail}`, { cause: err });
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 

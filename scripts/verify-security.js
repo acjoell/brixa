@@ -138,7 +138,7 @@ async function verifySecurityVariant(variant, step, total, pgContext) {
 
     if (database === "postgres") {
       if (!pgContext.available) throw new Error("PostgreSQL obligatorio no disponible");
-      await verifyDatabaseIntegration(backendDir, language, pgContext, label);
+      await verifyDatabaseIntegration(backendDir, language, pgContext);
     } else if (database === "sqlite") {
       await verifySqliteIntegration(backendDir, language);
     }

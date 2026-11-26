@@ -40,6 +40,7 @@ const groups = {
     files: [
       "src/main.tsx",
       "src/App.tsx",
+      "src/AppFrame.tsx",
       "src/ThemeSelector.tsx",
       "src/useAppContent.tsx",
       "vite.config.ts",
@@ -48,7 +49,7 @@ const groups = {
     modules: ["react", "react-dom/client", "@vitejs/plugin-react", "@tailwindcss/vite", "vite"],
   },
   "database-postgres": {
-    files: database,
+    files: [...database, "src/db/connection-url.ts"],
     modules: [
       "pg",
       "drizzle-orm/node-postgres",
@@ -71,21 +72,18 @@ const groups = {
     fragments: ["app.imports", "app.routes", "index.imports", "index.startup"],
   },
   "auth-postgres": {
-    overlays: ["auth"],
+    overlays: ["auth", "database-postgres"],
     files: [
       "src/db/schema.ts",
       "src/db/session-write.ts",
       "src/db/activation-write.ts",
       "src/db/login-abuse-write.ts",
-      "src/db/client.ts",
-      "src/db/connection-url.ts",
+      "src/db/check-auth-privileges.ts",
       "src/db/bootstrap.ts",
       "src/auth/bootstrap-cli.ts",
       "src/auth/recover-admin-cli.ts",
-      "src/db/migrate.ts",
       "tests/session-postgres.test.ts",
     ],
-    fragments: ["index.imports", "index.startup"],
     modules: [
       "drizzle-orm",
       "drizzle-orm/pg-core",
@@ -148,6 +146,7 @@ const groups = {
       "src/auth/recover-admin.ts",
       "src/auth/recover-admin-console.ts",
       "src/auth/password-limits.ts",
+      "src/auth/password-policy.ts",
       "src/auth/argon2id-phc.ts",
       "src/auth/password-crypto.ts",
       "src/auth/argon2-limiter.ts",
@@ -159,11 +158,13 @@ const groups = {
       "tests/login-contract.ts",
       "tests/auth-http.test.ts",
       "tests/auth-lifecycle-contract.ts",
+      "tests/require-auth-contract.ts",
       "tests/login-abuse-contract.ts",
       "tests/logout-contract.ts",
       "tests/change-password-contract.ts",
       "tests/admin-recovery-contract.ts",
       "tests/password-limits.test.ts",
+      "tests/password-policy.test.ts",
       "tests/argon2id-phc.test.ts",
       "tests/password-crypto.test.ts",
       "tests/argon2-limiter.test.ts",
@@ -174,6 +175,26 @@ const groups = {
   i18n: {
     files: ["src/i18n.ts", "src/components/LanguageSelector.tsx", "src/useAppContent.tsx"],
     modules: ["i18next", "react-i18next", "i18next-browser-languagedetector"],
+  },
+  "auth-ui": {
+    files: [
+      "src/features/auth/AuthApp.tsx",
+      "src/features/auth/AuthApp.test.tsx",
+      "src/features/auth/AuthForm.tsx",
+      "src/features/auth/AuthForms.tsx",
+      "src/features/auth/ActivationView.tsx",
+      "src/features/auth/activation.ts",
+      "src/features/auth/WorkspaceView.tsx",
+      "src/features/auth/ProtectedRoute.tsx",
+      "src/features/auth/SessionNotice.tsx",
+      "src/features/auth/authClient.ts",
+      "src/features/auth/authClient.test.ts",
+      "src/features/auth/session.ts",
+      "src/features/auth/session.test.ts",
+      "src/features/auth/sessionContext.ts",
+      "src/features/auth/SessionProvider.tsx",
+    ],
+    modules: ["react-router", "react-dom/server", "vitest"],
   },
 };
 
@@ -325,7 +346,7 @@ async function exists(file) {
 
 function templateGroup(directory, name) {
   const group = groups[name];
-  const frontend = name === "react" || name === "i18n";
+  const frontend = name === "react" || name === "i18n" || name === "auth-ui";
   const base = frontend ? groups.react : groups.express;
   const dir = (language) =>
     path.join(directory, group.base ? group.base + "-" + language : path.join(name, language));
@@ -340,7 +361,10 @@ function templateGroup(directory, name) {
     entries,
     sourceDir: dir("ts"),
     targetDir: dir("js"),
-    overlayDirs: (group.overlays ?? []).map((overlay) => path.join(directory, overlay, "js")),
+    overlayDirs:
+      name === "auth-ui"
+        ? [path.join(directory, name, "shared")]
+        : (group.overlays ?? []).map((overlay) => path.join(directory, overlay, "js")),
     nodeRuntime: !frontend,
     fallback: group.base ? null : path.join(directory, base.base + "-js"),
     modules: new Set([...base.modules, ...group.modules]),
@@ -412,7 +436,12 @@ export async function syncTemplates(
         }
       }
       if (!fragment) {
-        const results = await group.eslint.lintText(compiled, { filePath: target });
+        // El generador aporta la entrada de la variante en el marcador de main.
+        const lintSource =
+          sourceFile === "src/main.tsx"
+            ? compiled.replace("// @@INSERT:imports@@", "import App from './App.jsx'")
+            : compiled;
+        const results = await group.eslint.lintText(lintSource, { filePath: target });
         if (results.some((result) => result.errorCount || result.warningCount)) {
           const formatter = await group.eslint.loadFormatter("stylish");
           throw new Error(await formatter.format(results));

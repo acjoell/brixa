@@ -11,6 +11,13 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+// Las etiquetas para ocultar se activan tras pulsar el control en el navegador.
+const interactionOnly = new Set([
+  "auth.hidePassword",
+  "auth.hideNewPassword",
+  "auth.hideConfirmation",
+]);
+
 const [frontendDir, language] = process.argv.slice(2);
 if (!frontendDir || !language) {
   console.error("Uso: node verify-i18n-v2.js <frontendDir> <language>");
@@ -30,8 +37,18 @@ function getLeaves(obj, prefix = "") {
   return leaves;
 }
 
+const passwordPolicy = {
+  minLength: 12,
+  maxLength: 50,
+  maxBytes: 512,
+};
+
 function cleanVal(str) {
-  return str.replace(/<[^>]+>/g, "").trim();
+  return str
+    .replace(/<[^>]+>/g, "")
+    .replace("{seconds}", "30")
+    .replace(/\{(minLength|maxLength|maxBytes)\}/g, (_, key) => String(passwordPolicy[key]))
+    .trim();
 }
 
 const req = createRequire(path.join(frontendDir, "package.json"));
@@ -55,68 +72,154 @@ const vite = await createServer({
 try {
   const appExt = language === "ts" ? "tsx" : "jsx";
   const codeExt = language === "ts" ? "ts" : "js";
-  const { default: App } = await vite.ssrLoadModule(`/src/App.${appExt}`);
   const { default: i18n } = await vite.ssrLoadModule(`/src/i18n.${codeExt}`);
   const { I18nextProvider } = await vite.ssrLoadModule("react-i18next");
-
-  await i18n.changeLanguage("en");
-  const htmlEn = renderToString(
-    React.createElement(I18nextProvider, { i18n }, React.createElement(App)),
-  );
-  const htmlEnText = htmlEn.replace(/<[^>]+>/g, "");
+  const hasAuth =
+    req(path.join(frontendDir, "package.json")).dependencies?.["react-router"] !== undefined;
+  const hasWelcome = fs.existsSync(path.join(frontendDir, "src", `App.${appExt}`));
   const projectName = "V2 generated project";
 
-  await i18n.changeLanguage("es");
-  const htmlEs = renderToString(
-    React.createElement(I18nextProvider, { i18n }, React.createElement(App, { projectName })),
-  );
-  const htmlEsText = htmlEs.replace(/<[^>]+>/g, "");
-  if (!htmlEsText.includes(projectName)) {
-    throw new Error("[V2 SSR es] No se renderizó el nombre del proyecto recibido por App");
+  let views;
+  if (hasAuth) {
+    const { AuthRoutes } = await vite.ssrLoadModule(`/src/features/auth/AuthApp.${appExt}`);
+    const { SessionContext } = await vite.ssrLoadModule(
+      `/src/features/auth/sessionContext.${codeExt}`,
+    );
+    const { ActivationForm, LoginForm } = await vite.ssrLoadModule(
+      `/src/features/auth/AuthForms.${appExt}`,
+    );
+    // AuthRoutes usa la instancia externa que Node resuelve en SSR.
+    const { MemoryRouter } = await import(pathToFileURL(req.resolve("react-router")).href);
+    const checking = { status: "checking" };
+    const routes = [
+      ["/login", { status: "unauthenticated" }],
+      ["/login", { status: "error", failure: { kind: "http", status: 429 } }],
+      ["/login", { status: "error", failure: { kind: "http", status: 503 } }],
+      ["/login", { status: "error", failure: { kind: "communication" } }],
+      ["/app", checking],
+      ["/app", { status: "unauthenticated" }],
+      ["/app", { status: "error", failure: { kind: "unexpected_response" } }],
+      ["/app", { status: "authenticated", identity: { userId: "v2-fixture" } }],
+      ["/activate", checking],
+      ["/missing", checking],
+    ];
+    routes.unshift(["/", checking]);
+    if (hasWelcome) routes.unshift(["/", { status: "authenticated" }]);
+    views = routes.map(
+      ([route, state]) =>
+        (props) =>
+          React.createElement(
+            MemoryRouter,
+            { initialEntries: [route] },
+            React.createElement(
+              SessionContext,
+              { value: { state } },
+              React.createElement(AuthRoutes, props),
+            ),
+          ),
+    );
+    views.push(
+      ...[
+        "loginRejected",
+        "loginSessionMissing",
+        "loginHttpRejected",
+        "loginPending",
+        "loginUnconfirmed",
+        "activationSuccess",
+      ].map((feedback) => () => React.createElement(LoginForm, { feedback })),
+      () =>
+        React.createElement(LoginForm, {
+          feedback: "rateLimited",
+          retryAfter: 30,
+          fieldErrors: { email: "emailRequired", password: "passwordRequired" },
+        }),
+      () => React.createElement(LoginForm, { fieldErrors: { email: "emailInvalid" } }),
+      ...[
+        "operationPending",
+        "passwordMismatch",
+        "passwordLimits",
+        "passwordPolicyRejected",
+        "activationUnconfirmed",
+      ].map(
+        (feedback) => () =>
+          React.createElement(ActivationForm, {
+            feedback,
+            onSubmit() {},
+            passwordPolicy,
+          }),
+      ),
+      () => React.createElement(ActivationForm, { feedback: "activationChecking" }),
+      () =>
+        React.createElement(ActivationForm, {
+          feedback: "activationValidationError",
+          onRetry() {},
+        }),
+      () =>
+        React.createElement(
+          MemoryRouter,
+          null,
+          React.createElement(ActivationForm, { feedback: "activationInvalid" }),
+        ),
+    );
+  } else {
+    const { default: App } = await vite.ssrLoadModule(`/src/App.${appExt}`);
+    views = [(props) => React.createElement(App, props)];
   }
 
   const enLeaves = getLeaves(enJson);
-  for (const { key, val } of enLeaves) {
-    const cleaned = cleanVal(val);
-    const present =
-      key === "nav.label"
-        ? htmlEn.includes(`aria-label="${cleaned}"`)
-        : htmlEnText.includes(cleaned);
-    if (!present) {
-      throw new Error(`[V2 SSR en] Valor no encontrado en HTML: "${cleaned}"`);
-    }
-  }
+  for (const [locale, catalog] of [
+    ["en", enJson],
+    ["es", esJson],
+  ]) {
+    await i18n.changeLanguage(locale);
+    const html = views
+      .map((view) =>
+        renderToString(
+          React.createElement(
+            I18nextProvider,
+            { i18n },
+            view(locale === "es" ? { projectName } : undefined),
+          ),
+        ),
+      )
+      .join("\n");
+    const visible = html.replace(/<[^>]+>/g, "");
+    const leaves = getLeaves(catalog);
 
-  const esLeaves = getLeaves(esJson);
-  for (const { key, val } of esLeaves) {
-    const cleaned = cleanVal(val);
-    const present =
-      key === "nav.label"
-        ? htmlEs.includes(`aria-label="${cleaned}"`)
-        : htmlEsText.includes(cleaned);
-    if (!present) {
-      throw new Error(`[V2 SSR es] Valor no encontrado en HTML: "${cleaned}"`);
+    if (locale === "es" && !visible.includes(projectName)) {
+      throw new Error("[V2 SSR es] No se renderizó el nombre del proyecto");
     }
-  }
 
-  for (let i = 0; i < enLeaves.length; i++) {
-    const cleanedEn = cleanVal(enLeaves[i].val);
-    const cleanedEs = cleanVal(esLeaves[i].val);
-    if (cleanedEn !== cleanedEs) {
-      if (htmlEsText.includes(cleanedEn) || htmlEs.includes(`aria-label="${cleanedEn}"`)) {
+    for (const { key, val } of leaves) {
+      const cleaned = cleanVal(val);
+      const present = visible.includes(cleaned) || html.includes(`aria-label="${cleaned}"`);
+      const welcomeOnly =
+        hasAuth &&
+        !hasWelcome &&
+        (key.startsWith("home.") || key.startsWith("launchpad.") || key === "auth.workspaceAction");
+      const privateOnly = hasAuth && hasWelcome && key === "auth.sessionTitle";
+      if (present === (welcomeOnly || privateOnly || interactionOnly.has(key))) {
         throw new Error(
-          `[V2 SSR es] Valor inglés ("${cleanedEn}") encontrado indebidamente en HTML español`,
+          `[V2 SSR ${locale}] Valor ${present ? "inesperado" : "ausente"} en HTML: "${cleaned}"`,
         );
       }
     }
-  }
 
-  for (const { key } of enLeaves) {
-    if (htmlEnText.includes(key) || htmlEn.includes(`aria-label="${key}"`)) {
-      throw new Error(`[V2 SSR en] Clave de traducción visible como texto: "${key}"`);
-    }
-    if (htmlEsText.includes(key) || htmlEs.includes(`aria-label="${key}"`)) {
-      throw new Error(`[V2 SSR es] Clave de traducción visible como texto: "${key}"`);
+    for (const { key, val } of enLeaves) {
+      if (visible.includes(key) || html.includes(`aria-label="${key}"`)) {
+        throw new Error(`[V2 SSR ${locale}] Clave de traducción visible: "${key}"`);
+      }
+      if (locale === "es") {
+        const localized = leaves.find((leaf) => leaf.key === key);
+        const english = cleanVal(val);
+        if (
+          localized &&
+          english !== cleanVal(localized.val) &&
+          (visible.includes(english) || html.includes(`aria-label="${english}"`))
+        ) {
+          throw new Error(`[V2 SSR es] Valor inglés encontrado en HTML español: "${english}"`);
+        }
+      }
     }
   }
 } finally {

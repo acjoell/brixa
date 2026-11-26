@@ -32,6 +32,10 @@ const config = z.object({
   LOGIN_IDENTIFIER_FAILURE_LIMIT: positiveInteger.default(5),
   LOGIN_IP_REQUEST_LIMIT: positiveInteger.default(10),
   LOGIN_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
+  ACTIVATION_IP_REQUEST_LIMIT: positiveInteger.default(10),
+  ACTIVATION_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
+  ACTIVATION_VALIDATION_IP_REQUEST_LIMIT: positiveInteger.default(20),
+  ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES: positiveInteger.default(15),
   LOGIN_ABUSE_HMAC_KEY: z
     .string()
     .length(64)
@@ -68,7 +72,10 @@ export function createLoginAbuseService(
   const key = Buffer.from(secret, "hex");
   const windowMs = minutes * 60_000;
 
-  const digest = (kind: "ip" | "identifier" | "activation-ip", value: string) =>
+  const digest = (
+    kind: "ip" | "identifier" | "activation-ip" | "activation-validation-ip",
+    value: string,
+  ) =>
     createHmac("sha256", key)
       .update(kind + ":" + value)
       .digest("hex");
@@ -129,6 +136,7 @@ export function createLoginAbuseService(
     const active = row.expiresAtMs > row.now;
     const hits = active ? row.hits + 1 : 1;
     const expiresAtMs = active ? row.expiresAtMs : row.now + durationMs;
+    if (!Number.isSafeInteger(expiresAtMs)) throw new Error("LOGIN_ABUSE_INVALID_EXPIRY");
     await tx.update(counters).set({ hits, expiresAtMs }).where(eq(counters.keyDigest, keyDigest));
     return { hits, expiresAtMs };
   }
@@ -208,9 +216,19 @@ export function createLoginAbuseService(
 
   return {
     consumeIp: (ip: string) => consume(digest("ip", canonicalIp(ip)), ipLimit),
-    // Separate key and fixed window. Activation never spends the login budget.
+    // Preserve the confirmation namespace of deployed projects.
     consumeActivationIp: (ip: string) =>
-      consume(digest("activation-ip", canonicalIp(ip)), 10, 15 * 60_000),
+      consume(
+        digest("activation-ip", canonicalIp(ip)),
+        settings.data.ACTIVATION_IP_REQUEST_LIMIT,
+        settings.data.ACTIVATION_ABUSE_WINDOW_MINUTES * 60_000,
+      ),
+    consumeActivationValidationIp: (ip: string) =>
+      consume(
+        digest("activation-validation-ip", canonicalIp(ip)),
+        settings.data.ACTIVATION_VALIDATION_IP_REQUEST_LIMIT,
+        settings.data.ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES * 60_000,
+      ),
     // Status is a snapshot. Call consumeIp to decide and account for IP admission.
     ipStatus: (ip: string) => status(digest("ip", canonicalIp(ip)), ipLimit),
     // Records an observed failure. This does not reserve a slot before verification.
