@@ -80,23 +80,22 @@ describe("persistencia de Auth", () => {
         expect(pkg.scripts["auth:recover-admin"]).toBe(
           auth ? (language === "ts" ? "node --import tsx " : "node ") + recoverySource : undefined,
         );
-        const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
+        const readme = await fs.readFile(path.join(outputDir, "docs/deployment.md"), "utf8");
         if (auth) {
           await expect(fs.access(path.join(backend, recoverySource))).resolves.toBeUndefined();
           await expect(fs.access(path.join(backend, source))).resolves.toBeUndefined();
-          const env = database === "postgres" ? "-e MIGRATION_DATABASE_URL " : "";
+          const env = database === "postgres" ? "-e DATABASE_URL= -e MIGRATION_DATABASE_URL " : "";
           const composeCommand =
             modality === "fullstack"
               ? "docker compose -f compose.yaml -f compose.tls.yaml"
               : "docker compose";
-          const command =
-            language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
-          expect(readme).toContain(`${composeCommand} run --rm ${env}backend ${command}`);
-          const recovery =
-            language === "ts"
-              ? "node dist/auth/recover-admin-cli.js"
-              : "npm run auth:recover-admin";
-          expect(readme).toContain(`${composeCommand} run --rm ${env}backend ${recovery}`);
+          const directory = language === "ts" ? "dist" : "src";
+          expect(readme).toContain(
+            `${composeCommand} run --rm --no-deps ${env}backend node ${directory}/auth/bootstrap-cli.js`,
+          );
+          expect(readme).toContain(
+            `${composeCommand} run --rm --no-deps ${env}backend node ${directory}/auth/recover-admin-cli.js`,
+          );
           const compose = await fs.readFile(path.join(outputDir, "compose.yaml"), "utf8");
           expect(compose).not.toContain("MIGRATION_DATABASE_URL");
         } else {
@@ -378,8 +377,12 @@ describe("overlay criptográfico de Auth", () => {
       expect((await read("drizzle.config." + language)).includes("MIGRATION_DATABASE_URL")).toBe(
         separate,
       );
-      const instructions = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
-      expect(instructions.includes("run --rm -e MIGRATION_DATABASE_URL backend")).toBe(separate);
+      const instructions = await fs.readFile(path.join(outputDir, "docs/deployment.md"), "utf8");
+      expect(
+        instructions.includes(
+          "run --rm --no-deps -e DATABASE_URL= -e MIGRATION_DATABASE_URL backend",
+        ),
+      ).toBe(separate);
       if (separate) {
         expect(environment).toContain('DATABASE_URL: "${DATABASE_URL:?');
         expect(compose.split(/\n {2}(?:frontend|postgres):/)[0]).not.toMatch(
@@ -423,7 +426,7 @@ describe("overlay criptográfico de Auth", () => {
         expect(example.includes(key + "=" + value + "\n")).toBe(auth);
       }
       expect(environment?.includes('ACTIVATION_PAGE_URL: "${ACTIVATION_PAGE_URL-}"')).toBe(auth);
-      const readme = await fs.readFile(path.join(outputDir, "README.md"), "utf8");
+      const readme = await fs.readFile(path.join(outputDir, "docs/deployment.md"), "utf8");
       expect(readme.includes("ACTIVATION_TOKEN_EXPIRY_HOURS")).toBe(auth);
       expect(environment?.includes('LOGIN_ABUSE_HMAC_KEY: "${LOGIN_ABUSE_HMAC_KEY-}"')).toBe(auth);
       expect(example.includes("LOGIN_ABUSE_HMAC_KEY=\n")).toBe(auth);
@@ -824,13 +827,20 @@ describe("generate — interpolación de nombre en las cuatro variantes base", (
 });
 
 describe("generate — fullstack", () => {
-  it("crea la estructura con subcarpetas frontend y backend y solo README.md en raíz", async () => {
+  it("crea las aplicaciones separadas y la entrada de setup en raíz", async () => {
     const dest = await mkTmp("fullstack-structure-test");
     const result = await generate({ modality: "fullstack", language: "ts", outputDir: dest });
     expect(result.ok).toBe(true);
 
     const rootEntries = await fs.readdir(dest);
-    expect(rootEntries.sort()).toEqual(["README.md", "backend", "frontend"]);
+    expect(rootEntries.sort()).toEqual([
+      "README.md",
+      "backend",
+      "docs",
+      "frontend",
+      "package.json",
+      "scripts",
+    ]);
 
     await expect(fs.access(path.join(dest, "frontend", ".gitignore"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(dest, "frontend", "package.json"))).resolves.toBeUndefined();
@@ -860,13 +870,11 @@ describe("generate — fullstack", () => {
     expect(result.ok).toBe(true);
 
     const readme = await fs.readFile(path.join(dest, "README.md"), "utf-8");
-    expect(readme).toContain("Estructura");
-    expect(readme).toContain("Requisitos");
-    expect(readme).toContain("Instalación");
-    expect(readme).toContain("Terminal 1");
-    expect(readme).toContain("Terminal 2");
-    expect(readme).toContain("BACKEND_URL");
-    expect(readme).toContain("Despliegue en producción");
+    expect(readme).toContain("## Requisitos");
+    expect(readme).toContain("npm run setup");
+    expect(readme).toContain("## Desarrollo diario");
+    expect(readme).toContain("docs/development.md");
+    expect(readme).toContain("docs/deployment.md");
   });
 
   it("asigna los nombres de paquete <nombre>-frontend y <nombre>-backend", async () => {
@@ -1501,7 +1509,7 @@ describe("generate — docker opcional en fullstack", () => {
 
     // .gitignore raíz contiene .env
     const gitignoreContent = await fs.readFile(path.join(dest, ".gitignore"), "utf-8");
-    expect(gitignoreContent.trim()).toBe(".env");
+    expect(gitignoreContent.split(/\r?\n/).filter(Boolean)).toEqual([".env", ".brixa-setup/"]);
 
     // compose.yaml no contiene contraseñas literales
     const composeContent = await fs.readFile(path.join(dest, "compose.yaml"), "utf-8");
@@ -2566,5 +2574,87 @@ describe("appContent.types.ts — archivo de tipos compartido (TS)", () => {
     expect(hookContent).toContain("from './appContent.types'");
     const localDefs = (hookContent.match(/export type MessageKey/g) ?? []).length;
     expect(localDefs).toBe(0);
+  });
+});
+
+describe("documentación por variante", () => {
+  it.each([
+    {
+      modality: "fullstack",
+      language: "js",
+      database: "sqlite",
+      auth: true,
+      authAppMode: "public",
+    },
+    {
+      modality: "fullstack",
+      language: "ts",
+      database: "postgres",
+      auth: true,
+      docker: true,
+      i18n: true,
+      apiDocs: true,
+    },
+    { modality: "backend", language: "ts", database: "postgres" },
+    { modality: "frontend", language: "js" },
+  ] as const)("genera guías y comandos coherentes: %o", async (options) => {
+    const dest = await mkTmp("documentacion");
+    expect(await generate({ ...options, outputDir: dest })).toEqual({ ok: true });
+    const files = await fs.readdir(dest, { recursive: true });
+    const markdown = files.filter((file) => file.endsWith(".md"));
+    const guides = files.filter(
+      (file) => file.startsWith("docs" + path.sep) && file.endsWith(".md"),
+    );
+    expect(guides.sort()).toEqual([
+      ...("auth" in options ? [path.join("docs", "authentication.md")] : []),
+      ...(options.modality !== "frontend" ? [path.join("docs", "deployment.md")] : []),
+      path.join("docs", "development.md"),
+    ]);
+    const scripts = new Set<string>();
+    for (const file of files.filter((file) => path.basename(file) === "package.json")) {
+      const manifest = JSON.parse(await fs.readFile(path.join(dest, file), "utf8")) as {
+        scripts?: Record<string, string>;
+      };
+      for (const key of Object.keys(manifest.scripts ?? {})) scripts.add(key);
+    }
+    const docs = await Promise.all(
+      markdown.map(async (file) => {
+        const content = await fs.readFile(path.join(dest, file), "utf8");
+        for (const match of content.matchAll(/\]\(([^:#)]*)(?:#([^)]*))?\)/g)) {
+          const target = match[1]
+            ? path.join(dest, path.dirname(file), match[1])
+            : path.join(dest, file);
+          const linked = await fs.readFile(target, "utf8");
+          if (match[2]) {
+            const headings = [...linked.matchAll(/^#+ (.+)$/gm)].map(([, title]) =>
+              title
+                ?.toLowerCase()
+                .replace(/[^\p{Letter}\p{Number}\s-]/gu, "")
+                .replaceAll(" ", "-"),
+            );
+            expect(headings, target).toContain(match[2]);
+          }
+        }
+        for (const [, runScript, shortcut] of content.matchAll(
+          /npm (?:run ([\w:-]+)|(start|test)\b)/g,
+        ))
+          expect(scripts, file).toContain(runScript ?? shortcut);
+        return content;
+      }),
+    );
+    const text = docs.join("\n");
+    expect(text).not.toMatch(/esbuild|@esbuild-kit|npm run preview -- --host/i);
+    expect(text.includes("--strictPort")).toBe("auth" in options);
+    expect(text.includes("TLS_CA_PATH")).toBe("docker" in options);
+    expect(text.includes("MIGRATION_DATABASE_URL")).toBe(
+      "database" in options && options.database === "postgres",
+    );
+    expect(text.includes("npm run check:i18n")).toBe("i18n" in options);
+    expect(text.includes("Swagger UI")).toBe("apiDocs" in options);
+    expect(text.includes("AUTH_TRUSTED_PROXIES")).toBe("auth" in options);
+    if (options.modality === "frontend")
+      expect(text).not.toMatch(/Express|Compose|Auth|\.env|npm test/);
+    if (options.modality === "backend")
+      expect(text).not.toMatch(/Compose|Vite|React|auth:bootstrap/);
   });
 });

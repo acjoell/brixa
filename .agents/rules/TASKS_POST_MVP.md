@@ -66,7 +66,7 @@ Una tarea aprobada en alcance conserva detalles propuestos o pendientes de evide
 | T-018 | COMPLETADA | Implementación e integración completadas; CI normal aprobado y CI Full con SV-5, Docker y PostgreSQL aprobado según confirmación del desarrollador |
 | T-014a | COMPLETADA (backend y generador; ①–⑤, CLI público y verificación final acreditados) | T-014-0 (diseño completado), T-017b (completada), T-018 y T-023 (derivador y verify:sync verificados antes de implementar Auth en ambas variantes; composición backend disponible vía D-069; D-080 a D-103 y D-107 consolidadas) |
 | T-029 | COMPLETADA | T-017a-ui y T-023 (completadas); D-112 |
-| T-014a-ui | EN PROGRESO (I-06.1b y correcciones de auditoría validadas) | T-014a, T-017a-ui y T-029 |
+| T-014a-ui | EN PROGRESO (I-07 implementada) | T-014a, T-017a-ui y T-029 |
 | T-014b1 | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018, T-023 (composición backend disponible vía D-069; D-105 y D-106 consolidadas) |
 | T-014b2 | BLOQUEADA | T-014b1, T-014a-ui |
 | T-014c | BLOQUEADA | T-014a, T-014-0 (diseño completado), T-018; decisiones de arquitectura RLS consolidadas en D-094 a D-097 y D-104 (comprobación de sintaxis Drizzle Kit pendiente en implementación) |
@@ -666,7 +666,7 @@ Las cinco combinaciones llevan API Docs, con Docker e i18n desactivados en la ge
 
 ### T-014a-ui — Vistas de autenticación (aplicación completa)
 
-**Estado:** EN PROGRESO. Implementación validada hasta I-06.1b y correcciones de auditoría. I-06.2 a I-06.5, I-07 e I-08 siguen pendientes.
+**Estado:** EN PROGRESO. I-07 implementada. I-08 sigue pendiente.
 **Aprobación:** Arquitectura, diseño, modalidades, rutas y herramientas de pruebas aprobados en D-090, D-112 y D-113.
 **Dependencias:** T-014a, T-017a-ui y T-029.
 
@@ -761,7 +761,7 @@ Las pruebas HTTP focalizadas usaron SQLite en archivo y PostgreSQL 17.4 con `app
 
 Se comprobaron las rutas HTTP con SQLite en archivo y PostgreSQL 17.4 temporal, en TS y JS con cookies y Bearer. Chromium verificó la corrección de un rechazo de política, la navegación y el historial con transporte controlado, además de los requisitos EN/ES en la variante con i18n. La configuración efectiva de Compose propagó los valores predeterminados y personalizados. La validación contra contraseñas comunes y comprometidas queda como mejora futura no bloqueante, con fuente y mecanismo por decidir.
 
-**I-06 — Inicialización asistida.** I-06.1, inspección técnica, aceptada. D-115 registra S18–S23. I-06.1b aplica S18 con el alcance ampliado: el generador PostgreSQL común incorpora aprovisionamiento, credenciales separadas y controles de identidad y permisos. Auth conserva sus migraciones y verificaciones de seguridad particulares. El contrato anterior de una credencial no aplica a las plantillas nuevas. S19–S23 quedan aprobadas como diseño para incrementos posteriores, sin implementar aún el asistente. SQLite y los archivos del override TLS se conservan.
+**I-06 — Inicialización asistida.** I-06.1, inspección técnica, aceptada. D-115 registra S18–S23. I-06.1b aplica S18 con el alcance ampliado: el generador PostgreSQL común incorpora aprovisionamiento, credenciales separadas y controles de identidad y permisos. Auth conserva sus migraciones y verificaciones de seguridad particulares. El contrato anterior de una credencial no aplica a las plantillas nuevas. SQLite y los archivos del override TLS se conservan.
 
 La prueba focalizada con PostgreSQL 17.4 usó backend TS y fullstack JS sin Auth, y backend JS y fullstack TS con Auth. Verificó migraciones como `table_owner`, arranque con `app_exec`, rechazo de credenciales privilegiadas y de concesiones inseguras, y regresiones Auth con cookies y Bearer. Se inspeccionó la configuración efectiva de Compose para fullstack con y sin Auth, incluido el override TLS de Auth. Las pruebas de Auth aplicaron en la fixture la migración de auditoría ya publicada que permite el evento de denegación administrativa.
 
@@ -776,6 +776,38 @@ La prueba focalizada con PostgreSQL 17.4 usó backend TS y fullstack JS sin Auth
 Las ocho comprobaciones ordinarias posteriores a las correcciones pasaron, con 326/326 pruebas. Las suites especiales posteriores a las correcciones no se ejecutaron.
 
 **Seguimiento de auditoría.** B-02 es un riesgo condicionado y no bloqueante al adoptar esquemas PostgreSQL existentes. El DBA debe revisar rutinas `SECURITY DEFINER` y triggers con privilegios del propietario, como indica la guía de aprovisionamiento. E-01 queda aplazada como mejora opcional de las aserciones i18n por vista.
+
+**I-06.2 — Entrada y preparación local.** Los proyectos incluyen `npm run setup`, con manifiesto raíz privado y sin dependencias solo en fullstack. JS y TS comparten `scripts/setup.mjs` sin derivación ni dependencias. El generador escribe las capacidades explícitas en `scripts/setup.config.json`. Setup valida los requisitos de la variante e instala las dependencias de cada aplicación local. En Docker comprueba el cliente y el plugin Compose sin usar el daemon ni instalar dependencias en el host.
+
+En Linux prepara el `.env` local del backend o el de Compose, según corresponda. Publica con modo 0600, bloqueo y creación sin reemplazo. Usa `LOGIN_ABUSE_HMAC_KEY` del entorno si ya se proporcionó, o genera una nueva para archivos nuevos con Auth. En otras plataformas se prepara el archivo manualmente con permisos y ACL restrictivos. Ante una interrupción que deje `.brixa-setup`, se retira solo después de comprobar que el asistente ya no se ejecuta.
+
+Validación en Linux: cinco pruebas focalizadas y ejecución real de `npm run setup` en un frontend TS y un fullstack JS con PostgreSQL, Auth y Docker. Docker solo comprobó las versiones de las herramientas. Las ocho comprobaciones ordinarias pasaron, con 331/331 pruebas. Las suites especiales no se ejecutaron.
+
+**I-06.3 — Base de datos y bootstrap local.** Setup usa `db:migrate` sobre las migraciones existentes de SQLite y PostgreSQL. Si un proyecto sin Auth aún no tiene migraciones, indica cómo generarlas. En PostgreSQL el operador conserva el aprovisionamiento con `ops/provision.sql`. Setup comprueba la conexión y los privilegios de ejecución, exige que ambas URL apunten al mismo destino y proporciona `MIGRATION_DATABASE_URL` solo a las operaciones puntuales que usan `table_owner` (S19). La credencial puede proceder de una fuente protegida que la inyecte al entorno de setup.
+
+En Auth, `auth:bootstrap -- --if-needed` consulta la autoridad inicial antes de pedir credenciales. Si ya existe, continúa sin prompt. Si falta, reutiliza la entrada oculta y la protección transaccional del bootstrap existente (S21).
+
+Validación en Linux: SQLite JS y PostgreSQL 17.4 TS con Auth ejecutaron migraciones y bootstrap real en una PTY con contraseña oculta. Una segunda ejecución continuó sin prompt en ambos motores. PostgreSQL comprobó también el estado pendiente sin credencial de migración y el rechazo de `app_exec` como migrador. Las ocho comprobaciones ordinarias pasaron, con 332/332 pruebas. Las suites especiales no se ejecutaron.
+
+**I-06.4 — Compose, PostgreSQL y HTTPS.** En una terminal Linux, setup ofrece preparar Compose y verifica el daemon local. Aprovisiona exclusivamente un volumen nuevo reservado para este proyecto con confirmación expresa. Usa `ops/provision.sql` por stdin y `psql \password` con SCRAM-SHA-256. Verifica las identidades y privilegios por separado. Para instalaciones existentes comprueba la compatibilidad sin rotar contraseñas ni reasignar roles, y se detiene si no puede acreditar el estado.
+
+El `.env` raíz privado contiene las credenciales Docker conforme a D-115. Compose conserva la asignación explícita a PostgreSQL y Express. Las migraciones y el bootstrap se ejecutan en contenedores puntuales de la imagen del backend con las variables de cada operación. SQLite usa el volumen generado y omite el bootstrap cuando no incluye Auth.
+
+En fullstack con Auth, setup verifica certificados existentes o emite con mkcert y una CA ya disponible. Reutiliza el override D-114 sin reescribirlo. Mantiene manuales el acceso de Nginx a la clave y la confianza de la CA en el navegador. Si HTTPS queda pendiente, setup no publica HTTP. El backend independiente con Auth necesita el transporte HTTPS externo documentado.
+
+Validación real en Linux con Docker Engine 28.3.3 y Compose 2.39.1: PostgreSQL 17.4 sin Auth y con Auth, SQLite con Auth, migraciones y bootstrap, repetición sin rotación, HTTPS con el override distribuido y emisión con mkcert sin instalar confianza. La inspección verificó que Express y su imagen no recibieron credenciales privilegiadas. Se conservó un volumen huérfano rechazado y se bloqueó una configuración que habría entregado esas credenciales al backend. Suites especiales no ejecutadas.
+
+**I-06.5 — Recuperación y portabilidad.** En POSIX, setup cancela los grupos de procesos de npm y de las operaciones sin terminal. En Docker registra los trabajos puntuales mediante etiquetas del daemon. Si la operación se interrumpe, comprueba y acota la parada al trabajo de esa ejecución. Un trabajo anterior sin resolver bloquea el reintento. El bloqueo local muestra el PID cuando puede seguir activo. Un bloqueo abandonado y cualquier `.env` provisional requieren revisión manual.
+
+SQLite reutiliza el volumen reservado por setup cuando la etiqueta lo vincula al mismo directorio, aunque aún falte el contenedor. PostgreSQL parcial conserva sus credenciales y volumen y requiere revisión del operador. Los errores de daemon y puerto ocupado indican cómo recuperar la ejecución sin publicar secretos ni eliminar recursos.
+
+Validación Linux: concurrencia, bloqueo abandonado y cancelación de instalación con procesos reales de prueba. Se simularon pausas durante la publicación de `.env` y la migración. Con SQLite local y Docker reales se comprobó SIGTERM durante bootstrap y reejecución conservando datos. Docker real también comprobó cortes tras el aprovisionamiento SQL y tras el arranque, PostgreSQL parcial, socket inaccesible y conflicto de puerto. Las ocho verificaciones ordinarias pasaron con 332/332 pruebas. Suites especiales no ejecutadas.
+
+macOS y Windows se revisaron por inspección, sin validación efectiva. En macOS, el modo POSIX por sí solo no acredita las ACL heredadas. En Windows, Node no expone comprobaciones adecuadas de DACL ni terminación equivalente del árbol de procesos. Ambos conservan la preparación manual del archivo de secretos y del flujo Docker.
+
+**I-07 — Documentación generada.** Un único compositor genera el inicio rápido, la guía de desarrollo, la guía de Auth solo cuando se selecciona y la guía de despliegue cuando existe backend. Los README de fullstack remiten a esas guías. Se mantienen los procedimientos detallados de PostgreSQL en `ops/`. Se retiraron los README base duplicados y las instrucciones obsoletas de CORS y esbuild. La alternativa manual respeta la separación de credenciales de D-115 y el override local D-114. Compose conserva su comportamiento: no propaga `CORS_ALLOWED_ORIGINS` al backend.
+
+Se generaron y validaron cuatro muestras aisladas sin instalar dependencias: fullstack SQLite con Auth, fullstack PostgreSQL con Auth, Docker, i18n y OpenAPI, backend PostgreSQL sin Auth y frontend independiente. Se verificaron enlaces y anclas, scripts contra manifiestos y exclusión de guías y referencias de capacidades ausentes. Las ocho comprobaciones ordinarias pasaron con 336/336 pruebas. Suites especiales no ejecutadas.
 
 **Ejecución manual y CI propuesto.** Con Node 24, dependencias Brixa instaladas, Chromium con sandbox operativo, OpenSSL, Python 3, `libnss3`, npm accesible y Docker Compose v2 para A, ejecutar `npm run verify:auth-ui` en Linux. Los filtros `npm run verify:auth-ui -- A` y `npm run verify:auth-ui -- B` aíslan cada recorrido. `BRIXA_CHROMIUM` indica un binario alternativo. Propuesta pendiente de medir: un job Linux bajo demanda con caché npm y tope inicial de 30 minutos, sin añadir el recorrido a las matrices existentes.
 

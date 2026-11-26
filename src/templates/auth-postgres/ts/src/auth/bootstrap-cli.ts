@@ -1,4 +1,7 @@
 import { runBootstrapConsole } from "./bootstrap-console.js";
-import { bootstrapPostgresAdministrator } from "../db/bootstrap.js";
+import { hasInitialAdministrator } from "./bootstrap.js";
+import { bootstrapPostgresAdministrator, withPostgresAdministrator } from "../db/bootstrap.js";
 
-await runBootstrapConsole(bootstrapPostgresAdministrator);
+await runBootstrapConsole(bootstrapPostgresAdministrator, () =>
+  withPostgresAdministrator(hasInitialAdministrator),
+);

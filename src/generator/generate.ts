@@ -1,3 +1,4 @@
+import { writeProjectDocs } from "./documentation.js";
 /**
  * Brixa — orquestación de la generación de proyectos.
  *
@@ -283,61 +284,12 @@ async function appendEnvBlock(
 
 const runtimePostgresExample = "postgresql://app_exec:CLAVE@localhost:5432/NOMBRE_BD";
 const composeRuntimeExample = "postgresql://app_exec:CLAVE@postgres:5432/app";
-const composeSetup =
-  "Configura DATABASE_URL para app_exec con host postgres en el .env de Compose. Proporciona POSTGRES_PASSWORD solo a Compose para el servicio PostgreSQL. Inicia primero el servicio postgres (docker compose up -d postgres) y sigue ops/README.md del backend para el aprovisionamiento.";
-const migrationInstructions =
-  "Proporciona MIGRATION_DATABASE_URL con el usuario table_owner mediante el entorno de la orden puntual de migración. Usa una URL postgresql://table_owner:CLAVE@HOST:5432/BD. Guarda únicamente DATABASE_URL de app_exec en el archivo .env del backend. Antes de migrar, sigue ops/README.md del backend para aprovisionar ambos roles.";
-
 async function appendEnvExample(envPath: string, docker: boolean): Promise<void> {
+  const migrationInstructions = docker
+    ? "Para Compose, usa el .env raíz protegido. MIGRATION_DATABASE_URL solo se entrega al proceso puntual. Consulta docs/deployment.md."
+    : "Guarda solo DATABASE_URL de app_exec en este .env. Proporciona MIGRATION_DATABASE_URL de table_owner por separado para las operaciones puntuales. Consulta ops/README.md.";
   const line = `DATABASE_URL=${docker ? composeRuntimeExample : runtimePostgresExample}\n# ${migrationInstructions}\n`;
   await appendEnvBlock(envPath, line, "PostgreSQL");
-}
-
-async function appendBackendReadmeDatabase(readmePath: string): Promise<void> {
-  const content = `
-## Base de datos
-
-Este backend incluye integración con PostgreSQL mediante Drizzle ORM.
-
-### Configuración y flujo de trabajo
-
-1. Configura la variable de entorno \`DATABASE_URL\` en tu archivo \`.env\`:
-
-\`\`\`bash
-DATABASE_URL=${runtimePostgresExample}
-\`\`\`
-
-Por seguridad, nunca confirmes credenciales reales al control de versiones.
-
-2. Define tus tablas en \`src/db/schema\`.
-
-3. Genera las migraciones SQL:
-\`\`\`bash
-npm run db:generate
-\`\`\`
-
-4. Aplica las migraciones en la base de datos.\n\n${migrationInstructions}
-\`\`\`bash
-npm run db:migrate
-\`\`\`
-
-> **Nota:** Drizzle 1.0 se encuentra en fase RC (Release Candidate) y cambiará el formato de las migraciones en futuras versiones.
-> Este proyecto deniega por defecto el script de instalación de \`esbuild\` requerido internamente por \`drizzle-kit\`, garantizando la seguridad en la instalación sin afectar al generador de migraciones.
-> Los avisos de obsolescencia (\`npm warn deprecated\`) de \`@esbuild-kit\` durante \`npm install\` provienen internamente de las dependencias de \`drizzle-kit\` y no afectan al funcionamiento del proyecto.
-`;
-  const existing = await fs.readFile(readmePath, "utf-8");
-  const separator = existing.endsWith("\n") ? "" : "\n";
-  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
-}
-
-async function appendRootReadmeDatabase(readmePath: string): Promise<void> {
-  const content = `
-### Base de datos (PostgreSQL)
-El backend incluye PostgreSQL y Drizzle ORM. Sigue \`backend/ops/README.md\` para aprovisionar los roles y \`backend/README.md\` para configurar la conexión y aplicar las migraciones.
-`;
-  const existing = await fs.readFile(readmePath, "utf-8");
-  const separator = existing.endsWith("\n") ? "" : "\n";
-  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
 }
 
 async function applyPostgresOverlay(
@@ -393,9 +345,6 @@ async function applyPostgresOverlay(
 
   // Añadir DATABASE_URL a .env.example
   await appendEnvExample(path.join(targetBackendDir, ".env.example"), docker);
-
-  // Añadir sección de base de datos a README.md
-  await appendBackendReadmeDatabase(path.join(targetBackendDir, "README.md"));
 }
 
 async function appendEnvExampleSqlite(envPath: string): Promise<void> {
@@ -412,54 +361,6 @@ async function appendGitignoreSqlite(gitignorePath: string): Promise<void> {
   } catch {
     await fs.writeFile(gitignorePath, line, "utf-8");
   }
-}
-
-async function appendBackendReadmeDatabaseSqlite(readmePath: string): Promise<void> {
-  const content = `
-## Base de datos
-
-Este backend incluye integración con SQLite mediante Drizzle ORM y @libsql/client.
-
-### Configuración y flujo de trabajo
-
-1. Configura la variable de entorno \`DATABASE_URL\` en tu archivo \`.env\`:
-
-\`\`\`bash
-DATABASE_URL=file:./data/app.db
-\`\`\`
-
-La ruta con prefijo \`file:\` es relativa al directorio de ejecución del proyecto.
-Esta integración está verificada oficialmente en entornos Linux x64.
-
-2. Define tus tablas en \`src/db/schema\`.
-
-3. Genera las migraciones SQL:
-\`\`\`bash
-npm run db:generate
-\`\`\`
-
-4. Aplica las migraciones en la base de datos:
-\`\`\`bash
-npm run db:migrate
-\`\`\`
-
-> **Nota:** Drizzle 1.0 se encuentra en fase RC (Release Candidate) y cambiará el formato de las migraciones en futuras versiones.
-> Este proyecto deniega por defecto el script de instalación de \`esbuild\` requerido internamente por \`drizzle-kit\`, garantizando la seguridad en la instalación sin afectar al generador de migraciones.
-> Los avisos de obsolescencia (\`npm warn deprecated\`) de \`@esbuild-kit\` durante \`npm install\` provienen internamente de las dependencias de \`drizzle-kit\` y no afectan al funcionamiento del proyecto.
-`;
-  const existing = await fs.readFile(readmePath, "utf-8");
-  const separator = existing.endsWith("\n") ? "" : "\n";
-  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
-}
-
-async function appendRootReadmeDatabaseSqlite(readmePath: string): Promise<void> {
-  const content = `
-### Base de datos (SQLite)
-El backend incluye persistencia con SQLite (vía @libsql/client) y Drizzle ORM. Define tablas en \`backend/src/db/schema\`, genera migraciones con \`npm run db:generate\` y aplícalas con \`npm run db:migrate\`. La ruta del archivo SQLite es relativa al directorio de ejecución y está verificada en Linux x64.
-`;
-  const existing = await fs.readFile(readmePath, "utf-8");
-  const separator = existing.endsWith("\n") ? "" : "\n";
-  await fs.writeFile(readmePath, `${existing}${separator}${content}`, "utf-8");
 }
 
 async function applySqliteOverlay(targetBackendDir: string, language: Language): Promise<void> {
@@ -508,9 +409,6 @@ async function applySqliteOverlay(targetBackendDir: string, language: Language):
 
   // Añadir data/ a .gitignore
   await appendGitignoreSqlite(path.join(targetBackendDir, ".gitignore"));
-
-  // Añadir sección de base de datos a README.md
-  await appendBackendReadmeDatabaseSqlite(path.join(targetBackendDir, "README.md"));
 }
 
 // ---------------------------------------------------------------------------
@@ -529,170 +427,6 @@ POSTGRES_DB=app
 function dockerMigrationCommand(language: Language, postgres: boolean): string {
   const command = language === "ts" ? "node dist/db/migrate.js" : "npm run db:migrate";
   return `docker compose run --rm ${postgres ? "-e MIGRATION_DATABASE_URL " : ""}backend ${command}`;
-}
-
-async function appendBackendReadmeDocker(
-  readmePath: string,
-  language: Language,
-  database: Database,
-): Promise<void> {
-  const postgres = database === "postgres";
-  const hasDb = database === "postgres" || database === "sqlite";
-
-  let dbSection = "";
-  if (hasDb) {
-    const migrateCmd = dockerMigrationCommand(language, postgres);
-
-    dbSection = `
-### Migraciones de base de datos
-
-> **Importante:** ejecuta \`npm run db:generate\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
-
-${postgres ? "Construye la imagen y aplica las migraciones dentro del contenedor:" : "Aplica las migraciones en la base de datos dentro del contenedor:"}${postgres ? "\n\n" + migrationInstructions + " En Compose usa postgres como host en ambas URLs, y pasa MIGRATION_DATABASE_URL desde el entorno de la orden puntual." : ""}
-
-\`\`\`bash
-${postgres ? "docker compose build\n" : ""}${migrateCmd}
-\`\`\`
-`;
-  }
-
-  const content = `
-## Docker
-
-### Requisitos
-
-- Docker con Docker Compose v2 (\`docker compose\`).
-
-### Arranque
-
-1. Se recomienda ejecutar \`npm install\` antes de \`docker compose build\` para fijar el archivo de bloqueo (\`package-lock.json\`).
-2. ${postgres ? composeSetup : "Si utilizas base de datos, asegúrate de configurar las variables de entorno requeridas en tu archivo `.env` (en PostgreSQL, `POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica)."}
-3. ${postgres ? "Construye las imágenes, aplica las migraciones de la sección siguiente y luego inicia los servicios:" : "Construye e inicia los servicios:"}
-
-${postgres ? dbSection + "\n" : ""}\`\`\`bash
-docker compose up -d
-\`\`\`
-
-El backend estará disponible en \`http://localhost:3000\` y expondrá su ruta de salud en \`http://localhost:3000/health\`.
-${postgres ? "" : dbSection}
-### Limitaciones
-
-- Diseñado para desarrollo y pruebas locales en contenedores.
-- Cualquier modificación en el código fuente requiere reconstruir la imagen (\`docker compose build\` o \`docker compose up --build\`).
-`;
-
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
-  }
-}
-
-async function appendRootReadmeDockerFullstack(
-  readmePath: string,
-  language: Language,
-  database: Database,
-): Promise<void> {
-  const postgres = database === "postgres";
-  const hasDb = database === "postgres" || database === "sqlite";
-
-  let dbSection = "";
-  if (hasDb) {
-    const migrateCmd = dockerMigrationCommand(language, postgres);
-
-    dbSection = `
-### Migraciones de base de datos
-
-> **Importante:** ejecuta \`npm run db:generate\` dentro de \`backend/\` antes de \`docker compose build\`; sin la carpeta \`drizzle/\` el build falla (el directorio debe existir en la imagen).
-
-${postgres ? "Construye las imágenes y aplica las migraciones desde la raíz del proyecto:" : "Aplica las migraciones en la base de datos desde la raíz del proyecto:"}${postgres ? "\n\n" + migrationInstructions + " En Compose usa postgres como host en ambas URLs, y pasa MIGRATION_DATABASE_URL desde el entorno de la orden puntual." : ""}
-
-\`\`\`bash
-${postgres ? "docker compose build\n" : ""}${migrateCmd}
-\`\`\`
-`;
-  }
-
-  const content = `
-## Docker
-
-### Requisitos
-
-- Docker con Docker Compose v2 (\`docker compose\`).
-
-### Arranque
-
-1. Se recomienda ejecutar \`npm install\` en \`frontend/\` y \`backend/\` antes de \`docker compose build\` para fijar los archivos de bloqueo (\`package-lock.json\`).
-2. ${postgres ? composeSetup : "Si utilizas PostgreSQL, configura las variables de entorno requeridas en el archivo `.env` de la raíz (`POSTGRES_PASSWORD` es obligatoria y debe ser alfanumérica)."}
-3. ${postgres ? "Construye las imágenes, aplica las migraciones de la sección siguiente y luego inicia los servicios:" : "Construye e inicia los servicios:"}
-
-${postgres ? dbSection + "\n" : ""}\`\`\`bash
-docker compose up -d
-\`\`\`
-
-La aplicación web estará disponible en \`http://localhost:8080\` y la API responderá a través del proxy en \`http://localhost:8080/api/health\`.
-${postgres ? "" : dbSection}
-### Limitaciones
-
-- Diseñado para desarrollo y pruebas locales en contenedores.
-- Cualquier modificación en el código fuente requiere reconstruir las imágenes (\`docker compose build\` o \`docker compose up --build\`).
-`;
-
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
-  }
-}
-
-async function appendRootReadmeDockerTls(
-  readmePath: string,
-  language: Language,
-  postgres: boolean,
-): Promise<void> {
-  const compose = "docker compose -f compose.yaml -f compose.tls.yaml";
-  const migrate = dockerMigrationCommand(language, postgres).replace("docker compose", compose);
-  const bootstrap =
-    language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
-  const recovery =
-    language === "ts" ? "node dist/auth/recover-admin-cli.js" : "npm run auth:recover-admin";
-  const adminCommand = `${compose} run --rm ${postgres ? "-e MIGRATION_DATABASE_URL " : ""}backend`;
-  await fs.appendFile(
-    readmePath,
-    `
-## Docker con Auth y HTTPS local
-
-Usa Docker Engine 28.0.0 o posterior para el aislamiento de puertos publicados en loopback y Docker Compose 2.24.4 o posterior para reemplazar el puerto HTTP. Activa TLS explícitamente con los dos archivos indicados abajo.
-Si ya arrancaste con el Compose base, ejecuta primero \`docker compose down\` para recrear la red sin borrar los volúmenes de datos.
-
-1. Copia el \`.env.example\` raíz a \`.env\`. Configura \`AUTH_PUBLIC_ORIGIN=https://localhost:8443\` sin barra final y genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\`. Si cambias \`TLS_PORT\`, ajusta también el origen. El override deriva \`ACTIVATION_PAGE_URL\` del origen y usa \`TLS_NGINX_IP\` para Nginx y Auth.
-2. Indica en \`TLS_CERT_PATH\` y \`TLS_KEY_PATH\` las rutas absolutas de los PEM en el host de Docker, fuera del repositorio y de los contextos de build. El certificado debe cubrir el hostname del origen en su SAN y su CA debe ser de confianza para el navegador. Monta la cadena con el certificado del sitio primero. Ambos archivos se montan en solo lectura.
-3. Mantén la clave con modo \`0400\` y como propietaria la identidad correspondiente al UID 101 de Nginx. En Docker Linux sin remapeo aplica \`chmod 0400 /ruta/privada/tls.key\` y \`sudo chown 101 /ruta/privada/tls.key\` a la copia dedicada al contenedor. Con remapeo o Docker Desktop, comprueba qué identidad presenta el bind mount. Si el entorno no puede mantener el acceso restringido, utiliza un host Docker que lo permita.
-4. Si la subred predeterminada se solapa con una red existente, cambia \`TLS_SUBNET\`, \`TLS_DYNAMIC_RANGE\` y \`TLS_NGINX_IP\` juntos. Selecciona una subred privada libre y una IP de Nginx dentro de ella, fuera del rango dinámico, y distinta de la puerta de enlace.
-${postgres ? `5. Define \`DATABASE_URL\` para \`app_exec\` en el \`.env\` raíz con host \`postgres\`. Proporciona \`POSTGRES_PASSWORD\` en el entorno de Compose. Ejecuta \`${compose} up -d --wait postgres\` y sigue \`backend/ops/README.md\` para aprovisionar roles y asignar sus contraseñas. Proporciona \`MIGRATION_DATABASE_URL\` de \`table_owner\` con host \`postgres\` únicamente a las dos órdenes puntuales siguientes.\n` : ""}
-Auth ya incluye sus migraciones SQL. Desde la raíz, construye, migra, crea el administrador en la terminal interactiva e inicia los servicios:
-
-\`\`\`bash
-${compose} config --quiet
-${compose} build
-${migrate}
-${adminCommand} ${bootstrap}
-${compose} up -d --wait
-\`\`\`
-
-Abre \`https://localhost:8443/login\` o la URL equivalente si cambiaste el origen. Comprueba \`/api/health\` en ese origen. Solo HTTPS se publica en el host. Al terminar, usa \`${compose} down\`.
-
-Para recuperar la cuenta inicial usa \`${adminCommand} ${recovery}\` en una terminal interactiva. Consulta \`backend/README.md\` para ajustar \`ACTIVATION_TOKEN_EXPIRY_HOURS\` o los contadores de login, incluido \`LOGIN_ABUSE_WINDOW_MINUTES\`.
-
-### Producción con Auth
-
-Configura el DNS, certificados de confianza, su renovación y el proxy de entrada de tu despliegue. Restringe la conexión al backend a los intermediarios controlados y confía solo en sus IP literales. El borde debe sustituir las cabeceras reenviadas del cliente y entregar un único \`X-Forwarded-Proto: https\` al backend. Conserva \`AUTH_PUBLIC_ORIGIN\` y \`ACTIVATION_PAGE_URL\` en el mismo origen público HTTPS. Verifica cookies, CSRF y activación en el despliegue real.
-`,
-  );
 }
 
 async function applyDockerOverlay(
@@ -720,9 +454,6 @@ async function applyDockerOverlay(
   if (database === "postgres") {
     await appendEnvExampleDockerPostgres(path.join(targetBackendDir, ".env.example"));
   }
-
-  // 5. Sección Docker en README.md
-  await appendBackendReadmeDocker(path.join(targetBackendDir, "README.md"), language, database);
 }
 
 async function applyFullstackDockerOverlay(
@@ -733,7 +464,6 @@ async function applyFullstackDockerOverlay(
   database: Database,
   auth = false,
 ): Promise<void> {
-  const postgres = database === "postgres";
   const dockerTemplates = path.join(templatesDir(), "docker");
   const fullstackTemplates = path.join(dockerTemplates, "fullstack");
 
@@ -788,16 +518,11 @@ async function applyFullstackDockerOverlay(
     await appendEnvBlock(
       path.join(outputDir, ".env.example"),
       "# Solo con compose.tls.yaml. Completa las rutas absolutas fuera del proyecto.\n" +
-        "TLS_CERT_PATH=\nTLS_KEY_PATH=\nTLS_PORT=8443\n" +
+        "TLS_CERT_PATH=\nTLS_KEY_PATH=\nTLS_CA_PATH=\nTLS_PORT=8443\n" +
         "TLS_SUBNET=172.30.240.0/28\nTLS_DYNAMIC_RANGE=172.30.240.8/29\nTLS_NGINX_IP=172.30.240.2\n",
       "Docker TLS",
     );
-    await appendRootReadmeDockerTls(path.join(outputDir, "README.md"), language, postgres);
-    return;
   }
-
-  // 6. Raíz: README.md sección Docker
-  await appendRootReadmeDockerFullstack(path.join(outputDir, "README.md"), language, database);
 }
 
 // ---------------------------------------------------------------------------
@@ -808,67 +533,6 @@ async function appendEnvExampleApiDocs(envPath: string): Promise<void> {
   const line =
     "# Documentación de API (OpenAPI/Swagger UI). No habilitar en producción sin una decisión explícita.\nENABLE_API_DOCS=false\n";
   await appendEnvBlock(envPath, line, "API Docs");
-}
-
-async function appendBackendReadmeApiDocs(readmePath: string): Promise<void> {
-  const content = `
-## Documentación de API
-
-El backend incluye documentación OpenAPI interactiva servida con Swagger UI.
-
-### Activación y uso
-
-Por seguridad, la documentación está desactivada por defecto para no exponer la estructura de la API en producción sin una decisión explícita.
-
-Para activarla localmente:
-1. Configura \`ENABLE_API_DOCS=true\` en tu archivo \`.env\`.
-2. Accede en tu navegador a \`http://localhost:3000/docs\` (o \`http://localhost:3000/docs/\`).
-
-### Mantenimiento de la especificación
-
-La especificación OpenAPI reside en \`src/docs/openapi.json\` y se mantiene a mano. El backend incluye un test automatizado que compara las rutas registradas en Express con la especificación para detectar desincronizaciones.
-`;
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
-  }
-}
-
-async function appendRootReadmeApiDocsFullstack(
-  readmePath: string,
-  auth: boolean,
-  docker: boolean,
-): Promise<void> {
-  const content = `
-## Documentación de API
-
-La API incluye documentación OpenAPI interactiva servida con Swagger UI.
-
-### Activación y uso
-
-Por defecto está desactivada para evitar exponer la estructura de la API en producción.
-
-Para activarla:
-1. Configura \`ENABLE_API_DOCS=true\` en el archivo \`.env\` (en la raíz o en \`backend/.env\`).
-2. Accede en el navegador a:
-   - En desarrollo (con Vite): \`http://localhost:5173/api/docs/\` (o \`http://localhost:5173/api/docs\`).
-${docker ? `   - Con Docker: \`${auth ? "https://localhost:8443" : "http://localhost:8080"}/api/docs/\`.\n` : ""}${auth ? "   - Inicia sesión antes de abrir la documentación.\n" : ""}\
-   (Se recomienda usar la barra final \`/api/docs/\`).
-
-### Mantenimiento de la especificación
-
-La especificación OpenAPI reside en \`backend/src/docs/openapi.json\` y se mantiene a mano. El backend incluye un test automatizado que detecta rutas registradas en Express no documentadas en la especificación.
-`;
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
-  }
 }
 
 export const COMPOSE_API_DOCS_MARKER = "# @@INSERT:api-docs-env@@";
@@ -1004,7 +668,6 @@ async function applyApiDocsOverlay(targetBackendDir: string, language: Language)
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 
   await appendEnvExampleApiDocs(path.join(targetBackendDir, ".env.example"));
-  await appendBackendReadmeApiDocs(path.join(targetBackendDir, "README.md"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,65 +752,6 @@ async function applyAuthUiOverlay(
       contents.auth = JSON.parse(await fs.readFile(messages, "utf-8")) as unknown;
       await fs.writeFile(catalog, JSON.stringify(contents, null, 2) + "\n");
     }
-  }
-}
-
-async function appendFrontendReadmeI18n(readmePath: string): Promise<void> {
-  const content = `
-## Internacionalización (i18n)
-
-Este proyecto incluye soporte opcional de internacionalización con [i18next](https://www.i18next.com/) y [react-i18next](https://react.i18next.com/).
-
-Idiomas incluidos de ejemplo: inglés (\`en\`) y español (\`es\`).
-
-### Cómo añadir un idioma
-
-1. Crea el archivo \`src/locales/<código>.json\` con las mismas claves que \`src/locales/en.json\`.
-2. Importa el nuevo JSON en \`src/i18n.ts\` (o \`src/i18n.js\`) y regístralo en \`resources\`.
-3. Añade el código a la lista \`supportedLngs\` en la configuración de i18next.
-4. Añade la opción correspondiente en \`src/components/LanguageSelector\`.
-5. Ejecuta \`npm run check:i18n\` para verificar la paridad de claves.
-
-### Cómo añadir una clave de traducción
-
-1. Añade la clave anidada en \`src/locales/en.json\` (el idioma de referencia).
-2. Añade la correspondiente traducción en los demás archivos de idioma (\`src/locales/*.json\`).
-3. Ejecuta \`npm run check:i18n\` para comprobar la coherencia de claves y marcadores.
-4. En TypeScript, las claves se tipan automáticamente a partir de \`en.json\`.
-
-### Verificación de paridad de traducciones
-
-\`\`\`bash
-npm run check:i18n
-\`\`\`
-
-### Límites conocidos
-
-- El \`<title>\` del documento HTML es estático (no cambia dinámicamente según el idioma).
-- Solo se contemplan idiomas con dirección de lectura de izquierda a derecha (LTR).
-- El backend no incluye traducción de mensajes o respuestas.
-- Sin carga diferida de traducciones (los recursos se empaquetan en el bundle inicial).
-`;
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
-  }
-}
-
-async function appendRootReadmeI18nFullstack(readmePath: string): Promise<void> {
-  const content = `
-### Internacionalización (Frontend)
-El frontend incluye soporte de internacionalización con i18next y selector de idioma. Consulta \`frontend/README.md\` para añadir idiomas o claves, y ejecuta \`npm run check:i18n\` dentro de \`frontend/\` para verificar paridad.
-`;
-  try {
-    const existing = await fs.readFile(readmePath, "utf-8");
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    await fs.writeFile(readmePath, `${existing}${separator}${content.trimStart()}`, "utf-8");
-  } catch {
-    await fs.writeFile(readmePath, content.trimStart(), "utf-8");
   }
 }
 
@@ -1428,11 +1032,6 @@ async function applyAuthOverlay(
       path.join(backendDir, "ops", "README.md"),
       "\n[Controles adicionales de Auth](auth.md).\n",
     );
-  } else {
-    await fs.appendFile(
-      path.join(backendDir, "README.md"),
-      "\n### Auditoría SQLite\n\nLa migración 0002 protege los eventos existentes mediante triggers y una tabla WITHOUT ROWID. La migración reconstruye la tabla y sus índices de Brixa. Si has añadido índices, triggers o referencias a esta tabla, revisa su conservación antes de migrar. Las inserciones con identificador nuevo siguen permitidas. La protección requiere conservar el esquema y sus triggers en futuras migraciones. Quien pueda alterar el esquema o reemplazar el archivo puede modificar el historial. SQLite carece de separación de privilegios por tabla como la de PostgreSQL.\n",
-    );
   }
   await copyAuthMigrations(path.join(persistence, "drizzle"), path.join(backendDir, "drizzle"));
   await copyDir(path.join(persistence, language), backendDir, path.basename(backendDir));
@@ -1445,7 +1044,6 @@ async function applyAuthOverlay(
     "utf8",
   );
   if (options.apiDocs) await documentAuthRoutes(backendDir, options);
-  const mode = options.authTransport ?? DEFAULT_AUTH_TRANSPORT;
   const origin =
     options.modality === "fullstack" ? "http://localhost:5173" : "http://localhost:3000";
   await appendEnvBlock(
@@ -1457,87 +1055,6 @@ async function applyAuthOverlay(
     "auth",
   );
   await fs.writeFile(pkgPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
-  const postgres = database === "postgres";
-  const local = postgres
-    ? "Proporciona `MIGRATION_DATABASE_URL` de `table_owner` desde el entorno de la orden puntual. Consulta `ops/README.md` para aprovisionar los roles."
-    : "Configura `DATABASE_URL` con la misma ruta SQLite en archivo que usa el backend.";
-  await fs.appendFile(
-    path.join(backendDir, "README.md"),
-    `\n## Administrador inicial\n\nDesde el directorio del backend, aplica las migraciones y ejecuta \`npm run auth:bootstrap\` en una terminal. Introduce el email y la contraseña dos veces. La contraseña se introduce de forma oculta. ${local}\n\nPara recuperar la contraseña de esa cuenta activa, ejecuta \`npm run auth:recover-admin\` en una terminal y confirma la nueva contraseña. El comando revoca todas sus sesiones. ${local}\n\n## Caducidad de activación\n\nConfigura \`ACTIVATION_TOKEN_EXPIRY_HOURS\` en el entorno del backend (entero de 1 a 168, 24 por defecto).\n\n## Contadores de abuso de login\n\nConfigura \`LOGIN_IDENTIFIER_FAILURE_LIMIT\` (5), \`LOGIN_IP_REQUEST_LIMIT\` (10) y \`LOGIN_ABUSE_WINDOW_MINUTES\` (15) con enteros positivos hasta 2147483647. Genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\` y configura la misma clave secreta en todas las instancias que compartan BD. Cambiarla reinicia efectivamente los presupuestos existentes. Con Compose, define estas variables en el entorno o en el archivo \`.env\` de la raíz. La primera solicitud por IP o el primer fallo por identificador abren ventanas independientes. La última plaza se contabiliza y los rechazos posteriores no aplazan el vencimiento. Solo se almacenan claves HMAC, recuentos y vencimientos. SQLite en archivo utiliza el reloj del host compartido. El login consume primero el presupuesto de una IP validada y luego reserva una plaza por identificador durante 60 segundos. Los fallos confirmados y las reservas activas ocupan el presupuesto durante la admisión. Las reservas vencidas liberan su plaza y una verificación tardía no puede emitir sesión. En cada solicitud admitida por IP, la limpieza procesa hasta 100 contadores y 100 reservas vencidas. El adaptador HTTP proporciona una IP confiable y convierte el tiempo restante a Retry-After.\n`,
-  );
-  await fs.appendFile(
-    path.join(backendDir, "README.md"),
-    "\n## Auth HTTP\n\n" +
-      "El backend monta `/auth/login`, `/auth/session`, `/auth/logout` y `/auth/password`. " +
-      (options.modality === "fullstack"
-        ? "Desde el frontend utiliza `/api/auth/…` en el mismo origen. "
-        : "") +
-      (mode === "cookie"
-        ? "El login devuelve 204 y fija una cookie HttpOnly. Envía `X-Requested-With: XMLHttpRequest` en las mutaciones mediante fetch y conserva las cookies del mismo origen. Con `mode: 'same-origin'` y una política global `no-referrer`, indica `referrerPolicy: 'same-origin'` en fetch para que el navegador envíe el origen. "
-        : "El login devuelve `{ token }`. Envía `Authorization: Bearer <token>` al consultar la sesión, cerrar sesión o cambiar la contraseña. ") +
-      "Si habilitas API Docs, utiliza una sesión válida para `/docs/` y todos sus recursos. " +
-      (mode === "bearer"
-        ? "Cada petición de documentación requiere la cabecera Authorization, incluidas las de recursos estáticos. "
-        : "") +
-      "\n\nConfigura `AUTH_PUBLIC_ORIGIN` con el origen público canónico, sin barra final. " +
-      "HTTPS es obligatorio salvo desarrollo explícito con `NODE_ENV=development`, origen localhost o 127.0.0.1 y conexión local. " +
-      "Para Compose configura el origen HTTPS público en el `.env` raíz. Si utilizas varios orígenes de desarrollo, ajusta el origen configurado al puerto que realmente utiliza Vite.\n\n" +
-      "Deja `AUTH_TRUSTED_PROXIES` vacío para conexiones directas. Detrás de un proxy, configura solo las IP literales de los saltos controlados, separadas por comas. " +
-      "El proxy de entrada debe eliminar `X-Forwarded-For` y `X-Forwarded-Proto` del cliente. Construye la cadena con IP verificadas y entrega un único valor `https` al backend si la conexión pública se estableció mediante TLS. " +
-      "Si TLS termina antes del Nginx de fullstack, limita el acceso a su listener al terminador confiable y configura allí el valor https de X-Forwarded-Proto para las conexiones reenviadas por ese terminador. Restringe el acceso directo al backend. " +
-      "Express camina desde el socket hasta el primer salto no confiable. No se admiten nombres, rangos ni conteos de saltos.\n\n" +
-      "Configura `ACTIVATION_PAGE_URL` con la URL HTTPS de la vista de activación que sirve tu cliente, sin query ni fragmento. " +
-      "En modo cookie debe compartir `AUTH_PUBLIC_ORIGIN`. HTTP se permite únicamente en ese origen local de desarrollo. " +
-      (options.modality === "fullstack"
-        ? "La vista generada está en `/activate`. El override Compose TLS deriva la URL del origen configurado.\n\n"
-        : "Con Compose, define la variable en el `.env` raíz. El backend genera la API y el enlace. La vista del cliente se integra por separado.\n\n") +
-      "Un administrador autenticado puede enviar `{email}` a `POST /auth/register`. Una identidad nueva devuelve 201 con `activationUrl` y `expiresAt`. Un alta repetida devuelve 200 sin otro enlace. " +
-      "Usa `POST /auth/activation/revoke` o `POST /auth/activation/regenerate` con el `userId` de destino para gestionar enlaces pendientes. Comparte el enlace solo por un canal privado. " +
-      "La vista retira `token` del fragmento y lo envía en JSON a `POST /auth/activate/validate`. Un 200 devuelve `{passwordPolicy:{minLength,maxLength,maxBytes}}` e indica vigencia puntual. El 400 es uniforme para enlaces no válidos. Solo al confirmar, envía `{token,password}` a `POST /auth/activate`, que vuelve a comprobar el token y la contraseña. El éxito devuelve 204 y consume el token atómicamente, sin iniciar sesión. Ambas operaciones requieren el encabezado CSRF indicado arriba en modo cookie.\n\n" +
-      "Configura `AUTH_PASSWORD_MIN_LENGTH` (10) y `AUTH_PASSWORD_MAX_LENGTH` (64) en el entorno del backend, o en el `.env` raíz con Compose. Aceptan enteros de 8 a 128 con mínimo menor o igual al máximo. La política se aplica al establecer o cambiar contraseñas y cuenta puntos de código Unicode. Rechaza coincidencias completas con el correo, su parte local o el nombre del proyecto, sin distinguir mayúsculas. Login y rehash de credenciales anteriores conservan los límites defensivos de 128 puntos de código y 512 bytes UTF-8. Los sustitutos UTF-16 aislados se rechazan. Un rechazo de política en activación o cambio autenticado devuelve 400 con `code: PASSWORD_POLICY`.\n\n" +
-      "Para autenticación de factor único, configura un mínimo de al menos 15 para satisfacer el requisito de longitud mínima de [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b/authenticators/). El valor predeterminado de 10 queda por debajo. Un máximo inferior a 64 se aparta de la recomendación de longitud máxima admitida. Estos ajustes cubren solo los criterios de longitud.\n\n" +
-      "La confirmación y la validación tienen presupuestos persistentes independientes por IP. Configura `ACTIVATION_IP_REQUEST_LIMIT` (10), `ACTIVATION_ABUSE_WINDOW_MINUTES` (15), `ACTIVATION_VALIDATION_IP_REQUEST_LIMIT` (20) y `ACTIVATION_VALIDATION_ABUSE_WINDOW_MINUTES` (15) en el entorno, o en el `.env` raíz con Compose. Aceptan enteros positivos hasta 2147483647. Un 429 indica el tiempo de espera en `Retry-After`.\n",
-  );
-  await fs.appendFile(
-    path.join(backendDir, "README.md"),
-    `
-### Proteger rutas propias
-
-En \`src/app.${language}\`, monta el router antes de \`app.use(notFoundHandler)\`. El arranque normal inicializa Auth.
-
-\`\`\`${language}
-import { Router } from "express";
-import { requireAuth } from "./auth/http-runtime.js";
-
-const business = Router();
-business.get("/me", requireAuth(), (req, res) => {
-  if (!req.auth) {
-    res.sendStatus(401);
-    return;
-  }
-  res.json({ userId: req.auth.userId });
-});
-app.use("/business", business);
-\`\`\`
-
-En TypeScript, \`req.auth\` es opcional porque existe solo después de autenticar la petición. El mismo ejemplo funciona en JavaScript. Usa \`requireAuth()\` para validar sin renovar actividad. Configura \`requireAuth({ intentionalActivity: true })\` únicamente en rutas que representen actividad intencional, como una mutación iniciada por el usuario. El servicio conserva el umbral de escritura y los límites de sesión.
-
-Las rutas propias usan la misma política HTTPS, \`AUTH_TRUSTED_PROXIES\` y CSRF de Auth. Aplica las comprobaciones de autorización de cada recurso en el controlador.
-`,
-  );
-  if (composeRoot === backendDir) {
-    const args = postgres ? "-e MIGRATION_DATABASE_URL " : "";
-    const entry = language === "ts" ? "node dist/auth/bootstrap-cli.js" : "npm run auth:bootstrap";
-    const recovery =
-      language === "ts" ? "node dist/auth/recover-admin-cli.js" : "npm run auth:recover-admin";
-    const migration = postgres
-      ? "Usa el host `postgres` en `MIGRATION_DATABASE_URL` y proporciona la variable desde el entorno de esta orden. Conserva `DATABASE_URL` de `app_exec` en el backend."
-      : "El contenedor puntual usa el mismo volumen SQLite que el backend.";
-    await fs.appendFile(
-      path.join(composeRoot, "README.md"),
-      `\n### Bootstrap y recuperación interactivos con Compose\n\nDesde la raíz del proyecto, después de construir la imagen y aplicar las migraciones, ejecuta el comando con una terminal interactiva. ${migration}\n\n\`\`\`bash\ndocker compose run --rm ${args}backend ${entry}\ndocker compose run --rm ${args}backend ${recovery}\n\`\`\`\n\nCompose toma \`ACTIVATION_TOKEN_EXPIRY_HOURS\` del entorno o del archivo \`.env\` de la raíz (24 por defecto).\n\nLos contadores de login también toman de ese entorno \`LOGIN_ABUSE_WINDOW_MINUTES\`, \`LOGIN_IDENTIFIER_FAILURE_LIMIT\`, \`LOGIN_IP_REQUEST_LIMIT\` y la clave secreta \`LOGIN_ABUSE_HMAC_KEY\`. Consulta la sección de contadores en el README del backend.\n`,
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,6 +1068,57 @@ Las rutas propias usan la misma política HTTPS, \`AUTH_TRUSTED_PROXIES\` y CSRF
  * Si se solicita base de datos PostgreSQL, aplica el overlay sobre el backend resultante.
  * Para cualquier otra combinación devuelve error `unsupported_combination`.
  */
+async function applySetup(options: UserOptions): Promise<void> {
+  const { outputDir, modality, database = "none", auth = false, apiDocs = false } = options;
+  const docker = modality !== "frontend" && (options.docker ?? false);
+  const fullstack = modality === "fullstack";
+  const environment =
+    modality === "frontend" || (fullstack && docker && database !== "postgres" && !auth && !apiDocs)
+      ? null
+      : fullstack && !docker
+        ? "backend"
+        : ".";
+  const manifestPath = path.join(outputDir, "package.json");
+  const manifest: PackageJson = fullstack
+    ? { private: true, engines: { node: "^24.0.0 || >=26.0.0" } }
+    : (JSON.parse(await fs.readFile(manifestPath, "utf8")) as PackageJson);
+  manifest.scripts = { ...manifest.scripts, setup: "node scripts/setup.mjs" };
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+  const scripts = path.join(outputDir, "scripts");
+  await fs.mkdir(scripts, { recursive: true });
+  await fs.copyFile(
+    path.join(templatesDir(), "setup", "setup.mjs"),
+    path.join(scripts, "setup.mjs"),
+  );
+  if (docker)
+    await fs.copyFile(
+      path.join(templatesDir(), "setup", "setup-docker.mjs"),
+      path.join(scripts, "setup-docker.mjs"),
+    );
+  await fs.writeFile(
+    path.join(scripts, "setup.config.json"),
+    JSON.stringify(
+      {
+        modality,
+        environment,
+        docker,
+        database,
+        language: docker || database === "postgres" ? options.language : undefined,
+        auth,
+        cookie: auth && (options.authTransport ?? DEFAULT_AUTH_TRANSPORT) === "cookie",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  const lockDir = path.join(outputDir, environment ?? ".");
+  await fs.appendFile(path.join(lockDir, ".gitignore"), "\n.brixa-setup/\n");
+  if (docker && !fullstack) {
+    await fs.appendFile(path.join(lockDir, ".dockerignore"), "\n.brixa-setup/\n");
+  }
+}
+
 export async function generate(input: UserOptions): Promise<GenerateResult> {
   const authOptions = validateAuthOptions(input);
   if (!authOptions.ok) return authOptions;
@@ -1605,29 +1173,14 @@ export async function generate(input: UserOptions): Promise<GenerateResult> {
 
       await applyFullstackViteProxy(frontendDest, language);
 
-      const readmeContent = generateFullstackReadme(
-        projectName,
-        language,
-        options.auth ?? false,
-        database,
-      );
-      await fs.writeFile(path.join(outputDir, "README.md"), readmeContent, "utf-8");
-
       if (database === "postgres") {
         await applyPostgresOverlay(backendDest, language);
-        if (!options.auth) await appendRootReadmeDatabase(path.join(outputDir, "README.md"));
       } else if (database === "sqlite") {
         await applySqliteOverlay(backendDest, language);
-        if (!options.auth) await appendRootReadmeDatabaseSqlite(path.join(outputDir, "README.md"));
       }
 
       if (options.apiDocs) {
         await applyApiDocsOverlay(backendDest, language);
-        await appendRootReadmeApiDocsFullstack(
-          path.join(outputDir, "README.md"),
-          options.auth ?? false,
-          options.docker ?? false,
-        );
       }
 
       if (options.docker) {
@@ -1644,8 +1197,6 @@ export async function generate(input: UserOptions): Promise<GenerateResult> {
 
       if (options.i18n) {
         await applyI18nOverlay(frontendDest, language);
-        await appendFrontendReadmeI18n(path.join(frontendDest, "README.md"));
-        await appendRootReadmeI18nFullstack(path.join(outputDir, "README.md"));
       }
 
       if (options.auth)
@@ -1661,6 +1212,8 @@ export async function generate(input: UserOptions): Promise<GenerateResult> {
       }
       await composeFrontendInsertionPoints(frontendDest, language, options);
       await composeBackendInsertionPoints(backendDest, options);
+      await applySetup(options);
+      await writeProjectDocs(options);
 
       return { ok: true };
     } catch (err) {
@@ -1691,7 +1244,6 @@ export async function generate(input: UserOptions): Promise<GenerateResult> {
     if (modality === "frontend") {
       if (options.i18n) {
         await applyI18nOverlay(outputDir, language);
-        await appendFrontendReadmeI18n(path.join(outputDir, "README.md"));
       }
       await composeFrontendInsertionPoints(outputDir, language, options);
     }
@@ -1719,6 +1271,8 @@ export async function generate(input: UserOptions): Promise<GenerateResult> {
         );
       await composeBackendInsertionPoints(outputDir, options);
     }
+    await applySetup(options);
+    await writeProjectDocs(options);
 
     return { ok: true };
   } catch (err) {
@@ -1944,130 +1498,9 @@ async function composeFrontendInsertionPoints(
 }
 
 // ---------------------------------------------------------------------------
-// Generación del README raíz para proyectos fullstack
-// ---------------------------------------------------------------------------
-
-function generateFullstackReadme(
-  projectName: string,
-  language: string,
-  auth: boolean,
-  database: Database,
-): string {
-  const langLabel = language === "ts" ? "TypeScript" : "JavaScript";
-  return `# ${projectName}
-
-Aplicación fullstack generada con Brixa.
-
-## Estructura
-
-\`\`\`
-${projectName}/
-├── frontend/   # Aplicación cliente React + Vite (${langLabel})
-├── backend/    # API REST Express (${langLabel})
-└── README.md   # Documentación general del proyecto
-\`\`\`
-
-## Requisitos
-
-- Node.js ^24.0.0 o >=26.0.0
-- npm
-
-## Instalación
-
-Instala las dependencias en cada carpeta por separado:
-
-\`\`\`bash
-# Frontend
-cd frontend
-npm install
-cd ..
-
-# Backend
-cd backend
-npm install
-cd ..
-\`\`\`
-
-## Ejecución en desarrollo
-
-La aplicación requiere ejecutar ambos servicios en dos terminales independientes:
-
-${
-  auth
-    ? `Antes de iniciar ambos servicios, copia \`backend/.env.example\` a \`backend/.env\`. Conserva el origen de desarrollo \`http://localhost:5173\`, configura \`ACTIVATION_PAGE_URL=http://localhost:5173/activate\` y genera \`LOGIN_ABUSE_HMAC_KEY\` con \`openssl rand -hex 32\`. Si Vite usa otro puerto local, actualiza ambas URLs antes de iniciar el backend.
-
-${database === "postgres" ? "Aprovisiona la base y los roles según `backend/ops/README.md`. Configura `DATABASE_URL` de `app_exec` en `backend/.env` y proporciona `MIGRATION_DATABASE_URL` de `table_owner` solo al ejecutar la migración y el bootstrap.\n\n" : "Conserva `DATABASE_URL=file:./data/app.db` para que la migración, el bootstrap y el servidor usen el mismo archivo SQLite.\n\n"}
-Desde \`backend/\`, aplica las migraciones incluidas con \`npm run db:migrate\` y crea el primer administrador con \`npm run auth:bootstrap\` en una terminal interactiva.
-
-`
-    : ""
-}\
-### 1. Backend (Terminal 1)
-
-\`\`\`bash
-cd backend
-npm run dev
-\`\`\`
-
-El servidor backend iniciará en \`http://localhost:3000\`.
-
-### 2. Frontend (Terminal 2)
-
-\`\`\`bash
-cd frontend
-npm run dev
-\`\`\`
-
-El servidor de desarrollo de Vite iniciará habitualmente en \`http://localhost:5173\`.
-${
-  auth
-    ? `
-## Alta y activación de cuentas
-
-Inicia sesión como administrador en \`/login\`. Desde la consola de desarrollo del navegador en ese mismo origen, realiza el alta con una dirección de prueba:
-
-\`\`\`js
-await fetch("/api/auth/register", {
-  method: "POST",
-  headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
-  body: JSON.stringify({ email: "cuenta@example.test" }),
-}).then((response) => response.status);
-\`\`\`
-
-En la pestaña Red de las herramientas del navegador, lee \`activationUrl\` en la respuesta 201 y comparte el enlace por un canal privado. Ábrelo en un perfil separado, confirma la nueva contraseña y después inicia sesión con la cuenta creada. Un alta repetida devuelve 200 sin un enlace nuevo.
-
-Para añadir rutas protegidas, declara rutas hijas de \`ProtectedRoute\` junto a \`/app\` en \`frontend/src/features/auth/AuthApp\`. El proveedor verifica la sesión al entrar desde una vista pública. Express sigue autorizando cada operación de la API.
-`
-    : ""
-}\
-
-## Comunicación entre servicios y BACKEND_URL
-
-En desarrollo, Vite reenvía las peticiones dirigidas a \`/api/*\` hacia el backend descartando el prefijo \`/api\` (por ejemplo, una llamada a \`/api/health\` llegará al backend como \`/health\`).
-
-El destino del proxy se configura mediante la variable de entorno \`BACKEND_URL\`, con valor por defecto \`http://localhost:3000\`. Si ejecutas el backend en otro puerto o dirección:
-
-\`\`\`bash
-cd frontend
-BACKEND_URL=http://localhost:4000 npm run dev
-\`\`\`
-
-## Despliegue en producción
-
-El proxy de Vite es exclusivo para desarrollo local. El despliegue en producción no está resuelto por Brixa. Para producción es necesario:
-
-1. Compilar el frontend (\`npm run build\` dentro de \`frontend/\`).
-2. Servir los archivos estáticos resultantes (\`dist/\`) y enrutar las peticiones \`/api/*\` al backend mediante un proxy inverso (como Nginx, Caddy o un API gateway) o servir el frontend compilado desde el propio servidor backend.
-`;
-}
-
-// ---------------------------------------------------------------------------
 // Mensajes de usuario
 // ---------------------------------------------------------------------------
 
-/**
- * Devuelve el mensaje de error legible para el usuario según el tipo de error.
- */
 export function formatGenerateError(error: GenerateError): string {
   switch (error.kind) {
     case "auth_requires_backend_database":
@@ -2184,7 +1617,7 @@ export function nextStepsMessage(
         "  # Base de datos (PostgreSQL):",
         "  # 1. Consulta backend/ops/README.md; configura DATABASE_URL de app_exec",
         "  # 2. Define tus tablas en backend/src/db/schema",
-        "  # 3. Genera y aplica migraciones con MIGRATION_DATABASE_URL según backend/README.md.",
+        "  # 3. Genera y aplica migraciones con MIGRATION_DATABASE_URL según docs/deployment.md.",
       );
       if (docker) {
         const migrateCmd = dockerMigrationCommand(language ?? "js", true);
@@ -2260,7 +1693,7 @@ export function nextStepsMessage(
       "  # Base de datos (PostgreSQL):",
       "  # 1. Configura DATABASE_URL en .env",
       "  # 2. Define tus tablas en src/db/schema",
-      "  # 3. Genera y aplica migraciones con MIGRATION_DATABASE_URL según README.md.",
+      "  # 3. Genera y aplica migraciones con MIGRATION_DATABASE_URL según docs/deployment.md.",
     );
     if (docker) {
       const migrateCmd = dockerMigrationCommand(language ?? "js", true);

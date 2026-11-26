@@ -56,13 +56,23 @@ export async function readConsoleCredentials(includeEmail) {
   }
 }
 
-export async function runBootstrapConsole(bootstrap) {
-  if (process.argv.length !== 2 || !process.stdin.isTTY || !process.stdout.isTTY) {
+export async function runBootstrapConsole(bootstrap, administratorExists) {
+  const assisted = process.argv.length === 3 && process.argv[2] === "--if-needed";
+  if (!assisted && (process.argv.length !== 2 || !process.stdin.isTTY || !process.stdout.isTTY)) {
     process.stderr.write("Ejecuta auth:bootstrap en una terminal interactiva y sin argumentos.\n");
     process.exitCode = 1;
     return;
   }
   try {
+    if (assisted && (await administratorExists())) {
+      process.stdout.write(messages.ALREADY_INITIALIZED + "\n");
+      return;
+    }
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      process.stderr.write("Completa el bootstrap en una terminal interactiva.\n");
+      process.exitCode = 1;
+      return;
+    }
     const answers = await readConsoleCredentials(true);
     if (!answers) {
       process.stderr.write("Bootstrap cancelado.\n");
@@ -81,6 +91,10 @@ export async function runBootstrapConsole(bootstrap) {
     await bootstrap({ email, password });
     process.stdout.write("Administrador inicial creado.\n");
   } catch (error) {
+    if (assisted && error instanceof BootstrapError && error.code === "ALREADY_INITIALIZED") {
+      process.stdout.write(messages.ALREADY_INITIALIZED + "\n");
+      return;
+    }
     const message =
       error instanceof BootstrapError ? messages[error.code] : messages.BOOTSTRAP_FAILED;
     process.stderr.write(message + "\n");

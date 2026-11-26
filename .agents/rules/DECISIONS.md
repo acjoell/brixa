@@ -2127,6 +2127,10 @@ Estas ejecuciones cubren únicamente esas dos configuraciones en sus topologías
 - **S22.** Sin Docker, preparar y mostrar comandos de arranque independientes, sin supervisar procesos ni añadir `concurrently`. En Docker se puede ofrecer arranque con Compose.
 - **S23.** Asistencia HTTPS optativa según TLS-03 de D-114. La confianza de la CA y los permisos privilegiados son manuales. Se conservan HTTPS, cookies Secure, CSRF y validación de proxies.
 
+**Ampliación aprobada para I-06.4 (S20.1–S20.7).** Setup puede crear PostgreSQL local, dedicado y nuevo con confirmación expresa y verificando que ningún contenedor ni volumen preexistente se apropiará del estado nuevo. Genera tres contraseñas independientes con 32 bytes aleatorios. Reutiliza `ops/provision.sql` por stdin y asigna las contraseñas nuevas de los roles mediante `psql \password` con SCRAM-SHA-256. Verifica conexiones, roles y privilegios efectivos. Las instalaciones externas siguen a cargo del operador. Si un estado parcial impide comprobar el origen o la compatibilidad, setup se detiene. Nunca rota credenciales existentes, elimina volúmenes ni reinicializa datos.
+
+**Almacenamiento para Docker.** Un único `.env` raíz protegido contiene, según la variante, `POSTGRES_PASSWORD`, `DATABASE_URL`, `MIGRATION_DATABASE_URL`, la clave HMAC de Auth y la configuración normal. Se excluye de Git y de los contextos de construcción. Compose entrega al servidor PostgreSQL las variables de su servicio y a Express únicamente la conexión `app_exec` y la configuración de aplicación. Las operaciones puntuales reciben explícitamente las variables imprescindibles. El runtime conserva sus rechazos defensivos. S19 sigue aplicando sin Docker, con la credencial de migración fuera del `.env` de ejecución.
+
 ---
 
 ## 5. Cuestiones pendientes

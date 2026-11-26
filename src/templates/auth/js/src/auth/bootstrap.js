@@ -14,6 +14,14 @@ export class BootstrapError extends Error {
   }
 }
 
+export async function hasInitialAdministrator(database) {
+  const [existing] = await database
+    .select({ singleton: initialAdministrator.singleton })
+    .from(initialAdministrator)
+    .limit(1);
+  return existing !== undefined;
+}
+
 // En PostgreSQL el llamador operativo usa el adaptador reservado a table_owner.
 export async function bootstrapInitialAdministrator(database, { email, password }) {
   const identifier = emailSchema.safeParse(email);
@@ -25,11 +33,7 @@ export async function bootstrapInitialAdministrator(database, { email, password 
   }
 
   try {
-    const [existing] = await database
-      .select({ singleton: initialAdministrator.singleton })
-      .from(initialAdministrator)
-      .limit(1);
-    if (existing) throw new BootstrapError("ALREADY_INITIALIZED");
+    if (await hasInitialAdministrator(database)) throw new BootstrapError("ALREADY_INITIALIZED");
 
     const passwordHash = await hashPassword(password);
     const userId = randomUUID();
